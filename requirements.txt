@@ -1,5 +1,5 @@
 numpy
 singledispatch
 git+https://github.com/coneoproject/COFFEE#egg=COFFEE
-git+https://bitbucket.org/mapdes/ufl.git@tsfc#egg=ufl
+git+https://bitbucket.org/mapdes/ufl.git#egg=ufl
 git+https://bitbucket.org/mapdes/fiat.git#egg=fiat
