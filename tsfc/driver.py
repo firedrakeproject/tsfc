@@ -210,7 +210,7 @@ def compile_integral(idata, fd, prefix, parameters):
 
     body, kernel.oriented = build_kernel_body(expressions, nonfem,
                                               quadrature_indices + argument_indices,
-                                              coffee_licm=parameters["coffee_licm"],
+                                              coffee_licm=True,
                                               index_names=index_names)
     if body is None:
         return None
@@ -271,7 +271,7 @@ def build_kernel_body(return_variables, ir, prefix_ordering, coffee_licm=False, 
     # Generate COFFEE
     if index_names is None:
         index_names = {}
-    body = generate_coffee(impero_c, index_names)
+    body = generate_coffee(impero_c, index_names, ir)
     body.open_scope = False
     return body, oriented
 
