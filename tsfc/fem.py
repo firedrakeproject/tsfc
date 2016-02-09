@@ -157,7 +157,7 @@ class FindPolynomialDegree(MultiFunction):
         elif cell.cellname() == "quadrilateral":
             # TODO: Tensor-product space assumed
             return 2*element.degree()
-        elif cell.cellname() == "OuterProductCell":
+        elif isinstance(cell, ufl.TensorProductCell):
             try:
                 return sum(element.degree())
             except TypeError:
@@ -374,7 +374,7 @@ class TabulationManager(object):
                 self.tabulators.append(NumericTabulator(numpy.asarray(map(t, points))))
 
         elif integral_type in ['exterior_facet_vert', 'interior_facet_vert']:
-            for entity in range(cell._A.num_facets()):  # "base cell" facets
+            for entity in range(cell.sub_cells()[0].num_facets()):  # "base cell" facets
                 t = as_fiat_cell(cell).get_vert_facet_transform(entity)
                 self.tabulators.append(NumericTabulator(numpy.asarray(map(t, points))))
 
@@ -620,9 +620,9 @@ def _(terminal, e, mt, params):
               ufl.Cell("triangle"): 1.0/2.0,
               ufl.Cell("quadrilateral"): 1.0,
               ufl.Cell("tetrahedron"): 1.0/6.0,
-              ufl.OuterProductCell(ufl.Cell("interval"), ufl.Cell("interval")): 1.0,
-              ufl.OuterProductCell(ufl.Cell("triangle"), ufl.Cell("interval")): 1.0/2.0,
-              ufl.OuterProductCell(ufl.Cell("quadrilateral"), ufl.Cell("interval")): 1.0}
+              ufl.TensorProductCell(ufl.Cell("interval"), ufl.Cell("interval")): 1.0,
+              ufl.TensorProductCell(ufl.Cell("triangle"), ufl.Cell("interval")): 1.0/2.0,
+              ufl.TensorProductCell(ufl.Cell("quadrilateral"), ufl.Cell("interval")): 1.0}
     return ein.Literal(volume[cell])
 
 
@@ -726,9 +726,9 @@ def make_cell_facet_jacobian(terminal):
                      ufl.Cell("triangle"): triangle,
                      ufl.Cell("quadrilateral"): quadrilateral,
                      ufl.Cell("tetrahedron"): tetrahedron,
-                     ufl.OuterProductCell(ufl.Cell("interval"), ufl.Cell("interval")): interval_x_interval,
-                     ufl.OuterProductCell(ufl.Cell("triangle"), ufl.Cell("interval")): triangle_x_interval,
-                     ufl.OuterProductCell(ufl.Cell("quadrilateral"), ufl.Cell("interval")): quadrilateral_x_interval}
+                     ufl.TensorProductCell(ufl.Cell("interval"), ufl.Cell("interval")): interval_x_interval,
+                     ufl.TensorProductCell(ufl.Cell("triangle"), ufl.Cell("interval")): triangle_x_interval,
+                     ufl.TensorProductCell(ufl.Cell("quadrilateral"), ufl.Cell("interval")): quadrilateral_x_interval}
 
     table = cell_to_table[cell]
 
@@ -779,9 +779,9 @@ def make_reference_normal(terminal):
                      ufl.Cell("triangle"): triangle,
                      ufl.Cell("quadrilateral"): quadrilateral,
                      ufl.Cell("tetrahedron"): tetrahedron,
-                     ufl.OuterProductCell(ufl.Cell("interval"), ufl.Cell("interval")): interval_x_interval,
-                     ufl.OuterProductCell(ufl.Cell("triangle"), ufl.Cell("interval")): triangle_x_interval,
-                     ufl.OuterProductCell(ufl.Cell("quadrilateral"), ufl.Cell("interval")): quadrilateral_x_interval}
+                     ufl.TensorProductCell(ufl.Cell("interval"), ufl.Cell("interval")): interval_x_interval,
+                     ufl.TensorProductCell(ufl.Cell("triangle"), ufl.Cell("interval")): triangle_x_interval,
+                     ufl.TensorProductCell(ufl.Cell("quadrilateral"), ufl.Cell("interval")): quadrilateral_x_interval}
 
     table = cell_to_table[cell]
 
@@ -790,11 +790,11 @@ def make_reference_normal(terminal):
 
 
 def make_cell_edge_vectors(terminal):
-    from FIAT.reference_element import two_product_cell
+    from FIAT.reference_element import TensorProductCell
     shape = terminal.ufl_shape
     cell = as_fiat_cell(terminal.ufl_domain().ufl_cell())
-    if isinstance(cell, two_product_cell):
-        raise NotImplementedError("CEV not implemented on OPEs yet")
+    if isinstance(cell, TensorProductCell):
+        raise NotImplementedError("CEV not implemented on TPEs yet")
     nedge = len(cell.get_topology()[1])
     vecs = numpy.vstack(tuple(cell.compute_edge_tangent(i) for i in range(nedge))).astype(NUMPY_TYPE)
 
