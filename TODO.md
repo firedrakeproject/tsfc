@@ -8,5 +8,5 @@
 - [X] `VariableIndex` to wrap a GEM expression instead of a string
 - [X] `optimise.py`: module docstring
 - [X] `ufl2gem.py`: comments + docstring
-- [ ] Better `README`
-- [ ] make optimisations etc. configurable (e.g. coffee_licm, unroll_indexsums)
+- [ ] Better `README`, AUTHORS, more pedantic licensing info
+- [X] make optimisations etc. configurable (e.g. coffee_licm, unroll_indexsums)
