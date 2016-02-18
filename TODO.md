@@ -6,6 +6,6 @@
  - [ ] simplification in the `FormSplitter`?
 - [ ] `geometric.py`: move functionality to FIAT
 - [ ] `VariableIndex` to wrap a `gem.Expression` instead of a string
-- [ ] `optimise.py`: module docstring
+- [X] `optimise.py`: module docstring
 - [ ] `ufl2gem.py`: comments + docstring
 - [ ] Better `README`
