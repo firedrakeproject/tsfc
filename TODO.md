@@ -1,6 +1,6 @@
 - [ ] `driver.py` cleanup
  - [ ] kernel interface separation?
-- [ ] `fem.py` docstrings
+- [X] `fem.py` docstrings
  - [ ] separation of UFL preprocessing?
  - [ ] symbolic tabulation for cellwise constantness? (See [#15](https://github.com/firedrakeproject/tsfc/issues/15))
  - [ ] simplification in the `FormSplitter`?
@@ -9,3 +9,4 @@
 - [X] `optimise.py`: module docstring
 - [X] `ufl2gem.py`: comments + docstring
 - [ ] Better `README`
+- [ ] make optimisations etc. configurable (e.g. coffee_licm, unroll_indexsums)
