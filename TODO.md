@@ -7,5 +7,5 @@
 - [ ] `geometric.py`: move functionality to FIAT
 - [X] `VariableIndex` to wrap a GEM expression instead of a string
 - [X] `optimise.py`: module docstring
-- [ ] `ufl2gem.py`: comments + docstring
+- [X] `ufl2gem.py`: comments + docstring
 - [ ] Better `README`
