@@ -147,12 +147,12 @@ def compile_integral(idata, fd, prefix, parameters):
     kernel.coefficient_numbers = tuple(coefficient_numbers)
 
     if integral_type in ["exterior_facet", "exterior_facet_vert"]:
-        decl = coffee.Decl("unsigned int", coffee.Symbol("facet", rank=(1,)),
-                           qualifiers=["const"])
+        decl = coffee.Decl("int", coffee.Symbol("facet", rank=(1,)),
+                           qualifiers=["const", "unsigned"])
         arglist.append(decl)
     elif integral_type in ["interior_facet", "interior_facet_vert"]:
-        decl = coffee.Decl("unsigned int", coffee.Symbol("facet", rank=(2,)),
-                           qualifiers=["const"])
+        decl = coffee.Decl("int", coffee.Symbol("facet", rank=(2,)),
+                           qualifiers=["const", "unsigned"])
         arglist.append(decl)
 
     nonfem_ = []
@@ -215,8 +215,9 @@ def compile_integral(idata, fd, prefix, parameters):
     if body is None:
         return None
     if kernel.oriented:
-        decl = coffee.Decl("int *restrict *restrict",
+        decl = coffee.Decl("int",
                            coffee.Symbol("cell_orientations"),
+                           pointers=[("restrict",), ("restrict",)],
                            qualifiers=["const"])
         arglist.insert(2, decl)
 
@@ -324,7 +325,8 @@ def prepare_coefficient(integral_type, coefficient, name, mode=None):
         # Simple case
 
         shape = (fiat_element.space_dimension(),)
-        funarg = coffee.Decl("%s *restrict" % SCALAR_TYPE, coffee.Symbol(name, rank=shape),
+        funarg = coffee.Decl(SCALAR_TYPE, coffee.Symbol(name, rank=shape),
+                             pointers=[("restrict",)],
                              qualifiers=["const"])
 
         i = gem.Index()
@@ -340,7 +342,8 @@ def prepare_coefficient(integral_type, coefficient, name, mode=None):
 
         shape = (2, fiat_element.space_dimension())
 
-        funarg = coffee.Decl("%s *restrict" % SCALAR_TYPE, coffee.Symbol(name, rank=shape),
+        funarg = coffee.Decl(SCALAR_TYPE, coffee.Symbol(name, rank=shape),
+                             pointers=[("restrict",)],
                              qualifiers=["const"])
         expression = gem.Variable(name, shape + (1,))
 
@@ -373,7 +376,8 @@ def prepare_coefficient(integral_type, coefficient, name, mode=None):
         name_ = name + "_"
         shape = (2, fiat_element.space_dimension())
 
-        funarg = coffee.Decl("%s *restrict *restrict" % SCALAR_TYPE, coffee.Symbol(name_),
+        funarg = coffee.Decl(SCALAR_TYPE, coffee.Symbol(name_),
+                             pointers=[("restrict",), ("restrict",)],
                              qualifiers=["const"])
         prepare = [coffee.Decl(SCALAR_TYPE, coffee.Symbol(name, rank=shape))]
         expression = gem.Variable(name, shape)
@@ -399,7 +403,8 @@ def prepare_coefficient(integral_type, coefficient, name, mode=None):
         # In this case we generate a gem.ListTensor to do the
         # reordering.  Every single element in a E[n]{+,-} block is
         # referenced separately.
-        funarg = coffee.Decl("%s *restrict *restrict" % SCALAR_TYPE, coffee.Symbol(name),
+        funarg = coffee.Decl(SCALAR_TYPE, coffee.Symbol(name),
+                             pointers=[("restrict",), ("restrict",)],
                              qualifiers=["const"])
 
         variable = gem.Variable(name, (2 * fiat_element.space_dimension(), 1))
