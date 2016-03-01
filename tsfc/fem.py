@@ -265,8 +265,9 @@ def simplify_abs(expression):
     return MemoizerArg(_simplify_abs)(expression, False)
 
 
-def _tabulate(ufl_element, order, points):
-    """Ask FIAT to tabulate ``points`` up to order ``order``, then
+def _tabulate(ufl_element, order, points, entity):
+    """Ask FIAT to tabulate ``points`` up to order ``order``, on entity
+    ``entity`` with ``entity = (element dimension, id), then
     rearranges the result into a series of ``(c, D, table)`` tuples,
     where:
 
@@ -278,22 +279,23 @@ def _tabulate(ufl_element, order, points):
     :arg ufl_element: element to tabulate
     :arg order: FIAT gives all derivatives up to this order
     :arg points: points to tabulate the element on
+    :arg entity: specific entity that we are tabulating (cell or facet)
     """
     element = create_element(ufl_element)
     phi = element.space_dimension()
     C = ufl_element.reference_value_size() - len(ufl_element.symmetry())
     q = len(points)
-    for D, fiat_table in element.tabulate(order, points).iteritems():
+    for D, fiat_table in element.tabulate(order, points, entity).iteritems():
         reordered_table = fiat_table.reshape(phi, C, q).transpose(1, 2, 0)  # (C, q, phi)
         for c, table in enumerate(reordered_table):
             yield c, D, table
 
 
-def tabulate(ufl_element, order, points):
+def tabulate(ufl_element, order, points, entity):
     """Same as the above, but also applies FFC rounding and recognises
     cellwise constantness.  Cellwise constantness is determined
     symbolically, but we also check the numerics to be safe."""
-    for c, D, table in _tabulate(ufl_element, order, points):
+    for c, D, table in _tabulate(ufl_element, order, points, entity):
         # Copied from FFC (ffc/quadrature/quadratureutils.py)
         table[abs(table) < epsilon] = 0
         table[abs(table - 1.0) < epsilon] = 1.0
@@ -308,9 +310,9 @@ def tabulate(ufl_element, order, points):
         yield c, D, table
 
 
-def make_tabulator(points):
+def make_tabulator(points, entity):
     """Creates a tabulator for an array of points."""
-    return lambda elem, order: tabulate(elem, order, points)
+    return lambda elem, order: tabulate(elem, order, points, entity)
 
 
 class TabulationManager(object):
@@ -336,16 +338,23 @@ class TabulationManager(object):
 
         elif integral_type in ['exterior_facet', 'interior_facet']:
             for entity in range(cell.num_facets()):
-                t = as_fiat_cell(cell).get_facet_transform(entity)
-                self.tabulators.append(make_tabulator(numpy.asarray(map(t, points))))
+            
+                # Facet transforms for non-tensor element is computed in FIAT
+                # Simply pass entity id (dim, facet_id)
+            	entity_id = (cell.topological_dimension(), entity)
+                self.tabulators.append(make_tabulator(points, entity_id))
 
+        
         elif integral_type in ['exterior_facet_bottom', 'exterior_facet_top', 'interior_facet_horiz']:
             for entity in range(2):  # top and bottom
+            
+            #FOR LATER: Compute Horizontal Facet Transform in FIAT as with the non-tensor case
                 t = as_fiat_cell(cell).get_horiz_facet_transform(entity)
                 self.tabulators.append(make_tabulator(numpy.asarray(map(t, points))))
 
         elif integral_type in ['exterior_facet_vert', 'interior_facet_vert']:
             for entity in range(cell.sub_cells()[0].num_facets()):  # "base cell" facets
+            #FOR LATER: Compute Vertical Facet Transform in FIAT as with the non-tensor case
                 t = as_fiat_cell(cell).get_vert_facet_transform(entity)
                 self.tabulators.append(make_tabulator(numpy.asarray(map(t, points))))
 
