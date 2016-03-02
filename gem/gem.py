@@ -105,10 +105,11 @@ class Zero(Terminal):
 class Literal(Terminal):
     """Tensor-valued constant"""
 
-    __slots__ = ('array',)
+    __slots__ = ('array', 'track_zeros')
     __front__ = ('array',)
+    __back__ = ('track_zeros',)
 
-    def __new__(cls, array):
+    def __new__(cls, array, track_zeros=None):
         array = asarray(array)
         if (array == 0).all():
             # All zeros, make symbolic zero
@@ -116,18 +117,19 @@ class Literal(Terminal):
         else:
             return super(Literal, cls).__new__(cls)
 
-    def __init__(self, array):
+    def __init__(self, array, track_zeros=None):
         self.array = asarray(array, dtype=float)
+        self.track_zeros = bool(track_zeros)
 
     def is_equal(self, other):
         if type(self) != type(other):
             return False
         if self.shape != other.shape:
             return False
-        return tuple(self.array.flat) == tuple(other.array.flat)
+        return tuple(self.array.flat) == tuple(other.array.flat) and self.track_zeros == other.track_zeros
 
     def get_hash(self):
-        return hash((type(self), self.shape, tuple(self.array.flat)))
+        return hash((type(self), self.shape, tuple(self.array.flat), self.track_zeros))
 
     @property
     def value(self):
