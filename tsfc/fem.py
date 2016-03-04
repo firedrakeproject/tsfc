@@ -279,7 +279,7 @@ def _tabulate(ufl_element, order, points, entity):
     :arg ufl_element: element to tabulate
     :arg order: FIAT gives all derivatives up to this order
     :arg points: points to tabulate the element on
-    :arg entity: specific entity that we are tabulating (cell or facet)
+    :arg entity: specific entity that we are tabulating
     """
     element = create_element(ufl_element)
     phi = element.space_dimension()
@@ -311,7 +311,7 @@ def tabulate(ufl_element, order, points, entity):
 
 
 def make_tabulator(points, entity):
-    """Creates a tabulator for an array of points."""
+    """Creates a tabulator for an array of points on a given entity."""
     return lambda elem, order: tabulate(elem, order, points, entity)
 
 
@@ -340,8 +340,8 @@ class TabulationManager(object):
             for entity in range(cell.num_facets()):
             
                 # Facet transforms for non-tensor element is computed in FIAT
-                # Simply pass entity id (dim, facet_id)
-            	entity_id = (cell.topological_dimension(), entity)
+                # Simply pass entity id (facet dim, facet_id)
+            	entity_id = (cell.topological_dimension()-1, entity)
                 self.tabulators.append(make_tabulator(points, entity_id))
 
         
