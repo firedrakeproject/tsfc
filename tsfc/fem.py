@@ -338,25 +338,22 @@ class TabulationManager(object):
 
         elif integral_type in ['exterior_facet', 'interior_facet']:
             for entity in range(cell.num_facets()):
-            
+
                 # Facet transforms for non-tensor element is computed in FIAT
                 # Simply pass entity id (facet dim, facet_id)
-            	entity_id = (cell.topological_dimension()-1, entity)
+                entity_id = (cell.topological_dimension()-1, entity)
                 self.tabulators.append(make_tabulator(points, entity_id))
 
-        
         elif integral_type in ['exterior_facet_bottom', 'exterior_facet_top', 'interior_facet_horiz']:
             for entity in range(2):  # top and bottom
-            
-            #FOR LATER: Compute Horizontal Facet Transform in FIAT as with the non-tensor case
-                t = as_fiat_cell(cell).get_horiz_facet_transform(entity)
-                self.tabulators.append(make_tabulator(numpy.asarray(map(t, points))))
+
+                entity_id = ((cell.topological_dimension()-1, 0), (0, entity))
+                self.tabulators.append(make_tabulator(points, entity_id))
 
         elif integral_type in ['exterior_facet_vert', 'interior_facet_vert']:
             for entity in range(cell.sub_cells()[0].num_facets()):  # "base cell" facets
-            #FOR LATER: Compute Vertical Facet Transform in FIAT as with the non-tensor case
-                t = as_fiat_cell(cell).get_vert_facet_transform(entity)
-                self.tabulators.append(make_tabulator(numpy.asarray(map(t, points))))
+                entity_id = ((cell.topological_dimension()-2, 1), (entity, 0))
+                self.tabulators.append(make_tabulator(points, entity_id))
 
         else:
             raise NotImplementedError("integral type %s not supported" % integral_type)
