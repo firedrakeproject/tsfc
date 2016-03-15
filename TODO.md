@@ -5,8 +5,4 @@
  - [ ] symbolic tabulation for cellwise constantness? (See [#15](https://github.com/firedrakeproject/tsfc/issues/15))
  - [ ] simplification in the `FormSplitter`?
 - [ ] `geometric.py`: move functionality to FIAT
-- [X] `VariableIndex` to wrap a GEM expression instead of a string
-- [X] `optimise.py`: module docstring
-- [X] `ufl2gem.py`: comments + docstring
 - [ ] Better `README`, AUTHORS, more pedantic licensing info
-- [X] make optimisations etc. configurable (e.g. coffee_licm, unroll_indexsums)
