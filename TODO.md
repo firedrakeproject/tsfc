@@ -9,4 +9,5 @@
    - [X] on branch for new H(div) trace element
 - [ ] `geometric.py`: move functionality to FIAT
 - [ ] split `compile_gem`: Impero AST, ImperoC
+- [ ] `gem.py`: common base class for indices, make `Zero` a "`Literal`"
 - [ ] Better `README`, AUTHORS, more pedantic licensing info
