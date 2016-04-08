@@ -5,8 +5,8 @@ from __future__ import absolute_import
 
 from singledispatch import singledispatch
 
-from tsfc.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
-from tsfc.gem import Node, Zero, Sum, Indexed, IndexSum, ComponentTensor
+from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
+from gem.gem import Node, Zero, Sum, Indexed, IndexSum, ComponentTensor
 
 
 @singledispatch

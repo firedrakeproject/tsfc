@@ -14,8 +14,8 @@ import itertools
 import numpy
 from singledispatch import singledispatch
 
-from tsfc.node import traversal, collect_refcount
-from tsfc import gem, impero as imp, optimise, scheduling
+from gem.node import traversal, collect_refcount
+from gem import gem, impero as imp, optimise, scheduling
 
 
 # ImperoC is named tuple for C code generation.

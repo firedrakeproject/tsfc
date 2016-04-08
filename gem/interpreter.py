@@ -9,7 +9,7 @@ import math
 from singledispatch import singledispatch
 import itertools
 
-from tsfc import gem, node
+from gem import gem, node
 
 __all__ = ("evaluate", )
 

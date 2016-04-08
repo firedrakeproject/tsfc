@@ -19,7 +19,7 @@ from __future__ import absolute_import
 from itertools import chain
 from numpy import asarray, unique
 
-from tsfc.node import Node as NodeBase
+from gem.node import Node as NodeBase
 
 
 class NodeMeta(type):
