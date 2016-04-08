@@ -22,6 +22,14 @@ from numpy import asarray, unique
 from gem.node import Node as NodeBase
 
 
+__all__ = ['Node', 'Literal', 'Zero', 'Variable', 'Sum', 'Product',
+           'Division', 'Power', 'MathFunction', 'MinValue',
+           'MaxValue', 'Comparison', 'LogicalNot', 'LogicalAnd',
+           'LogicalOr', 'Conditional', 'Index', 'VariableIndex',
+           'Indexed', 'ComponentTensor', 'IndexSum', 'ListTensor',
+           'partial_indexed']
+
+
 class NodeMeta(type):
     """Metaclass of GEM nodes.
 
