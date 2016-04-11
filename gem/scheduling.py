@@ -111,7 +111,7 @@ def handle(ops, push, decref, node):
     if isinstance(node, gem.Variable):
         # Declared in the kernel header
         pass
-    elif isinstance(node, gem.Literal):
+    elif isinstance(node, gem.Constant):
         # Constant literals inlined, unless tensor-valued
         if node.shape:
             ops.append(impero.Evaluate(node))

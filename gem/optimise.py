@@ -6,7 +6,9 @@ from __future__ import absolute_import
 from singledispatch import singledispatch
 
 from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
-from gem.gem import Node, Zero, Sum, Indexed, IndexSum, ComponentTensor
+from gem.gem import (Node, Identity, Literal, Zero, Sum, Comparison,
+                     Conditional, Index, VariableIndex, Indexed,
+                     IndexSum, ComponentTensor, Delta)
 
 
 @singledispatch
@@ -20,7 +22,6 @@ def replace_indices(node, self, subst):
                 replace with.
     """
     raise AssertionError("cannot handle type %s" % type(node))
-
 
 replace_indices.register(Node)(reuse_if_untouched_arg)
 
@@ -52,9 +53,49 @@ def filtered_replace_indices(node, self, subst):
 
 
 def remove_componenttensors(expressions):
-    """Removes all ComponentTensors from a list of expression DAGs."""
+    """Removes all ComponentTensors in multi-root expression DAG."""
     mapper = MemoizerArg(filtered_replace_indices)
     return [mapper(expression, ()) for expression in expressions]
+
+
+@singledispatch
+def _replace_delta(node, self):
+    raise AssertionError("cannot handle type %s" % type(node))
+
+_replace_delta.register(Node)(reuse_if_untouched)
+
+
+@_replace_delta.register(Delta)
+def _replace_delta_delta(node, self):
+    i, j = node.i, node.j
+
+    if isinstance(i, Index) or isinstance(j, Index):
+        if isinstance(i, Index) and isinstance(j, Index):
+            assert i.extent == j.extent
+        if isinstance(i, Index):
+            assert i.extent is not None
+            size = i.extent
+        if isinstance(j, Index):
+            assert j.extent is not None
+            size = j.extent
+        return Indexed(Identity(size), (i, j))
+    else:
+        def expression(index):
+            if isinstance(index, int):
+                return Literal(index)
+            elif isinstance(index, VariableIndex):
+                return index.expression
+            else:
+                raise ValueError("Cannot convert running index to expression.")
+        e_i = expression(i)
+        e_j = expression(j)
+        return Conditional(Comparison("==", e_i, e_j), Literal(1), Zero())
+
+
+def replace_delta(expressions):
+    """Lowers all Deltas in a multi-root expression DAG."""
+    mapper = Memoizer(_replace_delta)
+    return map(mapper, expressions)
 
 
 @singledispatch
