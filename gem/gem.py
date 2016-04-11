@@ -16,6 +16,7 @@ indices.
 
 from __future__ import absolute_import
 
+from abc import ABCMeta
 from itertools import chain
 from numpy import asarray, eye, unique
 
@@ -336,7 +337,15 @@ class Conditional(Node):
         self.shape = then.shape
 
 
-class Index(object):
+class IndexBase(object):
+    """Abstract base class for indices."""
+
+    __metaclass__ = ABCMeta
+
+IndexBase.register(int)
+
+
+class Index(IndexBase):
     """Free index"""
 
     # Not true object count, just for naming purposes
@@ -369,7 +378,7 @@ class Index(object):
         return "Index(%r)" % self.name
 
 
-class VariableIndex(object):
+class VariableIndex(IndexBase):
     """An index that is constant during a single execution of the
     kernel, but whose value is not known at compile time."""
 
@@ -401,6 +410,7 @@ class Indexed(Scalar):
         # Set index extents from shape
         assert len(aggregate.shape) == len(multiindex)
         for index, extent in zip(multiindex, aggregate.shape):
+            assert isinstance(index, IndexBase)
             if isinstance(index, Index):
                 index.set_extent(extent)
 
