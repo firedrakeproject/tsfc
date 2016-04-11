@@ -14,7 +14,7 @@ from __future__ import absolute_import
 
 from abc import ABCMeta, abstractmethod
 
-from tsfc.node import Node as NodeBase
+from gem.node import Node as NodeBase
 
 
 class Node(NodeBase):

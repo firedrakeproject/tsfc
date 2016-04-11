@@ -19,7 +19,15 @@ from __future__ import absolute_import
 from itertools import chain
 from numpy import asarray, unique
 
-from tsfc.node import Node as NodeBase
+from gem.node import Node as NodeBase
+
+
+__all__ = ['Node', 'Literal', 'Zero', 'Variable', 'Sum', 'Product',
+           'Division', 'Power', 'MathFunction', 'MinValue',
+           'MaxValue', 'Comparison', 'LogicalNot', 'LogicalAnd',
+           'LogicalOr', 'Conditional', 'Index', 'VariableIndex',
+           'Indexed', 'ComponentTensor', 'IndexSum', 'ListTensor',
+           'partial_indexed']
 
 
 class NodeMeta(type):

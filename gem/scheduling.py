@@ -6,8 +6,8 @@ from __future__ import absolute_import
 import collections
 import functools
 
-from tsfc import gem, impero
-from tsfc.node import collect_refcount
+from gem import gem, impero
+from gem.node import collect_refcount
 
 
 class OrderedDefaultDict(collections.OrderedDict):
