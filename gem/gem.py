@@ -28,7 +28,7 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Variable', 'Sum',
            'MaxValue', 'Comparison', 'LogicalNot', 'LogicalAnd',
            'LogicalOr', 'Conditional', 'Index', 'VariableIndex',
            'Indexed', 'ComponentTensor', 'IndexSum', 'ListTensor',
-           'partial_indexed']
+           'Delta', 'partial_indexed']
 
 
 class NodeMeta(type):
@@ -527,6 +527,31 @@ class ListTensor(Node):
 
     def get_hash(self):
         return hash((type(self), self.shape, self.children))
+
+
+class Delta(Scalar, Terminal):
+    __slots__ = ('i', 'j')
+    __front__ = ('i', 'j')
+
+    def __new__(cls, i, j):
+        assert isinstance(i, IndexBase)
+        assert isinstance(j, IndexBase)
+
+        # \delta_{i,i} = 1
+        if i == j:
+            return Literal(1)
+
+        # Fixed indices
+        if isinstance(i, int) and isinstance(j, int):
+            return Literal(int(i == j))
+
+        self = super(Delta, cls).__new__(cls)
+        self.i = i
+        self.j = j
+        # Set up free indices
+        free_indices = tuple(index for index in (i, j) if isinstance(index, Index))
+        self.free_indices = tuple(unique(free_indices))
+        return self
 
 
 def partial_indexed(tensor, indices):
