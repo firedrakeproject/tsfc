@@ -17,13 +17,13 @@ indices.
 from __future__ import absolute_import
 
 from itertools import chain
-from numpy import asarray, unique
+from numpy import asarray, eye, unique
 
 from gem.node import Node as NodeBase
 
 
-__all__ = ['Node', 'Literal', 'Zero', 'Variable', 'Sum', 'Product',
-           'Division', 'Power', 'MathFunction', 'MinValue',
+__all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Variable', 'Sum',
+           'Product', 'Division', 'Power', 'MathFunction', 'MinValue',
            'MaxValue', 'Comparison', 'LogicalNot', 'LogicalAnd',
            'LogicalOr', 'Conditional', 'Index', 'VariableIndex',
            'Indexed', 'ComponentTensor', 'IndexSum', 'ListTensor',
@@ -87,7 +87,17 @@ class Scalar(Node):
     shape = ()
 
 
-class Zero(Terminal):
+class Constant(Terminal):
+    """Abstract base class for constant types.
+
+    Convention:
+     - array: numpy array of values
+     - value: float value (scalars only)
+    """
+    __slots__ = ()
+
+
+class Zero(Constant):
     """Symbolic zero tensor"""
 
     __slots__ = ('shape',)
@@ -102,7 +112,25 @@ class Zero(Terminal):
         return 0.0
 
 
-class Literal(Terminal):
+class Identity(Constant):
+    """Identity matrix"""
+
+    __slots__ = ('dim',)
+    __front__ = ('dim',)
+
+    def __init__(self, dim):
+        self.dim = dim
+
+    @property
+    def shape(self):
+        return (self.dim, self.dim)
+
+    @property
+    def array(self):
+        return eye(self.dim)
+
+
+class Literal(Constant):
     """Tensor-valued constant"""
 
     __slots__ = ('array',)
@@ -382,7 +410,7 @@ class Indexed(Scalar):
 
         # All indices fixed
         if all(isinstance(i, int) for i in multiindex):
-            if isinstance(aggregate, Literal):
+            if isinstance(aggregate, Constant):
                 return Literal(aggregate.array[multiindex])
             elif isinstance(aggregate, ListTensor):
                 return aggregate.array[multiindex]
