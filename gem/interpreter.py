@@ -99,9 +99,9 @@ def _(e, self):
     return Result(numpy.zeros(e.shape, dtype=float))
 
 
-@_evaluate.register(gem.Literal)  # noqa: not actually redefinition
+@_evaluate.register(gem.Constant)  # noqa: not actually redefinition
 def _(e, self):
-    """Literals return their array."""
+    """Constants return their array."""
     return Result(e.array)
 
 

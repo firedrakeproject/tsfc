@@ -16,14 +16,15 @@ indices.
 
 from __future__ import absolute_import
 
+from abc import ABCMeta
 from itertools import chain
-from numpy import asarray, unique
+from numpy import asarray, eye, unique
 
 from gem.node import Node as NodeBase
 
 
-__all__ = ['Node', 'Literal', 'Zero', 'Variable', 'Sum', 'Product',
-           'Division', 'Power', 'MathFunction', 'MinValue',
+__all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Variable', 'Sum',
+           'Product', 'Division', 'Power', 'MathFunction', 'MinValue',
            'MaxValue', 'Comparison', 'LogicalNot', 'LogicalAnd',
            'LogicalOr', 'Conditional', 'Index', 'VariableIndex',
            'Indexed', 'ComponentTensor', 'IndexSum', 'ListTensor',
@@ -87,7 +88,17 @@ class Scalar(Node):
     shape = ()
 
 
-class Zero(Terminal):
+class Constant(Terminal):
+    """Abstract base class for constant types.
+
+    Convention:
+     - array: numpy array of values
+     - value: float value (scalars only)
+    """
+    __slots__ = ()
+
+
+class Zero(Constant):
     """Symbolic zero tensor"""
 
     __slots__ = ('shape',)
@@ -102,7 +113,25 @@ class Zero(Terminal):
         return 0.0
 
 
-class Literal(Terminal):
+class Identity(Constant):
+    """Identity matrix"""
+
+    __slots__ = ('dim',)
+    __front__ = ('dim',)
+
+    def __init__(self, dim):
+        self.dim = dim
+
+    @property
+    def shape(self):
+        return (self.dim, self.dim)
+
+    @property
+    def array(self):
+        return eye(self.dim)
+
+
+class Literal(Constant):
     """Tensor-valued constant"""
 
     __slots__ = ('array',)
@@ -308,7 +337,15 @@ class Conditional(Node):
         self.shape = then.shape
 
 
-class Index(object):
+class IndexBase(object):
+    """Abstract base class for indices."""
+
+    __metaclass__ = ABCMeta
+
+IndexBase.register(int)
+
+
+class Index(IndexBase):
     """Free index"""
 
     # Not true object count, just for naming purposes
@@ -341,7 +378,7 @@ class Index(object):
         return "Index(%r)" % self.name
 
 
-class VariableIndex(object):
+class VariableIndex(IndexBase):
     """An index that is constant during a single execution of the
     kernel, but whose value is not known at compile time."""
 
@@ -373,6 +410,7 @@ class Indexed(Scalar):
         # Set index extents from shape
         assert len(aggregate.shape) == len(multiindex)
         for index, extent in zip(multiindex, aggregate.shape):
+            assert isinstance(index, IndexBase)
             if isinstance(index, Index):
                 index.set_extent(extent)
 
@@ -382,7 +420,7 @@ class Indexed(Scalar):
 
         # All indices fixed
         if all(isinstance(i, int) for i in multiindex):
-            if isinstance(aggregate, Literal):
+            if isinstance(aggregate, Constant):
                 return Literal(aggregate.array[multiindex])
             elif isinstance(aggregate, ListTensor):
                 return aggregate.array[multiindex]
