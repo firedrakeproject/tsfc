@@ -18,7 +18,9 @@ from __future__ import absolute_import
 
 from abc import ABCMeta
 from itertools import chain
-from numpy import asarray, eye, unique
+import numpy
+from numpy import asarray, unique
+from operator import attrgetter
 
 from gem.node import Node as NodeBase
 
@@ -128,7 +130,7 @@ class Identity(Constant):
 
     @property
     def array(self):
-        return eye(self.dim)
+        return numpy.eye(self.dim)
 
 
 class Literal(Constant):
@@ -492,11 +494,23 @@ class ListTensor(Node):
 
     def __new__(cls, array):
         array = asarray(array)
+        assert numpy.prod(array.shape)
 
-        # Zero folding
-        if all(isinstance(elem, Zero) for elem in array.flat):
-            assert all(elem.shape == () for elem in array.flat)
-            return Zero(array.shape)
+        # Handle children with shape
+        child_shape = array.flat[0].shape
+        assert all(elem.shape == child_shape for elem in array.flat)
+
+        if child_shape:
+            # Destroy structure
+            direct_array = numpy.empty(array.shape + child_shape, dtype=object)
+            for alpha in numpy.ndindex(array.shape):
+                for beta in numpy.ndindex(child_shape):
+                    direct_array[alpha + beta] = Indexed(array[alpha], beta)
+            array = direct_array
+
+        # Constant folding
+        if all(isinstance(elem, Constant) for elem in array.flat):
+            return Literal(numpy.vectorize(attrgetter('value'))(array))
 
         self = super(ListTensor, cls).__new__(cls)
         self.array = array
