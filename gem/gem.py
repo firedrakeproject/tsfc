@@ -355,12 +355,11 @@ class Index(IndexBase):
 
     __slots__ = ('name', 'extent', 'count')
 
-    def __init__(self, name=None):
+    def __init__(self, name=None, extent=None):
         self.name = name
         Index._count += 1
         self.count = Index._count
-        # Initialise with indefinite extent
-        self.extent = None
+        self.extent = extent
 
     def set_extent(self, value):
         # Set extent, check for consistency
