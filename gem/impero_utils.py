@@ -42,6 +42,7 @@ def compile_gem(return_variables, expressions, prefix_ordering, remove_zeros=Fal
     :arg remove_zeros: remove zero assignment to return variables
     :arg coffee_licm: trust COFFEE to do loop invariant code motion
     """
+    expressions = optimise.replace_delta(expressions)
     expressions = optimise.remove_componenttensors(expressions)
 
     # Remove zeros
