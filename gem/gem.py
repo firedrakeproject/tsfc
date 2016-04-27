@@ -626,8 +626,8 @@ def affine_index_group(n, extent):
 
     group = tuple(AffineIndex(extent=extent) for i in range(n))
 
-    for i in range(n):
-        group[i].group = group
+    for g in group:
+        g.group = group
 
     return group
 
