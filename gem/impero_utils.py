@@ -33,14 +33,13 @@ class NoopError(Exception):
     pass
 
 
-def compile_gem(return_variables, expressions, prefix_ordering, remove_zeros=False, coffee_licm=False):
+def compile_gem(return_variables, expressions, prefix_ordering, remove_zeros=False):
     """Compiles GEM to Impero.
 
     :arg return_variables: return variables for each root (type: GEM expressions)
     :arg expressions: multi-root expression DAG (type: GEM expressions)
     :arg prefix_ordering: outermost loop indices
     :arg remove_zeros: remove zero assignment to return variables
-    :arg coffee_licm: trust COFFEE to do loop invariant code motion
     """
     expressions = optimise.replace_delta(expressions)
     expressions = optimise.remove_componenttensors(expressions)
@@ -80,7 +79,7 @@ def compile_gem(return_variables, expressions, prefix_ordering, remove_zeros=Fal
         raise NoopError()
 
     # Drop unnecessary temporaries
-    ops = inline_temporaries(expressions, ops, coffee_licm=coffee_licm)
+    ops = inline_temporaries(expressions, ops)
 
     # Build Impero AST
     tree = make_loop_tree(ops, get_indices)
@@ -112,15 +111,13 @@ def make_index_orderer(index_ordering):
     return apply_ordering
 
 
-def inline_temporaries(expressions, ops, coffee_licm=False):
+def inline_temporaries(expressions, ops):
     """Inline temporaries which could be inlined without blowing up
     the code.
 
     :arg expressions: a multi-root GEM expression DAG, used for
                       reference counting
     :arg ops: ordered list of Impero terminals
-    :arg coffee_licm: Trust COFFEE to do LICM. If enabled, inlining
-                      can move calculations inside inner loops.
     :returns: a filtered ``ops``, without the unnecessary
               :class:`impero.Evaluate`s
     """
@@ -133,12 +130,11 @@ def inline_temporaries(expressions, ops, coffee_licm=False):
             if expr.shape == () and refcount[expr] == 1:
                 candidates.add(expr)
 
-    if not coffee_licm:
-        # Prevent inlining that pulls expressions into inner loops
-        for node in traversal(expressions):
-            for child in node.children:
-                if child in candidates and set(child.free_indices) < set(node.free_indices):
-                    candidates.remove(child)
+    # Prevent inlining that pulls expressions into inner loops
+    for node in traversal(expressions):
+        for child in node.children:
+            if child in candidates and set(child.free_indices) < set(node.free_indices):
+                candidates.remove(child)
 
     # Filter out candidates
     return [op for op in ops if not (isinstance(op, imp.Evaluate) and op.expression in candidates)]
