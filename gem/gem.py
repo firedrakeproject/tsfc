@@ -582,7 +582,7 @@ class Delta(Scalar, Terminal):
         self.free_indices = tuple(unique(free_indices))
         return self
 
-    
+
 class IndexIterator(object):
     """An iterator whose value is a multi-index (tuple) iterating over the
     extent of the supplied :class:`.Index` objects in a last index varies
@@ -599,7 +599,7 @@ class IndexIterator(object):
                 except ValueError:
                     raise ValueError("Only able to iterate over all indices in an affine group at once")
                 self.affine_groups.add((i.group, pos))
-        
+
         self.ndindex = numpy.ndindex(tuple(i.extent for i in indices))
 
     def _affine_groups_legal(self, multiindex):
@@ -607,7 +607,7 @@ class IndexIterator(object):
             if sum(multiindex[p] for p in pos) >= group[0].extent:
                 return False
         return True
-        
+
     def __iter__(self):
         # Fix this for affine index groups.
         while True:
