@@ -32,7 +32,8 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Variable', 'Sum',
            'MaxValue', 'Comparison', 'LogicalNot', 'LogicalAnd',
            'LogicalOr', 'Conditional', 'Index', 'VariableIndex',
            'Indexed', 'FlexiblyIndexed', 'ComponentTensor',
-           'IndexSum', 'ListTensor', 'partial_indexed', 'reshape']
+           'IndexSum', 'ListTensor', 'partial_indexed', 'reshape',
+           'Failure']
 
 
 class NodeMeta(type):
@@ -88,6 +89,17 @@ class Scalar(Node):
     __slots__ = ()
 
     shape = ()
+
+
+class Failure(Terminal):
+    """Abstract class for failure GEM nodes."""
+
+    __slots__ = ('shape', 'exc_info')
+    __front__ = ('shape', 'exc_info')
+
+    def __init__(self, shape, exc_info):
+        self.shape = shape
+        self.exc_info = exc_info
 
 
 class Constant(Terminal):
