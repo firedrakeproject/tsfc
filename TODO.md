@@ -1,13 +1,12 @@
 - [ ] `driver.py` cleanup
- - [X] kernel interface separation?
- - [ ] clean up around the `fem.process` call
-- [X] `fem.py` docstrings
- - [ ] separation of UFL preprocessing?
-   - [X] separate `ufl_utils.py`
+ - [X] clean up around the `fem.process` call
+- UFL to GEM:
+ - [ ] Re-think translation context
  - [ ] symbolic tabulation for cellwise constantness? (See [#15](https://github.com/firedrakeproject/tsfc/issues/15))
  - [ ] simplification in the `FormSplitter`?
    - [X] on branch for new H(div) trace element
 - [ ] `geometric.py`: move functionality to FIAT
 - [ ] split `compile_gem`: Impero AST, ImperoC
-- [ ] `gem.py`: common base class for indices, make `Zero` a "`Literal`"
+- [X] `gem.py`: common base class for indices, make `Zero` a "`Literal`"
 - [ ] Better `README`, AUTHORS, more pedantic licensing info
+- [ ] refactor CellVolue / FacetArea
