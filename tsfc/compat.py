@@ -5,7 +5,7 @@ import numpy
 from distutils.version import StrictVersion
 
 
-if StrictVersion(numpy.__version__) < StrictVersion("1.10"):
+if False:#  StrictVersion(numpy.__version__) < StrictVersion("1.10"):
     def allclose(a, b, rtol=1e-5, atol=1e-8, equal_nan=False):
         """Wrapper around ``numpy.allclose``, which see.
 
