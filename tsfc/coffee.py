@@ -11,6 +11,7 @@ import itertools
 import numpy
 from singledispatch import singledispatch
 
+import coffee.visitors
 import coffee.base as coffee
 
 from gem import gem, impero as imp
