@@ -15,7 +15,7 @@ from tsfc.coffee import SCALAR_TYPE
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
                  "domain_number",
-                 "coefficient_numbers", "__weakref__")
+                 "coefficient_numbers", "__weakref__", "_ir")
     """A compiled Kernel object.
 
     :kwarg ast: The COFFEE ast for the kernel.

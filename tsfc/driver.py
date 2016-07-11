@@ -257,7 +257,9 @@ def compile_integral(integral_data, form_data, prefix, parameters):
     body = generate_coffee(impero_c, index_names, ir, argument_indices)
 
     kernel_name = "%s_%s_integral_%s" % (prefix, integral_type, integral_data.subdomain_id)
-    return builder.construct_kernel(kernel_name, body)
+    temp = builder.construct_kernel(kernel_name, body)
+    temp._ir = ir
+    return temp
 
 
 def lower_integral_type(fiat_cell, integral_type):
