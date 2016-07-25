@@ -93,19 +93,19 @@ def _evaluate(expression, self):
     raise ValueError("Unhandled node type %s" % type(expression))
 
 
-@_evaluate.register(gem.Zero)  # noqa: not actually redefinition
+@_evaluate.register(gem.Zero)  # noqa: F811
 def _(e, self):
     """Zeros produce an array of zeros."""
     return Result(numpy.zeros(e.shape, dtype=float))
 
 
-@_evaluate.register(gem.Constant)  # noqa: not actually redefinition
+@_evaluate.register(gem.Constant)  # noqa: F811
 def _(e, self):
     """Constants return their array."""
     return Result(e.array)
 
 
-@_evaluate.register(gem.Variable)  # noqa: not actually redefinition
+@_evaluate.register(gem.Variable)  # noqa: F811
 def _(e, self):
     """Look up variables in the provided bindings."""
     try:
@@ -118,7 +118,7 @@ def _(e, self):
     return Result(val)
 
 
-@_evaluate.register(gem.Power)  # noqa: not actually redefinition
+@_evaluate.register(gem.Power)  # noqa: F811
 @_evaluate.register(gem.Division)
 @_evaluate.register(gem.Product)
 @_evaluate.register(gem.Sum)
@@ -136,7 +136,7 @@ def _(e, self):
     return result
 
 
-@_evaluate.register(gem.MathFunction)  # noqa: not actually redefinition
+@_evaluate.register(gem.MathFunction)  # noqa: F811
 def _(e, self):
     ops = [self(o) for o in e.children]
     result = Result.empty(*ops)
@@ -148,7 +148,7 @@ def _(e, self):
     return result
 
 
-@_evaluate.register(gem.MaxValue)  # noqa: not actually redefinition
+@_evaluate.register(gem.MaxValue)  # noqa: F811
 @_evaluate.register(gem.MinValue)
 def _(e, self):
     ops = [self(o) for o in e.children]
@@ -160,7 +160,7 @@ def _(e, self):
     return result
 
 
-@_evaluate.register(gem.Comparison)  # noqa: not actually redefinition
+@_evaluate.register(gem.Comparison)  # noqa: F811
 def _(e, self):
     ops = [self(o) for o in e.children]
     op = {">": operator.gt,
@@ -175,7 +175,7 @@ def _(e, self):
     return result
 
 
-@_evaluate.register(gem.LogicalNot)  # noqa: not actually redefinition
+@_evaluate.register(gem.LogicalNot)  # noqa: F811
 def _(e, self):
     val = self(e.children[0])
     assert val.arr.dtype == numpy.dtype("bool")
@@ -185,7 +185,7 @@ def _(e, self):
     return result
 
 
-@_evaluate.register(gem.LogicalAnd)  # noqa: not actually redefinition
+@_evaluate.register(gem.LogicalAnd)  # noqa: F811
 def _(e, self):
     a, b = [self(o) for o in e.children]
     assert a.arr.dtype == numpy.dtype("bool")
@@ -197,7 +197,7 @@ def _(e, self):
     return result
 
 
-@_evaluate.register(gem.LogicalOr)  # noqa: not actually redefinition
+@_evaluate.register(gem.LogicalOr)  # noqa: F811
 def _(e, self):
     a, b = [self(o) for o in e.children]
     assert a.arr.dtype == numpy.dtype("bool")
@@ -209,7 +209,7 @@ def _(e, self):
     return result
 
 
-@_evaluate.register(gem.Conditional)  # noqa: not actually redefinition
+@_evaluate.register(gem.Conditional)  # noqa: F811
 def _(e, self):
     cond, then, else_ = [self(o) for o in e.children]
     assert cond.arr.dtype == numpy.dtype("bool")
@@ -222,7 +222,7 @@ def _(e, self):
     return result
 
 
-@_evaluate.register(gem.Indexed)  # noqa: not actually redefinition
+@_evaluate.register(gem.Indexed)  # noqa: F811
 def _(e, self):
     """Indexing maps shape to free indices"""
     val = self(e.children[0])
@@ -249,7 +249,7 @@ def _(e, self):
     return Result(val[idx], val.fids + fids)
 
 
-@_evaluate.register(gem.ComponentTensor)  # noqa: not actually redefinition
+@_evaluate.register(gem.ComponentTensor)  # noqa: F811
 def _(e, self):
     """Component tensors map free indices to shape."""
     val = self(e.children[0])
@@ -269,7 +269,7 @@ def _(e, self):
                   tuple(fids))
 
 
-@_evaluate.register(gem.IndexSum)  # noqa: not actually redefinition
+@_evaluate.register(gem.IndexSum)  # noqa: F811
 def _(e, self):
     """Index sums reduce over the given axis."""
     val = self(e.children[0])
@@ -278,7 +278,7 @@ def _(e, self):
                   val.fids[:idx] + val.fids[idx+1:])
 
 
-@_evaluate.register(gem.ListTensor)  # noqa: not actually redefinition
+@_evaluate.register(gem.ListTensor)  # noqa: F811
 def _(e, self):
     """List tensors just turn into arrays."""
     ops = [self(o) for o in e.children]
