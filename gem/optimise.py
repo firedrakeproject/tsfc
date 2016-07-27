@@ -12,12 +12,13 @@ from itertools import combinations, permutations
 import numpy
 from singledispatch import singledispatch
 
-from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
+from gem.node import (Memoizer, MemoizerArg, reuse_if_untouched,
+                      reuse_if_untouched_arg, collect_refcount)
 from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
                      Product, Sum, Comparison, Conditional, Division,
                      Index, VariableIndex, Indexed, FlexiblyIndexed,
-                     IndexSum, ComponentTensor, ListTensor, Delta,
-                     partial_indexed, one)
+                     IndexRenamer, IndexSum, ComponentTensor,
+                     ListTensor, Delta, partial_indexed, one)
 
 
 @singledispatch
@@ -90,10 +91,17 @@ def replace_indices_indexed(node, self, subst):
     substitute = dict(subst)
     multiindex = tuple(substitute.get(i, i) for i in node.multiindex)
     if isinstance(child, ComponentTensor):
-        # Indexing into ComponentTensor
-        # Inline ComponentTensor and augment the substitution rules
-        substitute.update(zip(child.multiindex, multiindex))
-        return self(child.children[0], tuple(sorted(substitute.items())))
+        if self.refcount[child] == 1 or isinstance(child.children[0], Indexed) or not all(isinstance(index, Index) for index in multiindex):
+            # Indexing into ComponentTensor
+            # Inline ComponentTensor and augment the substitution rules
+            substitute.update(zip(child.multiindex, multiindex))
+            return self(child.children[0], tuple(sorted(substitute.items())))
+        else:
+            op, = child.children
+            renames_dict = dict(zip(child.multiindex, multiindex))
+            renames = tuple((fi, renames_dict.get(fi, fi))
+                            for fi in op.free_indices)
+            return IndexRenamer(op, renames)
     else:
         # Replace indices
         new_child = self(child, subst)
@@ -131,6 +139,7 @@ def filtered_replace_indices(node, self, subst):
 def remove_componenttensors(expressions):
     """Removes all ComponentTensors in multi-root expression DAG."""
     mapper = MemoizerArg(filtered_replace_indices)
+    mapper.refcount = collect_refcount(expressions)
     return [mapper(expression, ()) for expression in expressions]
 
 

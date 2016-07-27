@@ -359,3 +359,15 @@ def _expression_flexiblyindexed(expr, parameters):
             offset.append((1, 0))
 
     return coffee.Symbol(var.symbol, rank=tuple(rank), offset=tuple(offset))
+
+
+@_expression.register(gem.IndexRenamer)
+def _expression_indexrenamer(expr, parameters):
+    rank = []
+    for src, dst in expr.renames:
+        assert isinstance(src, gem.Index)
+        assert isinstance(dst, gem.Index)
+        rank.append(parameters.index_names[dst])
+    ref = expression(expr.children[0], parameters)
+    assert isinstance(ref, coffee.Symbol)
+    return coffee.Symbol(ref.symbol, rank=tuple(rank))

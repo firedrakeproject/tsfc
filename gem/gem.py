@@ -551,6 +551,21 @@ class FlexiblyIndexed(Scalar):
         self.free_indices = unique(free_indices)
 
 
+class IndexRenamer(Scalar):
+    __slots__ = ('children', 'renames')
+    __back__ = ('renames',)
+
+    def __init__(self, expression, renames):
+        assert set(expression.free_indices) == set(src for src, dst in renames)
+        for src, dst in renames:
+            assert src.extent
+            dst.set_extent(src.extent)
+
+        self.children = (expression,)
+        self.renames = renames
+        self.free_indices = tuple(unique(list(dst for src, dst in renames)))
+
+
 class ComponentTensor(Node):
     __slots__ = ('children', 'multiindex', 'shape')
     __back__ = ('multiindex',)

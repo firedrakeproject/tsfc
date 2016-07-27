@@ -72,6 +72,10 @@ def compile_gem(assignments, prefix_ordering, remove_zeros=False):
                 for index, stride in idxs:
                     if isinstance(index, gem.Index):
                         indices.add(index)
+        elif isinstance(node, gem.IndexRenamer):
+            for src, dst in node.renames:
+                if isinstance(dst, gem.Index):
+                    indices.add(dst)
 
     # Build ordered index map
     index_ordering = make_prefix_ordering(indices, prefix_ordering)
