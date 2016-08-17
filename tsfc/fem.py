@@ -24,7 +24,8 @@ from tsfc import ufl2gem
 from tsfc import geometric
 from tsfc.ufl_utils import (CollectModifiedTerminals,
                             ModifiedTerminalMixin, PickRestriction,
-                            spanning_degree, simplify_abs)
+                            spanning_degree, simplify_abs,
+                            IndexSimplificator)
 
 
 def _tabulate(ufl_element, order, points):
@@ -370,6 +371,9 @@ def translate_coefficient(terminal, mt, params):
 
 def compile_ufl(expression, parameters, interior_facet=False, **kwargs):
     params = Parameters(**kwargs)
+
+    # Index simplification
+    expression = map_expr_dag(IndexSimplificator(), expression)
 
     # Abs-simplification
     expression = simplify_abs(expression)

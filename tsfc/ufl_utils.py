@@ -15,7 +15,8 @@ from ufl.algorithms.apply_geometry_lowering import apply_geometry_lowering
 from ufl.corealg.map_dag import map_expr_dag
 from ufl.corealg.multifunction import MultiFunction
 from ufl.classes import (Abs, Argument, CellOrientation, Coefficient,
-                         ComponentTensor, Expr, FloatValue, Division,
+                         ComponentTensor, Expr, FixedIndex,
+                         FloatValue, Division, Indexed, ListTensor,
                          MixedElement, MultiIndex, Product,
                          ReferenceValue, ScalarValue, Sqrt, Zero,
                          CellVolume, FacetArea)
@@ -367,3 +368,20 @@ def simplify_abs(expression):
     purpose is to "neutralise" CellOrientation nodes that are
     surrounded by absolute values and thus not at all necessary."""
     return MemoizerArg(_simplify_abs)(expression, False)
+
+
+class IndexSimplificator(MultiFunction):
+    """Simplifies indexing into ListTensors with fixed indices."""
+
+    expr = MultiFunction.reuse_if_untouched
+
+    def indexed(self, o, expr, multiindex):
+        indices = list(multiindex)
+        while indices and isinstance(expr, ListTensor) and isinstance(indices[0], FixedIndex):
+            index = indices.pop(0)
+            expr = expr.ufl_operands[int(index)]
+
+        if indices:
+            return Indexed(expr, MultiIndex(tuple(indices)))
+        else:
+            return expr
