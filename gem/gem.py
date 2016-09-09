@@ -30,7 +30,7 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Variable', 'Sum',
            'MaxValue', 'Comparison', 'LogicalNot', 'LogicalAnd',
            'LogicalOr', 'Conditional', 'Index', 'VariableIndex',
            'Indexed', 'ComponentTensor', 'IndexSum', 'ListTensor',
-           'partial_indexed']
+           'partial_indexed', 'reshape']
 
 
 class NodeMeta(type):
@@ -437,6 +437,41 @@ class Indexed(Scalar):
         return self
 
 
+class FlexiblyIndexed(Scalar):
+    __slots__ = ('children', 'dim2idxs')
+    __back__ = ('dim2idxs',)
+
+    def __init__(self, variable, dim2idxs):
+        assert isinstance(variable, Variable)
+        assert len(variable.shape) == len(dim2idxs)
+
+        indices = []
+        for dim, (offset, idxs) in zip(variable.shape, dim2idxs):
+            strides = []
+            for idx in idxs:
+                index, stride = idx
+                strides.append(stride)
+
+                if isinstance(index, Index):
+                    if index.extent is None:
+                        index.set_extent(stride)
+                    elif not (index.extent <= stride):
+                        raise ValueError("Index extent cannot exceed stride")
+                    indices.append(index)
+                elif isinstance(index, int):
+                    if not (index <= stride):
+                        raise ValueError("Index cannot exceed stride")
+                else:
+                    raise ValueError("Unexpected index type for flexible indexing")
+
+            if dim is not None and offset + numpy.prod(strides) > dim:
+                raise ValueError("Offset {0} and indices {1} exceed dimension {2}".format(offset, idxs, dim))
+
+        self.children = (variable,)
+        self.dim2idxs = dim2idxs
+        self.free_indices = tuple(unique(indices))
+
+
 class ComponentTensor(Node):
     __slots__ = ('children', 'multiindex', 'shape')
     __back__ = ('multiindex',)
@@ -564,3 +599,21 @@ def partial_indexed(tensor, indices):
         return Indexed(tensor, indices)
     else:
         raise ValueError("More indices than rank!")
+
+
+def reshape(variable, *shapes):
+    dim2idxs = []
+    indices = []
+    for shape in shapes:
+        idxs = []
+        for e in shape:
+            i = Index()
+            i.set_extent(e)
+            idxs.append((i, e))
+            indices.append(i)
+        dim2idxs.append((0, tuple(idxs)))
+    expr = FlexiblyIndexed(variable, tuple(dim2idxs))
+    if indices:
+        return ComponentTensor(expr, tuple(indices))
+    else:
+        return expr
