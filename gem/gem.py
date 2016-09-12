@@ -479,6 +479,10 @@ class ComponentTensor(Node):
     def __new__(cls, expression, multiindex):
         assert not expression.shape
 
+        # Empty multiindex
+        if not multiindex:
+            return expression
+
         # Collect shape
         shape = tuple(index.extent for index in multiindex)
         assert all(shape)
@@ -613,7 +617,4 @@ def reshape(variable, *shapes):
             indices.append(i)
         dim2idxs.append((0, tuple(idxs)))
     expr = FlexiblyIndexed(variable, tuple(dim2idxs))
-    if indices:
-        return ComponentTensor(expr, tuple(indices))
-    else:
-        return expr
+    return ComponentTensor(expr, tuple(indices))
