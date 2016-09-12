@@ -56,8 +56,7 @@ def compile_gem(return_variables, expressions, prefix_ordering, remove_zeros=Fal
     # Collect indices in a deterministic order
     indices = []
     for node in traversal(expressions):
-        if isinstance(node, gem.Indexed):
-            indices.extend(node.multiindex)
+        indices.extend(node.free_indices)
     # The next two lines remove duplicate elements from the list, but
     # preserve the ordering, i.e. all elements will appear only once,
     # in the order of their first occurance in the original list.
