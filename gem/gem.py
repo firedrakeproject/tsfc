@@ -438,10 +438,27 @@ class Indexed(Scalar):
 
 
 class FlexiblyIndexed(Scalar):
+    """Flexible indexing of :py:class:`Variable`s to implement views and
+    reshapes (splitting dimensions only)."""
+
     __slots__ = ('children', 'dim2idxs')
     __back__ = ('dim2idxs',)
 
     def __init__(self, variable, dim2idxs):
+        """Construct a flexibly indexed node.
+
+        :arg variable: a :py:class:`Variable`
+        :arg dim2idxs: describes the mapping of indices
+
+        For example, if ``variable`` is rank two, and ``dim2idxs`` is
+
+            ((1, ((i, 2), (j, 3), (k, 4))), (0, ()))
+
+        then this corresponds to the indexing:
+
+            variable[1 + i*12 + j*4 + k][0]
+
+        """
         assert isinstance(variable, Variable)
         assert len(variable.shape) == len(dim2idxs)
 
@@ -606,6 +623,11 @@ def partial_indexed(tensor, indices):
 
 
 def reshape(variable, *shapes):
+    """Reshape a variable (splitting indices only).
+
+    :arg variable: a :py:class:`Variable`
+    :arg shapes: one shape tuple for each dimension of the variable.
+    """
     dim2idxs = []
     indices = []
     for shape in shapes:
