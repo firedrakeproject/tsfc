@@ -29,8 +29,8 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Variable', 'Sum',
            'Product', 'Division', 'Power', 'MathFunction', 'MinValue',
            'MaxValue', 'Comparison', 'LogicalNot', 'LogicalAnd',
            'LogicalOr', 'Conditional', 'Index', 'VariableIndex',
-           'Indexed', 'ComponentTensor', 'IndexSum', 'ListTensor',
-           'partial_indexed', 'reshape']
+           'Indexed', 'FlexiblyIndexed', 'ComponentTensor',
+           'IndexSum', 'ListTensor', 'partial_indexed', 'reshape']
 
 
 class NodeMeta(type):
