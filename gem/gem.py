@@ -29,8 +29,10 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Variable', 'Sum',
            'Product', 'Division', 'Power', 'MathFunction', 'MinValue',
            'MaxValue', 'Comparison', 'LogicalNot', 'LogicalAnd',
            'LogicalOr', 'Conditional', 'Index', 'AffineIndex',
-           'VariableIndex', 'Indexed', 'ComponentTensor', 'IndexSum',
-           'ListTensor', 'Delta', 'IndexIterator', 'affine_index_group', 'partial_indexed']
+           'VariableIndex', 'Indexed', 'FlexiblyIndexed',
+           'ComponentTensor', 'IndexSum', 'ListTensor', 'Delta',
+           'IndexIterator', 'affine_index_group', 'partial_indexed',
+           'reshape']
 
 
 class NodeMeta(type):
@@ -452,12 +454,68 @@ class Indexed(Scalar):
         return self
 
 
+class FlexiblyIndexed(Scalar):
+    """Flexible indexing of :py:class:`Variable`s to implement views and
+    reshapes (splitting dimensions only)."""
+
+    __slots__ = ('children', 'dim2idxs')
+    __back__ = ('dim2idxs',)
+
+    def __init__(self, variable, dim2idxs):
+        """Construct a flexibly indexed node.
+
+        :arg variable: a :py:class:`Variable`
+        :arg dim2idxs: describes the mapping of indices
+
+        For example, if ``variable`` is rank two, and ``dim2idxs`` is
+
+            ((1, ((i, 2), (j, 3), (k, 4))), (0, ()))
+
+        then this corresponds to the indexing:
+
+            variable[1 + i*12 + j*4 + k][0]
+
+        """
+        assert isinstance(variable, Variable)
+        assert len(variable.shape) == len(dim2idxs)
+
+        indices = []
+        for dim, (offset, idxs) in zip(variable.shape, dim2idxs):
+            strides = []
+            for idx in idxs:
+                index, stride = idx
+                strides.append(stride)
+
+                if isinstance(index, Index):
+                    if index.extent is None:
+                        index.set_extent(stride)
+                    elif not (index.extent <= stride):
+                        raise ValueError("Index extent cannot exceed stride")
+                    indices.append(index)
+                elif isinstance(index, int):
+                    if not (index <= stride):
+                        raise ValueError("Index cannot exceed stride")
+                else:
+                    raise ValueError("Unexpected index type for flexible indexing")
+
+            if dim is not None and offset + numpy.prod(strides) > dim:
+                raise ValueError("Offset {0} and indices {1} exceed dimension {2}".format(offset, idxs, dim))
+
+        self.children = (variable,)
+        self.dim2idxs = dim2idxs
+        self.free_indices = tuple(unique(indices))
+
+
 class ComponentTensor(Node):
     __slots__ = ('children', 'multiindex', 'shape')
     __back__ = ('multiindex',)
 
     def __new__(cls, expression, multiindex):
         assert not expression.shape
+
+        # Empty multiindex
+        if not multiindex:
+            return expression
 
         # Collect shape
         shape = tuple(index.extent for index in multiindex)
@@ -653,3 +711,23 @@ def partial_indexed(tensor, indices):
         return Indexed(tensor, indices)
     else:
         raise ValueError("More indices than rank!")
+
+
+def reshape(variable, *shapes):
+    """Reshape a variable (splitting indices only).
+
+    :arg variable: a :py:class:`Variable`
+    :arg shapes: one shape tuple for each dimension of the variable.
+    """
+    dim2idxs = []
+    indices = []
+    for shape in shapes:
+        idxs = []
+        for e in shape:
+            i = Index()
+            i.set_extent(e)
+            idxs.append((i, e))
+            indices.append(i)
+        dim2idxs.append((0, tuple(idxs)))
+    expr = FlexiblyIndexed(variable, tuple(dim2idxs))
+    return ComponentTensor(expr, tuple(indices))

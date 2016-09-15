@@ -6,9 +6,10 @@ from __future__ import absolute_import
 from singledispatch import singledispatch
 
 from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
-from gem.gem import (Node, Identity, Literal, Zero, Sum, Comparison,
-                     Conditional, Index, VariableIndex, Indexed,
-                     IndexSum, ComponentTensor, Delta)
+from gem.gem import (Node, Terminal, Identity, Literal, Zero, Sum,
+                     Comparison, Conditional, Index, VariableIndex,
+                     Indexed, FlexiblyIndexed, IndexSum,
+                     ComponentTensor, Delta)
 
 
 @singledispatch
@@ -26,8 +27,8 @@ def replace_indices(node, self, subst):
 replace_indices.register(Node)(reuse_if_untouched_arg)
 
 
-@replace_indices.register(Indexed)  # noqa
-def _(node, self, subst):
+@replace_indices.register(Indexed)
+def replace_indices_indexed(node, self, subst):
     child, = node.children
     substitute = dict(subst)
     multiindex = tuple(substitute.get(i, i) for i in node.multiindex)
@@ -43,6 +44,24 @@ def _(node, self, subst):
             return node
         else:
             return Indexed(new_child, multiindex)
+
+
+@replace_indices.register(FlexiblyIndexed)
+def replace_indices_flexiblyindexed(node, self, subst):
+    child, = node.children
+    assert isinstance(child, Terminal)
+    assert not child.free_indices
+
+    substitute = dict(subst)
+    dim2idxs = tuple(
+        (offset, tuple((substitute.get(i, i), s) for i, s in idxs))
+        for offset, idxs in node.dim2idxs
+    )
+
+    if dim2idxs == node.dim2idxs:
+        return node
+    else:
+        return FlexiblyIndexed(child, dim2idxs)
 
 
 def filtered_replace_indices(node, self, subst):
