@@ -3,8 +3,7 @@ from __future__ import absolute_import
 import collections
 import time
 
-from ufl.classes import Form, CellVolume, FacetArea
-from ufl.algorithms import compute_form_data
+from ufl.classes import Form
 from ufl.log import GREEN
 
 import gem
@@ -15,7 +14,7 @@ from tsfc import fem, ufl_utils
 from tsfc.coffee import generate as generate_coffee
 from tsfc.constants import default_parameters
 from tsfc.fiatinterface import QuadratureRule, as_fiat_cell, create_quadrature
-from tsfc.kernel_interface import KernelBuilder, needs_cell_orientations
+from tsfc.kernel_interface import KernelBuilder
 from tsfc.logging import logger
 
 
@@ -38,13 +37,7 @@ def compile_form(form, prefix="form", parameters=None):
         _.update(parameters)
         parameters = _
 
-    fd = compute_form_data(form,
-                           do_apply_function_pullbacks=True,
-                           do_apply_integral_scaling=True,
-                           do_apply_geometry_lowering=True,
-                           do_apply_restrictions=True,
-                           preserve_geometry_types=(CellVolume, FacetArea),
-                           do_estimate_degrees=True)
+    fd = ufl_utils.compute_form_data(form)
     logger.info(GREEN % "compute_form_data finished in %g seconds.", time.time() - cpu_time)
 
     kernels = []
@@ -60,21 +53,17 @@ def compile_form(form, prefix="form", parameters=None):
     return kernels
 
 
-def compile_integral(integral_data, form_data, prefix, parameters):
+def compile_integral(integral_data, form_data, prefix, parameters,
+                     backend="pyop2"):
     """Compiles a UFL integral into an assembly kernel.
 
     :arg integral_data: UFL integral data
     :arg form_data: UFL form data
     :arg prefix: kernel name will start with this string
     :arg parameters: parameters object
+    :arg backend: output format
     :returns: a kernel, or None if the integral simplifies to zero
     """
-    # Remove these here, they're handled below.
-    if parameters.get("quadrature_degree") == "auto":
-        del parameters["quadrature_degree"]
-    if parameters.get("quadrature_rule") == "auto":
-        del parameters["quadrature_rule"]
-
     integral_type = integral_data.integral_type
     interior_facet = integral_type.startswith("interior_facet")
     mesh = integral_data.domain
@@ -89,7 +78,7 @@ def compile_integral(integral_data, form_data, prefix, parameters):
 
     # Dict mapping domains to index in original_form.ufl_domains()
     domain_numbering = form_data.original_form.domain_numbering()
-    builder = KernelBuilder(integral_type, integral_data.subdomain_id,
+    builder = KernelBuilder(backend, integral_type, integral_data.subdomain_id,
                             domain_numbering[integral_data.domain])
     return_variables = builder.set_arguments(arguments, argument_indices)
 
@@ -97,12 +86,15 @@ def compile_integral(integral_data, form_data, prefix, parameters):
     if ufl_utils.is_element_affine(mesh.ufl_coordinate_element()):
         # For affine mesh geometries we prefer code generation that
         # composes well with optimisations.
-        builder.set_coordinates(coordinates, "coords", mode='list_tensor')
+        builder.set_coordinates(coordinates, mode='list_tensor')
     else:
         # Otherwise we use the approach that might be faster (?)
-        builder.set_coordinates(coordinates, "coords")
+        builder.set_coordinates(coordinates)
 
     builder.set_coefficients(integral_data, form_data)
+
+    builder.set_cell_orientations()
+    builder.set_facets()
 
     # Map from UFL FiniteElement objects to Index instances.  This is
     # so we reuse Index instances when evaluating the same coefficient
@@ -115,12 +107,7 @@ def compile_integral(integral_data, form_data, prefix, parameters):
     def cellvolume(restriction):
         from ufl import dx
         form = 1 * dx(domain=mesh)
-        fd = compute_form_data(form,
-                               do_apply_function_pullbacks=True,
-                               do_apply_integral_scaling=True,
-                               do_apply_geometry_lowering=True,
-                               do_apply_restrictions=True,
-                               do_estimate_degrees=True)
+        fd = ufl_utils.compute_form_data(form, preserve_geometry_types=())
         itg_data, = fd.integral_data
         integral, = itg_data.integrals
 
@@ -143,7 +130,7 @@ def compile_integral(integral_data, form_data, prefix, parameters):
                              point_index=quadrature_index,
                              coefficient=coefficient,
                              index_cache=index_cache)
-        if parameters["unroll_indexsum"]:
+        if parameters.get("unroll_indexsum"):
             ir = opt.unroll_indexsum(ir, max_extent=parameters["unroll_indexsum"])
         expr, = ir
         if quadrature_index in expr.free_indices:
@@ -155,12 +142,7 @@ def compile_integral(integral_data, form_data, prefix, parameters):
         from ufl import Measure
         assert integral_type != 'cell'
         form = 1 * Measure(integral_type, domain=mesh)
-        fd = compute_form_data(form,
-                               do_apply_function_pullbacks=True,
-                               do_apply_integral_scaling=True,
-                               do_apply_geometry_lowering=True,
-                               do_apply_restrictions=True,
-                               do_estimate_degrees=True)
+        fd = ufl_utils.compute_form_data(form, preserve_geometry_types=())
         itg_data, = fd.integral_data
         integral, = itg_data.integrals
 
@@ -179,7 +161,7 @@ def compile_integral(integral_data, form_data, prefix, parameters):
                              coefficient=builder.coefficient,
                              facet_number=builder.facet_number,
                              index_cache=index_cache)
-        if parameters["unroll_indexsum"]:
+        if parameters.get("unroll_indexsum"):
             ir = opt.unroll_indexsum(ir, max_extent=parameters["unroll_indexsum"])
         expr, = ir
         if quadrature_index in expr.free_indices:
@@ -196,12 +178,13 @@ def compile_integral(integral_data, form_data, prefix, parameters):
 
         # Check if the integral has a quad degree attached, otherwise use
         # the estimated polynomial degree attached by compute_form_data
-        quadrature_degree = params.get("quadrature_degree",
-                                       params["estimated_polynomial_degree"])
+        quad_degree = params.get("quadrature_degree")
+        if quad_degree in [None, "auto", "default", -1, "-1"]:
+            quad_degree = params["estimated_polynomial_degree"]
         integration_cell = fiat_cell.construct_subelement(integration_dim)
-        quad_rule = params.get("quadrature_rule",
-                               create_quadrature(integration_cell,
-                                                 quadrature_degree))
+        quad_rule = params.get("quadrature_rule")
+        if quad_rule in [None, "auto", "default"]:
+            quad_rule = create_quadrature(integration_cell, quad_degree)
 
         if not isinstance(quad_rule, QuadratureRule):
             raise ValueError("Expected to find a QuadratureRule object, not a %s" %
@@ -225,7 +208,7 @@ def compile_integral(integral_data, form_data, prefix, parameters):
                              index_cache=index_cache,
                              cellvolume=cellvolume,
                              facetarea=facetarea)
-        if parameters["unroll_indexsum"]:
+        if parameters.get("unroll_indexsum"):
             ir = opt.unroll_indexsum(ir, max_extent=parameters["unroll_indexsum"])
         irs.append([(gem.IndexSum(expr, quadrature_index)
                      if quadrature_index in expr.free_indices
@@ -239,7 +222,7 @@ def compile_integral(integral_data, form_data, prefix, parameters):
     ir = opt.remove_componenttensors(ir)
 
     # Look for cell orientations in the IR
-    if needs_cell_orientations(ir):
+    if builder.needs_cell_orientations(ir):
         builder.require_cell_orientations()
 
     impero_c = impero_utils.compile_gem(return_variables, ir,
