@@ -532,7 +532,7 @@ class ComponentTensor(Node):
 
         # Collect free indices
         assert set(multiindex) <= set(expression.free_indices)
-        self.free_indices = tuple(set(expression.free_indices) - set(multiindex))
+        self.free_indices = tuple(unique(list(set(expression.free_indices) - set(multiindex))))
 
         return self
 
@@ -557,7 +557,7 @@ class IndexSum(Scalar):
 
         # Collect shape and free indices
         assert index in summand.free_indices
-        self.free_indices = tuple(set(summand.free_indices) - {index})
+        self.free_indices = tuple(unique(list(set(summand.free_indices) - {index})))
 
         return self
 
