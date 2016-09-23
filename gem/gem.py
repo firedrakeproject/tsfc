@@ -15,12 +15,14 @@ indices.
 """
 
 from __future__ import absolute_import, print_function, division
+from six import with_metaclass
 
 from abc import ABCMeta
 from itertools import chain
+from operator import attrgetter
+
 import numpy
 from numpy import asarray, unique
-from operator import attrgetter
 
 from gem.node import Node as NodeBase
 
@@ -52,10 +54,8 @@ class NodeMeta(type):
         return obj
 
 
-class Node(NodeBase):
+class Node(with_metaclass(NodeMeta, NodeBase)):
     """Abstract GEM node class."""
-
-    __metaclass__ = NodeMeta
 
     __slots__ = ('free_indices')
 
@@ -339,10 +339,9 @@ class Conditional(Node):
         self.shape = then.shape
 
 
-class IndexBase(object):
+class IndexBase(with_metaclass(ABCMeta)):
     """Abstract base class for indices."""
-
-    __metaclass__ = ABCMeta
+    pass
 
 IndexBase.register(int)
 
