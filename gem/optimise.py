@@ -1,8 +1,9 @@
 """A set of routines implementing various transformations on GEM
 expressions."""
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
+from functools import reduce
 from singledispatch import singledispatch
 
 from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg

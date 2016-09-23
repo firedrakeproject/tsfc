@@ -1,7 +1,7 @@
 """Schedules operations to evaluate a multi-root expression DAG,
 forming an ordered list of Impero terminals."""
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import collections
 import functools

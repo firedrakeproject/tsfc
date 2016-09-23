@@ -1,7 +1,7 @@
 """
 An interpreter for GEM trees.
 """
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import numpy
 import operator

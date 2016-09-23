@@ -6,7 +6,7 @@ What this module does is independent of whether we eventually generate
 C code or a COFFEE AST.
 """
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import collections
 import itertools
