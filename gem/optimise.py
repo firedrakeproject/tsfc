@@ -2,6 +2,7 @@
 expressions."""
 
 from __future__ import absolute_import, print_function, division
+from six.moves import map
 
 from functools import reduce
 from singledispatch import singledispatch
@@ -112,4 +113,4 @@ def unroll_indexsum(expressions, max_extent):
     """
     mapper = Memoizer(_unroll_indexsum)
     mapper.max_extent = max_extent
-    return map(mapper, expressions)
+    return list(map(mapper, expressions))

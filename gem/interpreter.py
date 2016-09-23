@@ -2,6 +2,7 @@
 An interpreter for GEM trees.
 """
 from __future__ import absolute_import, print_function, division
+from six.moves import map
 
 import numpy
 import operator
@@ -302,4 +303,4 @@ def evaluate(expressions, bindings=None):
         exprs = (expressions, )
     mapper = node.Memoizer(_evaluate)
     mapper.bindings = bindings if bindings is not None else {}
-    return map(mapper, exprs)
+    return list(map(mapper, exprs))

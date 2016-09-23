@@ -2,6 +2,7 @@
 expression DAG languages."""
 
 from __future__ import absolute_import, print_function, division
+from six.moves import map
 
 import collections
 
@@ -201,7 +202,7 @@ class MemoizerArg(object):
 
 def reuse_if_untouched(node, self):
     """Reuse if untouched recipe"""
-    new_children = map(self, node.children)
+    new_children = list(map(self, node.children))
     if all(nc == c for nc, c in zip(new_children, node.children)):
         return node
     else:

@@ -7,6 +7,7 @@ C code or a COFFEE AST.
 """
 
 from __future__ import absolute_import, print_function, division
+from six.moves import zip
 
 import collections
 import itertools
@@ -75,7 +76,7 @@ def compile_gem(return_variables, expressions, prefix_ordering, remove_zeros=Fal
     get_indices = lambda expr: apply_ordering(expr.free_indices)
 
     # Build operation ordering
-    ops = scheduling.emit_operations(zip(return_variables, expressions), get_indices)
+    ops = scheduling.emit_operations(list(zip(return_variables, expressions)), get_indices)
 
     # Empty kernel
     if len(ops) == 0:
@@ -177,7 +178,7 @@ def make_loop_tree(ops, get_indices, level=0):
         else:
             statements.extend(op_group)
     # Remove no-op terminals from the tree
-    statements = filter(lambda s: not isinstance(s, imp.Noop), statements)
+    statements = [s for s in statements if not isinstance(s, imp.Noop)]
     return imp.Block(statements)
 
 
