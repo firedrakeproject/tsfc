@@ -22,7 +22,7 @@ from itertools import chain
 from operator import attrgetter
 
 import numpy
-from numpy import asarray, unique
+from numpy import asarray
 
 from gem.node import Node as NodeBase
 
@@ -48,8 +48,8 @@ class NodeMeta(type):
 
         # Set free_indices if not set already
         if not hasattr(obj, 'free_indices'):
-            cfi = list(chain(*[c.free_indices for c in obj.children]))
-            obj.free_indices = tuple(unique(cfi))
+            obj.free_indices = unique(chain(*[c.free_indices
+                                              for c in obj.children]))
 
         return obj
 
@@ -431,7 +431,7 @@ class Indexed(Scalar):
         self.multiindex = multiindex
 
         new_indices = tuple(i for i in multiindex if isinstance(i, Index))
-        self.free_indices = tuple(unique(aggregate.free_indices + new_indices))
+        self.free_indices = unique(aggregate.free_indices + new_indices)
 
         return self
 
@@ -485,7 +485,7 @@ class FlexiblyIndexed(Scalar):
 
         self.children = (variable,)
         self.dim2idxs = dim2idxs
-        self.free_indices = tuple(unique(indices))
+        self.free_indices = unique(indices)
 
 
 class ComponentTensor(Node):
@@ -514,7 +514,7 @@ class ComponentTensor(Node):
 
         # Collect free indices
         assert set(multiindex) <= set(expression.free_indices)
-        self.free_indices = tuple(unique(list(set(expression.free_indices) - set(multiindex))))
+        self.free_indices = unique(set(expression.free_indices) - set(multiindex))
 
         return self
 
@@ -539,7 +539,7 @@ class IndexSum(Scalar):
 
         # Collect shape and free indices
         assert index in summand.free_indices
-        self.free_indices = tuple(unique(list(set(summand.free_indices) - {index})))
+        self.free_indices = unique(set(summand.free_indices) - {index})
 
         return self
 
@@ -596,6 +596,15 @@ class ListTensor(Node):
 
     def get_hash(self):
         return hash((type(self), self.shape, self.children))
+
+
+def unique(indices):
+    """Sorts free indices and eliminates duplicates.
+
+    :arg indices: iterable of indices
+    :returns: sorted tuple of unique free indices
+    """
+    return tuple(sorted(set(indices), key=id))
 
 
 def partial_indexed(tensor, indices):
