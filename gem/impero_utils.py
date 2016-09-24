@@ -58,11 +58,14 @@ def compile_gem(return_variables, expressions, prefix_ordering, remove_zeros=Fal
     indices = []
     for node in traversal(expressions):
         if isinstance(node, gem.Indexed):
-            indices.extend(node.multiindex)
+            for index in node.multiindex:
+                if isinstance(index, gem.Index):
+                    indices.append(index)
         elif isinstance(node, gem.FlexiblyIndexed):
             for offset, idxs in node.dim2idxs:
                 for index, stride in idxs:
-                    indices.append(index)
+                    if isinstance(index, gem.Index):
+                        indices.append(index)
     # The next two lines remove duplicate elements from the list, but
     # preserve the ordering, i.e. all elements will appear only once,
     # in the order of their first occurance in the original list.

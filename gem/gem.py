@@ -378,6 +378,10 @@ class Index(IndexBase):
             return "Index(%r)" % self.count
         return "Index(%r)" % self.name
 
+    def __lt__(self, other):
+        # Allow sorting of free indices in Python 3
+        return id(self) < id(other)
+
 
 class VariableIndex(IndexBase):
     """An index that is constant during a single execution of the
