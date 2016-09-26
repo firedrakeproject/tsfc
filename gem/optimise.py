@@ -9,7 +9,8 @@ from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouch
 from gem.gem import (Node, Terminal, Identity, Literal, Zero, Sum,
                      Comparison, Conditional, Index, VariableIndex,
                      Indexed, FlexiblyIndexed, IndexSum,
-                     ComponentTensor, Delta)
+                     ComponentTensor, ListTensor, Delta,
+                     partial_indexed)
 
 
 @singledispatch
@@ -25,6 +26,17 @@ def replace_indices(node, self, subst):
     raise AssertionError("cannot handle type %s" % type(node))
 
 replace_indices.register(Node)(reuse_if_untouched_arg)
+
+
+@replace_indices.register(Delta)
+def replace_indices_delta(node, self, subst):
+    substitute = dict(subst)
+    i = substitute.get(node.i, node.i)
+    j = substitute.get(node.j, node.j)
+    if i == node.i and j == node.j:
+        return node
+    else:
+        return Delta(i, j)
 
 
 @replace_indices.register(Indexed)
@@ -75,6 +87,65 @@ def remove_componenttensors(expressions):
     """Removes all ComponentTensors in multi-root expression DAG."""
     mapper = MemoizerArg(filtered_replace_indices)
     return [mapper(expression, ()) for expression in expressions]
+
+
+def _select_expression(expressions, index):
+    """Helper function to select an expression from a list of
+    expressions with an index.  This function expect sanitised input,
+    one should normally call :py:func:`select_expression` instead.
+
+    :arg expressions: a list of expressions
+    :arg index: an index (free, fixed or variable)
+    :returns: an expression
+    """
+    expr = expressions[0]
+    if all(e == expr for e in expressions):
+        return expr
+
+    cls = type(expr)
+    if all(type(e) == cls for e in expressions):
+        if not cls.__front__ and not cls.__back__:
+            assert all(len(e.children) == len(expr.children) for e in expressions)
+            assert len(expr.children) > 0
+
+            return cls(*[_select_expression(nth_children, index)
+                         for nth_children in zip(*[e.children
+                                                   for e in expressions])])
+        elif issubclass(cls, Indexed):
+            assert all(e.multiindex == expr.multiindex for e in expressions)
+            return Indexed(_select_expression([e.children[0]
+                                               for e in expressions], index), expr.multiindex)
+        elif issubclass(cls, Literal):
+            return partial_indexed(ListTensor(expressions), (index,))
+        else:
+            assert False
+    else:
+        assert False
+
+
+def select_expression(expressions, index):
+    """Select an expression from a list of expressions with an index.
+    Semantically equivalent to
+
+        partial_indexed(ListTensor(expressions), (index,))
+
+    but has a much more optimised implementation.
+
+    :arg expressions: a list of expressions of the same shape
+    :arg index: an index (free, fixed or variable)
+    :returns: an expression of the same shape as the given expressions
+    """
+    # Check arguments
+    shape = expressions[0].shape
+    assert all(e.shape == shape for e in expressions)
+
+    # Sanitise input expressions
+    alpha = tuple(Index() for s in shape)
+    exprs = remove_componenttensors([Indexed(e, alpha) for e in expressions])
+
+    # Factor the expressions recursively and convert result
+    selected = _select_expression(exprs, index)
+    return ComponentTensor(selected, alpha)
 
 
 @singledispatch
