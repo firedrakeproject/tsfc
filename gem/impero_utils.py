@@ -6,7 +6,8 @@ What this module does is independent of whether we eventually generate
 C code or a COFFEE AST.
 """
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
+from six.moves import zip
 
 import collections
 import itertools
@@ -58,11 +59,14 @@ def compile_gem(return_variables, expressions, prefix_ordering, remove_zeros=Fal
     indices = []
     for node in traversal(expressions):
         if isinstance(node, gem.Indexed):
-            indices.extend(node.multiindex)
+            for index in node.multiindex:
+                if isinstance(index, gem.Index):
+                    indices.append(index)
         elif isinstance(node, gem.FlexiblyIndexed):
             for offset, idxs in node.dim2idxs:
                 for index, stride in idxs:
-                    indices.append(index)
+                    if isinstance(index, gem.Index):
+                        indices.append(index)
     # The next two lines remove duplicate elements from the list, but
     # preserve the ordering, i.e. all elements will appear only once,
     # in the order of their first occurance in the original list.
@@ -76,7 +80,7 @@ def compile_gem(return_variables, expressions, prefix_ordering, remove_zeros=Fal
     get_indices = lambda expr: apply_ordering(expr.free_indices)
 
     # Build operation ordering
-    ops = scheduling.emit_operations(zip(return_variables, expressions), get_indices)
+    ops = scheduling.emit_operations(list(zip(return_variables, expressions)), get_indices)
 
     # Empty kernel
     if len(ops) == 0:
@@ -178,7 +182,7 @@ def make_loop_tree(ops, get_indices, level=0):
         else:
             statements.extend(op_group)
     # Remove no-op terminals from the tree
-    statements = filter(lambda s: not isinstance(s, imp.Noop), statements)
+    statements = [s for s in statements if not isinstance(s, imp.Noop)]
     return imp.Block(statements)
 
 

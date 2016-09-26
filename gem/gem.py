@@ -14,13 +14,15 @@ the Index objects in GEM, not on all the nodes that have those free
 indices.
 """
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
+from six import with_metaclass
 
 from abc import ABCMeta
 from itertools import chain
-import numpy
-from numpy import asarray, unique
 from operator import attrgetter
+
+import numpy
+from numpy import asarray
 
 from gem.node import Node as NodeBase
 
@@ -48,16 +50,14 @@ class NodeMeta(type):
 
         # Set free_indices if not set already
         if not hasattr(obj, 'free_indices'):
-            cfi = list(chain(*[c.free_indices for c in obj.children]))
-            obj.free_indices = tuple(unique(cfi))
+            obj.free_indices = unique(chain(*[c.free_indices
+                                              for c in obj.children]))
 
         return obj
 
 
-class Node(NodeBase):
+class Node(with_metaclass(NodeMeta, NodeBase)):
     """Abstract GEM node class."""
-
-    __metaclass__ = NodeMeta
 
     __slots__ = ('free_indices')
 
@@ -341,10 +341,9 @@ class Conditional(Node):
         self.shape = then.shape
 
 
-class IndexBase(object):
+class IndexBase(with_metaclass(ABCMeta)):
     """Abstract base class for indices."""
-
-    __metaclass__ = ABCMeta
+    pass
 
 IndexBase.register(int)
 
@@ -379,6 +378,10 @@ class Index(IndexBase):
         if self.name is None:
             return "Index(%r)" % self.count
         return "Index(%r)" % self.name
+
+    def __lt__(self, other):
+        # Allow sorting of free indices in Python 3
+        return id(self) < id(other)
 
 
 class AffineIndex(Index):
@@ -449,7 +452,7 @@ class Indexed(Scalar):
         self.multiindex = multiindex
 
         new_indices = tuple(i for i in multiindex if isinstance(i, Index))
-        self.free_indices = tuple(unique(aggregate.free_indices + new_indices))
+        self.free_indices = unique(aggregate.free_indices + new_indices)
 
         return self
 
@@ -503,7 +506,7 @@ class FlexiblyIndexed(Scalar):
 
         self.children = (variable,)
         self.dim2idxs = dim2idxs
-        self.free_indices = tuple(unique(indices))
+        self.free_indices = unique(indices)
 
 
 class ComponentTensor(Node):
@@ -532,7 +535,7 @@ class ComponentTensor(Node):
 
         # Collect free indices
         assert set(multiindex) <= set(expression.free_indices)
-        self.free_indices = tuple(unique(list(set(expression.free_indices) - set(multiindex))))
+        self.free_indices = unique(set(expression.free_indices) - set(multiindex))
 
         return self
 
@@ -557,7 +560,7 @@ class IndexSum(Scalar):
 
         # Collect shape and free indices
         assert index in summand.free_indices
-        self.free_indices = tuple(unique(list(set(summand.free_indices) - {index})))
+        self.free_indices = unique(set(summand.free_indices) - {index})
 
         return self
 
@@ -688,6 +691,15 @@ def affine_index_group(n, extent):
         g.group = group
 
     return group
+
+
+def unique(indices):
+    """Sorts free indices and eliminates duplicates.
+
+    :arg indices: iterable of indices
+    :returns: sorted tuple of unique free indices
+    """
+    return tuple(sorted(set(indices), key=id))
 
 
 def partial_indexed(tensor, indices):
