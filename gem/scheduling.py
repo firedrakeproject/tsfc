@@ -1,7 +1,7 @@
 """Schedules operations to evaluate a multi-root expression DAG,
 forming an ordered list of Impero terminals."""
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
 
 import collections
 import functools
@@ -117,7 +117,7 @@ def handle(ops, push, decref, node):
             ops.append(impero.Evaluate(node))
     elif isinstance(node, gem.Zero):  # should rarely happen
         assert not node.shape
-    elif isinstance(node, gem.Indexed):
+    elif isinstance(node, (gem.Indexed, gem.FlexiblyIndexed)):
         # Indexing always inlined
         decref(node.children[0])
     elif isinstance(node, gem.IndexSum):

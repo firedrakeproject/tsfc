@@ -10,7 +10,8 @@ Trivia:
    (Command?) after clicking on them.
 """
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, division
+from six import with_metaclass
 
 from abc import ABCMeta, abstractmethod
 
@@ -23,10 +24,8 @@ class Node(NodeBase):
     __slots__ = ()
 
 
-class Terminal(Node):
+class Terminal(with_metaclass(ABCMeta, Node)):
     """Abstract class for terminal Impero nodes"""
-
-    __metaclass__ = ABCMeta
 
     __slots__ = ()
 

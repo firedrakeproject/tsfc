@@ -20,11 +20,12 @@
 
 """Definitions of 'modified terminals', a core concept in uflacs."""
 
-from __future__ import print_function  # used in some debugging
+from __future__ import absolute_import, print_function, division
 
 from ufl.classes import (ReferenceValue, ReferenceGrad,
                          NegativeRestricted, PositiveRestricted,
-                         Restricted, FacetAvg, CellAvg)
+                         Restricted, FacetAvg, CellAvg,
+                         ConstantValue)
 
 
 class ModifiedTerminal(object):
@@ -180,9 +181,11 @@ def construct_modified_terminal(mt, terminal):
     elif mt.averaged == "facet":
         expr = FacetAvg(expr)
 
-    if mt.restriction == '+':
-        expr = PositiveRestricted(expr)
-    elif mt.restriction == '-':
-        expr = NegativeRestricted(expr)
+    # No need to apply restrictions to ConstantValue terminals
+    if not isinstance(expr, ConstantValue):
+        if mt.restriction == '+':
+            expr = PositiveRestricted(expr)
+        elif mt.restriction == '-':
+            expr = NegativeRestricted(expr)
 
     return expr
