@@ -198,22 +198,62 @@ def map_comparison(node, ctx):
         ctx.rec_gem(right, node))
 
 
-@expr_to_loopy.register(g.Indexed)
-def map_indexed(node, ctx):
-    c, = node.children
+def index_aggregate_to_name(c, ctx):
     if isinstance(c, g.Variable):
-        name = ctx.variable_to_name(c)
+        return ctx.variable_to_name(c)
 
     elif isinstance(c, g.Literal):
-        name = ctx.literal_to_name(c)
+        return ctx.literal_to_name(c)
 
     else:
         raise NotImplementedError(
             "indexing into %s" % type(c).__name__)
 
+
+@expr_to_loopy.register(g.Indexed)
+def map_indexed(node, ctx):
+    c, = node.children
+
     return p.Subscript(
-        p.Variable(name),
+        p.Variable(index_aggregate_to_name(c, ctx)),
         tuple(index_to_loopy(i, ctx) for i in node.multiindex))
+
+
+def cumulative_strides(strides):
+    """Calculate cumulative strides from per-dimension capacities.
+
+    For example:
+
+        [2, 3, 4] ==> [12, 4, 1]
+
+    """
+    temp = np.flipud(np.cumprod(np.flipud(list(strides)[1:])))
+    return tuple(temp) + (1,)
+
+
+@expr_to_loopy.register(g.FlexiblyIndexed)
+def map_flexibly_indexed(node, ctx):
+    c, = node.children
+
+    def flex_idx_to_loopy(f):
+        off, idxs = f
+        if idxs:
+            indices, strides = zip(*idxs)
+            strides = cumulative_strides(strides)
+        else:
+            indices = ()
+            strides = ()
+
+        result = f[0]
+
+        for i, s in zip(indices, strides):
+            result += index_to_loopy(i, ctx)*index_to_loopy(s, ctx)
+
+        return result
+
+    return p.Subscript(
+        p.Variable(index_aggregate_to_name(c, ctx)),
+        tuple(flex_idx_to_loopy(i) for i in node.dim2idxs))
 
 
 @expr_to_loopy.register(g.IndexSum)
