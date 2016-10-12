@@ -94,12 +94,12 @@ class Scalar(Node):
 class Failure(Terminal):
     """Abstract class for failure GEM nodes."""
 
-    __slots__ = ('shape', 'exc_info')
-    __front__ = ('shape', 'exc_info')
+    __slots__ = ('shape', 'exception')
+    __front__ = ('shape', 'exception')
 
-    def __init__(self, shape, exc_info):
+    def __init__(self, shape, exception):
         self.shape = shape
-        self.exc_info = exc_info
+        self.exception = exception
 
 
 class Constant(Terminal):
@@ -125,6 +125,10 @@ class Zero(Constant):
     def value(self):
         assert not self.shape
         return 0.0
+
+    @property
+    def array(self):
+        return numpy.zeros(self.shape)
 
 
 class Identity(Constant):
