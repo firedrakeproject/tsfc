@@ -22,6 +22,22 @@ class cached_property(object):
         return result
 
 
+class unset_attribute(object):
+    """Decorator for listing and documenting instance attributes without
+    setting a default value."""
+
+    def __init__(self, f):
+        """Initialise this property.
+
+        :arg f: dummy method
+        """
+        self.__doc__ = f.__doc__
+        self.__name__ = f.__name__
+
+    def __get__(self, obj, cls):
+        raise AttributeError("'{0}' object has no attribute '{1}'".format(cls.__name__, self.__name__))
+
+
 class OrderedSet(collections.MutableSet):
     """A set that preserves ordering, useful for deterministic code
     generation."""
@@ -56,3 +72,26 @@ class OrderedSet(collections.MutableSet):
         if value in self._set:
             self._list.remove(value)
             self._set.discard(value)
+
+
+def make_proxy_class(name, cls):
+    """Constructs a proxy class for a given class.  Instance attributes
+    are supposed to be listed e.g. with the unset_attribute decorator,
+    so that this function find them and create wrappers for them.
+
+    :arg name: name of the new proxy class
+    :arg cls: the wrapee class to create a proxy for
+    """
+    def __init__(self, wrapee):
+        self._wrapee = wrapee
+
+    def make_proxy_property(name):
+        def getter(self):
+            return getattr(self._wrapee, name)
+        return property(getter)
+
+    dct = {'__init__': __init__}
+    for attr in dir(cls):
+        if not attr.startswith('_'):
+            dct[attr] = make_proxy_property(attr)
+    return type(name, (), dct)
