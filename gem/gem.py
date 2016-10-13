@@ -344,6 +344,7 @@ class IndexBase(with_metaclass(ABCMeta)):
     pass
 
 IndexBase.register(int)
+IndexBase.register(numpy.integer)
 
 
 class Index(IndexBase):
