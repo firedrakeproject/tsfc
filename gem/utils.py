@@ -22,22 +22,6 @@ class cached_property(object):
         return result
 
 
-class unset_attribute(object):
-    """Decorator for listing and documenting instance attributes without
-    setting a default value."""
-
-    def __init__(self, f):
-        """Initialise this property.
-
-        :arg f: dummy method
-        """
-        self.__doc__ = f.__doc__
-        self.__name__ = f.__name__
-
-    def __get__(self, obj, cls):
-        raise AttributeError("'{0}' object has no attribute '{1}'".format(cls.__name__, self.__name__))
-
-
 class OrderedSet(collections.MutableSet):
     """A set that preserves ordering, useful for deterministic code
     generation."""
