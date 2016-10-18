@@ -12,10 +12,10 @@ from six.moves import zip
 import collections
 import itertools
 
-import numpy
 from singledispatch import singledispatch
 
 from gem.node import traversal, collect_refcount
+from gem.utils import OrderedSet
 from gem import gem, impero as imp, optimise, scheduling
 
 
@@ -55,22 +55,17 @@ def compile_gem(return_variables, expressions, prefix_ordering, remove_zeros=Fal
         return_variables, expressions = rv, es
 
     # Collect indices in a deterministic order
-    indices = []
+    indices = OrderedSet()
     for node in traversal(expressions):
         if isinstance(node, gem.Indexed):
             for index in node.multiindex:
                 if isinstance(index, gem.Index):
-                    indices.append(index)
+                    indices.add(index)
         elif isinstance(node, gem.FlexiblyIndexed):
             for offset, idxs in node.dim2idxs:
                 for index, stride in idxs:
                     if isinstance(index, gem.Index):
-                        indices.append(index)
-    # The next two lines remove duplicate elements from the list, but
-    # preserve the ordering, i.e. all elements will appear only once,
-    # in the order of their first occurance in the original list.
-    _, unique_indices = numpy.unique(indices, return_index=True)
-    indices = numpy.asarray(indices)[numpy.sort(unique_indices)]
+                        indices.add(index)
 
     # Build ordered index map
     index_ordering = make_prefix_ordering(indices, prefix_ordering)
