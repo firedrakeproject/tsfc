@@ -33,8 +33,8 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Variable', 'Sum',
            'LogicalOr', 'Conditional', 'Index', 'AffineIndex',
            'VariableIndex', 'Indexed', 'FlexiblyIndexed',
            'ComponentTensor', 'IndexSum', 'ListTensor', 'Delta',
-           'IndexIterator', 'affine_index_group', 'partial_indexed',
-           'reshape']
+           'IndexIterator', 'affine_index_group', 'index_sum',
+           'partial_indexed', 'reshape']
 
 
 class NodeMeta(type):
@@ -700,6 +700,16 @@ def unique(indices):
     :returns: sorted tuple of unique free indices
     """
     return tuple(sorted(set(indices), key=id))
+
+
+def index_sum(expression, index):
+    """Eliminates an index from the free indices of an expression by
+    summing over it.  Returns the expression unchanged if the index is
+    not a free index of the expression."""
+    if index in expression.free_indices:
+        return IndexSum(expression, index)
+    else:
+        return expression
 
 
 def partial_indexed(tensor, indices):
