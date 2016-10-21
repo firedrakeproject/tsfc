@@ -110,9 +110,9 @@ def _select_expression(expressions, index):
             assert all(len(e.children) == len(expr.children) for e in expressions)
             assert len(expr.children) > 0
 
-            return cls(*[_select_expression(nth_children, index)
-                         for nth_children in zip(*[e.children
-                                                   for e in expressions])])
+            return expr.reconstruct(*[_select_expression(nth_children, index)
+                                      for nth_children in zip(*[e.children
+                                                                for e in expressions])])
         elif issubclass(cls, Indexed):
             assert all(e.multiindex == expr.multiindex for e in expressions)
             return Indexed(_select_expression([e.children[0]
