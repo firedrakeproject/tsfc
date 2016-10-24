@@ -2,17 +2,22 @@
 expressions."""
 
 from __future__ import absolute_import, print_function, division
-from six.moves import map
+from six.moves import map, range, zip
 
+from collections import deque
 from functools import reduce
+from itertools import permutations
+
+import numpy
 from singledispatch import singledispatch
 
 from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
 from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
-                     Sum, Comparison, Conditional, Index,
+                     Product, Sum, Comparison, Conditional, Index,
                      VariableIndex, Indexed, FlexiblyIndexed,
                      IndexSum, ComponentTensor, ListTensor, Delta,
                      partial_indexed)
+from gem.utils import OrderedSet
 
 
 @singledispatch
@@ -188,6 +193,142 @@ def select_expression(expressions, index):
     # Factor the expressions recursively and convert result
     selected = _select_expression(exprs, index)
     return ComponentTensor(selected, alpha)
+
+
+@singledispatch
+def _pull_delta_from_listtensor(node, self):
+    raise AssertionError("cannot handle type %s" % type(node))
+
+
+_pull_delta_from_listtensor.register(Node)(reuse_if_untouched)
+
+
+@_pull_delta_from_listtensor.register(ListTensor)
+def _pull_delta_from_listtensor_listtensor(node, self):
+    # Separate Delta nodes from other expressions
+    deltaz = []
+    rests = []
+
+    for child in node.children:
+        deltas = OrderedSet()
+        others = []
+
+        # Traverse Product tree
+        queue = deque([child])
+        while queue:
+            expr = queue.popleft()
+            if isinstance(expr, Product):
+                queue.extend(expr.children)
+            elif isinstance(expr, Delta):
+                assert expr not in deltas
+                deltas.add(expr)
+            else:
+                others.append(self(expr))  # looks for more ListTensors inside
+
+        deltaz.append(deltas)
+        rests.append(reduce(Product, others))
+
+    # Factor out common Delta factors
+    common_deltas = set.intersection(*[set(ds) for ds in deltaz])
+    deltaz = [[d for d in ds if d not in common_deltas] for ds in deltaz]
+
+    # Rebuild ListTensor
+    new_children = [reduce(Product, ds, rest)
+                    for ds, rest in zip(deltaz, rests)]
+    result = node.reconstruct(*new_children)
+
+    # Apply common Delta factors
+    if common_deltas:
+        alpha = tuple(Index(extent=d) for d in result.shape)
+        expr = reduce(Product, common_deltas, Indexed(result, alpha))
+        result = ComponentTensor(expr, alpha)
+    return result
+
+
+def pull_delta_from_listtensor(expression):
+    mapper = Memoizer(_pull_delta_from_listtensor)
+    return mapper(expression)
+
+
+def contraction(expression):
+    # Pull Delta nodes out of annoying ListTensors, and eliminate
+    # annoying ComponentTensors
+    expression, = remove_componenttensors([expression])
+    expression = pull_delta_from_listtensor(expression)
+    expression, = remove_componenttensors([expression])
+
+    # Flatten a product tree
+    sum_indices = []
+    factors = []
+
+    queue = deque([expression])
+    while queue:
+        expr = queue.popleft()
+        if isinstance(expr, IndexSum):
+            queue.append(expr.children[0])
+            sum_indices.append(expr.index)
+        elif isinstance(expr, Product):
+            queue.extend(expr.children)
+        else:
+            factors.append(expr)
+
+    # Try to eliminate Delta nodes
+    delta_queue = [(f, index)
+                   for f in factors if isinstance(f, Delta)
+                   for index in (f.i, f.j) if index in sum_indices]
+    while delta_queue:
+        delta, from_ = delta_queue[0]
+        to_, = list({delta.i, delta.j} - {from_})
+
+        sum_indices.remove(from_)
+
+        mapper = MemoizerArg(filtered_replace_indices)
+        factors = [mapper(e, ((from_, to_),)) for e in factors]
+
+        delta_queue = [(f, index)
+                       for f in factors if isinstance(f, Delta)
+                       for index in (f.i, f.j) if index in sum_indices]
+
+    # Drop ones
+    factors = [e for e in factors if e != Literal(1)]
+
+    # Sum factorisation
+    expression = None
+    best_flops = numpy.inf
+
+    for ordering in permutations(factors):
+        deps = [set(sum_indices) & set(factor.free_indices)
+                for factor in ordering]
+
+        scan_deps = [None] * len(factors)
+        scan_deps[0] = deps[0]
+        for i in range(1, len(factors)):
+            scan_deps[i] = scan_deps[i - 1] | deps[i]
+
+        sum_at = [None] * len(factors)
+        sum_at[0] = scan_deps[0]
+        for i in range(1, len(factors)):
+            sum_at[i] = scan_deps[i] - scan_deps[i - 1]
+
+        expr = None
+        flops = 0
+        for s, f in reversed(list(zip(sum_at, ordering))):
+            if expr is None:
+                expr = f
+            else:
+                expr = Product(f, expr)
+                flops += numpy.prod([i.extent for i in expr.free_indices], dtype=int)
+            if s:
+                flops += numpy.prod([i.extent for i in s])
+            for i in sum_indices:
+                if i in s:
+                    expr = IndexSum(expr, i)
+
+        if flops < best_flops:
+            expression = expr
+            best_flops = flops
+
+    return expression
 
 
 @singledispatch
