@@ -266,7 +266,7 @@ def contraction(expression):
         expr = queue.popleft()
         if isinstance(expr, IndexSum):
             queue.append(expr.children[0])
-            sum_indices.append(expr.index)
+            sum_indices.extend(expr.multiindex)
         elif isinstance(expr, Product):
             queue.extend(expr.children)
         else:
@@ -320,9 +320,7 @@ def contraction(expression):
                 flops += numpy.prod([i.extent for i in expr.free_indices], dtype=int)
             if s:
                 flops += numpy.prod([i.extent for i in s])
-            for i in sum_indices:
-                if i in s:
-                    expr = IndexSum(expr, i)
+            expr = IndexSum(expr, tuple(i for i in sum_indices if i in s))
 
         if flops < best_flops:
             expression = expr
@@ -387,13 +385,18 @@ _unroll_indexsum.register(Node)(reuse_if_untouched)
 
 @_unroll_indexsum.register(IndexSum)  # noqa
 def _(node, self):
-    if node.index.extent <= self.max_extent:
+    unroll = tuple(index for index in node.multiindex
+                   if index.extent <= self.max_extent)
+    if unroll:
         # Unrolling
         summand = self(node.children[0])
-        return reduce(Sum,
-                      (Indexed(ComponentTensor(summand, (node.index,)), (i,))
-                       for i in range(node.index.extent)),
-                      Zero())
+        shape = tuple(index.extent for index in unroll)
+        unrolled = reduce(Sum,
+                          (Indexed(ComponentTensor(summand, unroll), alpha)
+                           for alpha in numpy.ndindex(shape)),
+                          Zero())
+        return IndexSum(unrolled, tuple(index for index in node.multiindex
+                                        if index not in unroll))
     else:
         return reuse_if_untouched(node, self)
 

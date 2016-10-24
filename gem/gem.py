@@ -553,26 +553,27 @@ class ComponentTensor(Node):
 
 
 class IndexSum(Scalar):
-    __slots__ = ('children', 'index')
-    __back__ = ('index',)
+    __slots__ = ('children', 'multiindex')
+    __back__ = ('multiindex',)
 
-    def __new__(cls, summand, index):
+    def __new__(cls, summand, multiindex):
         # Sum zeros
         assert not summand.shape
         if isinstance(summand, Zero):
             return summand
 
-        # Sum a single expression
-        if index.extent == 1:
-            return Indexed(ComponentTensor(summand, (index,)), (0,))
+        # No indices case
+        multiindex = tuple(multiindex)
+        if not multiindex:
+            return summand
 
         self = super(IndexSum, cls).__new__(cls)
         self.children = (summand,)
-        self.index = index
+        self.multiindex = multiindex
 
         # Collect shape and free indices
-        assert index in summand.free_indices
-        self.free_indices = unique(set(summand.free_indices) - {index})
+        assert set(multiindex) <= set(summand.free_indices)
+        self.free_indices = unique(set(summand.free_indices) - set(multiindex))
 
         return self
 
@@ -714,14 +715,13 @@ def unique(indices):
     return tuple(sorted(set(indices), key=id))
 
 
-def index_sum(expression, index):
-    """Eliminates an index from the free indices of an expression by
-    summing over it.  Returns the expression unchanged if the index is
-    not a free index of the expression."""
-    if index in expression.free_indices:
-        return IndexSum(expression, index)
-    else:
-        return expression
+def index_sum(expression, indices):
+    """Eliminates indices from the free indices of an expression by
+    summing over them.  Skips any index that is not a free index of
+    the expression."""
+    multiindex = tuple(index for index in indices
+                       if index in expression.free_indices)
+    return IndexSum(expression, multiindex)
 
 
 def partial_indexed(tensor, indices):
