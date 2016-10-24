@@ -146,6 +146,13 @@ class For(Node):
     __slots__ = ('index', 'children')
     __front__ = ('index',)
 
+    def __new__(cls, index, statement):
+        assert isinstance(statement, Block)
+        if not statement.children:
+            return Noop(None)
+        else:
+            return super(For, cls).__new__(cls)
+
     def __init__(self, index, statement):
         self.index = index
         self.children = (statement,)
