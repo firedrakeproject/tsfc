@@ -3,7 +3,7 @@ from six.moves import range
 
 import collections
 import time
-from functools import reduce
+from functools import partial, reduce
 from itertools import chain
 
 from ufl.algorithms import extract_arguments, extract_coefficients
@@ -165,6 +165,30 @@ def compile_integral(integral_data, form_data, prefix, parameters,
 
     # Sum the expressions that are part of the same restriction
     ir = list(reduce(gem.Sum, e, gem.Zero()) for e in zip(*irs))
+
+    def fast_sum_factorise(sum_indices, factors):
+        return gem.optimise.sum_factorise(sum_indices, factors)
+
+    def classify(argument_indices, expression):
+        from gem.optimise import ATOMIC, COMPOUND, OTHER
+        n = len(argument_indices.intersection(expression.free_indices))
+        if n == 0:
+            return OTHER
+        elif n == 1:
+            return ATOMIC
+        else:
+            return COMPOUND
+    classifier = partial(classify, set(flat_argument_indices))
+
+    ir = opt.remove_componenttensors(ir)
+    ir_ = []
+    for expr in ir:
+        hehe = []
+        for monomial in gem.optimise.collect_monomials(expr, classifier):
+            sum_indices, args, rest = monomial
+            hehe.append(fast_sum_factorise(sum_indices, args + (rest,)))
+        ir_.append(reduce(gem.Sum, hehe, gem.Zero()))
+    ir = ir_
 
     # Need optimised roots for COFFEE
     ir = impero_utils.preprocess_gem(ir)
