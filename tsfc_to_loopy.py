@@ -1,3 +1,5 @@
+from __future__ import division, absolute_import, print_function
+
 from functools import partial
 from singledispatch import singledispatch
 import numpy as np

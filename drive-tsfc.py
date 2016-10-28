@@ -1,6 +1,18 @@
-from ufl import *
+from __future__ import division, absolute_import, print_function
+
+from ufl import (
+    triangle, Mesh, VectorElement, FiniteElement, Coefficient,
+    TestFunction, FunctionSpace, dx)
+
+from tsfc_to_loopy import tsfc_to_loopy
 from tsfc import compile_form
+
 import six
+
+import pyopencl as cl
+import loopy as lp
+
+import numpy as np
 
 cell = triangle
 mesh = Mesh(VectorElement('P', cell, 1))
@@ -16,18 +28,14 @@ print(kernel._ir)
 
 print(kernel.ast)
 
-from tsfc_to_loopy import tsfc_to_loopy
 knl = tsfc_to_loopy(kernel._ir)
 
-import pyopencl as cl
-import loopy as lp
 ctx = cl.create_some_context()
 
-import numpy as np
 knl = lp.add_and_infer_dtypes(knl, {"coords,w_0,A0": np.float64})
 
 knl = lp.to_batched(knl, "nelements", ("A0", "coords",), batch_iname_prefix="iel")
-#knl = lp.tag_inames(knl, "j:ilp.seq")
+# knl = lp.tag_inames(knl, "j:ilp.seq")
 
 for rule in list(six.itervalues(knl.substitutions)):
     knl = lp.precompute(knl, rule.name, rule.arguments)
