@@ -3,10 +3,9 @@ Backwards compatibility for some functionality.
 """
 from __future__ import absolute_import, print_function, division
 import numpy
-from distutils.version import StrictVersion
 
 
-if False:#  StrictVersion(numpy.__version__) < StrictVersion("1.10"):
+if False:  # StrictVersion(numpy.__version__) < StrictVersion("1.10"):
     def allclose(a, b, rtol=1e-5, atol=1e-8, equal_nan=False):
         """Wrapper around ``numpy.allclose``, which see.
 
