@@ -16,6 +16,43 @@ from gem.gem import (Node, Terminal, Identity, Literal, Zero, Sum,
 
 
 @singledispatch
+def literal_rounding(node, self):
+    """Perform FFC rounding of FIAT tabulation matrices on the literals of
+    a GEM expression.
+
+    :arg node: root of the expression
+    :arg self: function for recursive calls
+    """
+    raise AssertionError("cannot handle type %s" % type(node))
+
+literal_rounding.register(Node)(reuse_if_untouched)
+
+
+@literal_rounding.register(Literal)
+def literal_rounding_literal(node, self):
+    table = node.array
+    epsilon = self.epsilon
+    table[abs(table) < epsilon] = 0
+    table[abs(table - 1.0) < epsilon] = 1.0
+    table[abs(table + 1.0) < epsilon] = -1.0
+    table[abs(table - 0.5) < epsilon] = 0.5
+    table[abs(table + 0.5) < epsilon] = -0.5
+    return Literal(table)
+
+
+def ffc_rounding(expression, epsilon):
+    """Perform FFC rounding of FIAT tabulation matrices on the literals of
+    a GEM expression.
+
+    :arg expression: GEM expression
+    :arg epsilon: tolerance limit for rounding
+    """
+    mapper = Memoizer(literal_rounding)
+    mapper.epsilon = epsilon
+    return mapper(expression)
+
+
+@singledispatch
 def replace_indices(node, self, subst):
     """Replace free indices in a GEM expression.
 
