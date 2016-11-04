@@ -8,10 +8,10 @@ from functools import reduce
 from singledispatch import singledispatch
 
 from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
-from gem.gem import (Node, Terminal, Identity, Literal, Zero, Sum,
-                     Comparison, Conditional, Index, VariableIndex,
-                     Indexed, FlexiblyIndexed, IndexSum,
-                     ComponentTensor, ListTensor, Delta,
+from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
+                     Sum, Comparison, Conditional, Index,
+                     VariableIndex, Indexed, FlexiblyIndexed,
+                     IndexSum, ComponentTensor, ListTensor, Delta,
                      partial_indexed)
 
 
@@ -155,7 +155,7 @@ def _select_expression(expressions, index):
             assert all(e.multiindex == expr.multiindex for e in expressions)
             return Indexed(_select_expression([e.children[0]
                                                for e in expressions], index), expr.multiindex)
-        elif issubclass(cls, Literal):
+        elif issubclass(cls, (Literal, Failure)):
             return partial_indexed(ListTensor(expressions), (index,))
         else:
             assert False

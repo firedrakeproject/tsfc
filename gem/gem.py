@@ -27,11 +27,11 @@ from numpy import asarray
 from gem.node import Node as NodeBase
 
 
-__all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Variable', 'Sum',
-           'Product', 'Division', 'Power', 'MathFunction', 'MinValue',
-           'MaxValue', 'Comparison', 'LogicalNot', 'LogicalAnd',
-           'LogicalOr', 'Conditional', 'Index', 'AffineIndex',
-           'VariableIndex', 'Indexed', 'FlexiblyIndexed',
+__all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
+           'Variable', 'Sum', 'Product', 'Division', 'Power',
+           'MathFunction', 'MinValue', 'MaxValue', 'Comparison',
+           'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
+           'Index', 'VariableIndex', 'Indexed', 'FlexiblyIndexed',
            'ComponentTensor', 'IndexSum', 'ListTensor', 'Delta',
            'IndexIterator', 'affine_index_group', 'index_sum',
            'partial_indexed', 'reshape']
@@ -90,6 +90,17 @@ class Scalar(Node):
     __slots__ = ()
 
     shape = ()
+
+
+class Failure(Terminal):
+    """Abstract class for failure GEM nodes."""
+
+    __slots__ = ('shape', 'exception')
+    __front__ = ('shape', 'exception')
+
+    def __init__(self, shape, exception):
+        self.shape = shape
+        self.exception = exception
 
 
 class Constant(Terminal):
