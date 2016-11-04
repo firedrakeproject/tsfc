@@ -32,6 +32,7 @@ literal_rounding.register(Node)(reuse_if_untouched)
 def literal_rounding_literal(node, self):
     table = node.array
     epsilon = self.epsilon
+    # Copied from FFC (ffc/quadrature/quadratureutils.py)
     table[abs(table) < epsilon] = 0
     table[abs(table - 1.0) < epsilon] = 1.0
     table[abs(table + 1.0) < epsilon] = -1.0
