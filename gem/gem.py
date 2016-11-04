@@ -16,9 +16,12 @@ indices.
 
 from __future__ import absolute_import, print_function, division
 from six import with_metaclass
+from six.moves import map
 
 from abc import ABCMeta
+import collections
 from itertools import chain
+import numbers
 from operator import attrgetter
 
 import numpy
@@ -27,13 +30,13 @@ from numpy import asarray
 from gem.node import Node as NodeBase
 
 
-__all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Variable', 'Sum',
-           'Product', 'Division', 'Power', 'MathFunction', 'MinValue',
-           'MaxValue', 'Comparison', 'LogicalNot', 'LogicalAnd',
-           'LogicalOr', 'Conditional', 'Index', 'VariableIndex',
-           'Indexed', 'FlexiblyIndexed', 'ComponentTensor',
-           'IndexSum', 'ListTensor', 'partial_indexed', 'reshape',
-           'Failure']
+__all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
+           'Variable', 'Sum', 'Product', 'Division', 'Power',
+           'MathFunction', 'MinValue', 'MaxValue', 'Comparison',
+           'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
+           'Index', 'VariableIndex', 'Indexed', 'FlexiblyIndexed',
+           'ComponentTensor', 'IndexSum', 'ListTensor', 'as_gem',
+           'partial_indexed', 'reshape']
 
 
 class NodeMeta(type):
@@ -624,6 +627,20 @@ def unique(indices):
     :returns: sorted tuple of unique free indices
     """
     return tuple(sorted(set(indices), key=id))
+
+
+def as_gem(expr):
+    """Cast an expression to GEM."""
+    if isinstance(expr, Node):
+        return expr
+    elif isinstance(expr, numbers.Number):
+        return Literal(expr)
+    elif isinstance(expr, numpy.ndarray) and expr.dtype != object:
+        return Literal(expr)
+    elif isinstance(expr, collections.Iterable):
+        return ListTensor(list(map(as_gem, expr)))
+    else:
+        raise ValueError("Cannot cast %s to GEM." % (expr,))
 
 
 def partial_indexed(tensor, indices):
