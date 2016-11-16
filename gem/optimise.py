@@ -197,6 +197,11 @@ def select_expression(expressions, index):
 
 @singledispatch
 def _pull_delta_from_listtensor(node, self):
+    """Pull common delta factors out of ListTensor entries.
+
+    :arg node: root of the expression
+    :arg self: function for recursive calls
+    """
     raise AssertionError("cannot handle type %s" % type(node))
 
 
@@ -246,11 +251,21 @@ def _pull_delta_from_listtensor_listtensor(node, self):
 
 
 def pull_delta_from_listtensor(expression):
+    """Pull common delta factors out of ListTensor entries."""
     mapper = Memoizer(_pull_delta_from_listtensor)
     return mapper(expression)
 
 
 def contraction(expression):
+    """Optimise the contractions of the tensor product at the root of
+    the expression, including:
+
+    - IndexSum-Delta cancellation
+    - Sum factorisation
+
+    This routine was designed with finite element coefficient
+    evaluation in mind.
+    """
     # Pull Delta nodes out of annoying ListTensors, and eliminate
     # annoying ComponentTensors
     expression, = remove_componenttensors([expression])
