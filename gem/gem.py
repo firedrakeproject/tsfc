@@ -362,6 +362,7 @@ class IndexBase(with_metaclass(ABCMeta)):
     """Abstract base class for indices."""
     pass
 
+
 IndexBase.register(int)
 
 
