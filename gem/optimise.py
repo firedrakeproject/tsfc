@@ -25,6 +25,7 @@ def literal_rounding(node, self):
     """
     raise AssertionError("cannot handle type %s" % type(node))
 
+
 literal_rounding.register(Node)(reuse_if_untouched)
 
 
@@ -64,6 +65,7 @@ def replace_indices(node, self, subst):
                 replace with.
     """
     raise AssertionError("cannot handle type %s" % type(node))
+
 
 replace_indices.register(Node)(reuse_if_untouched_arg)
 
@@ -191,6 +193,7 @@ def select_expression(expressions, index):
 @singledispatch
 def _replace_delta(node, self):
     raise AssertionError("cannot handle type %s" % type(node))
+
 
 _replace_delta.register(Node)(reuse_if_untouched)
 
