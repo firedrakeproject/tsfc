@@ -367,7 +367,7 @@ def _replace_delta_delta(node, self):
 def replace_delta(expressions):
     """Lowers all Deltas in a multi-root expression DAG."""
     mapper = Memoizer(_replace_delta)
-    return map(mapper, expressions)
+    return list(map(mapper, expressions))
 
 
 @singledispatch
