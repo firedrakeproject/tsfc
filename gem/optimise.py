@@ -310,19 +310,24 @@ def contraction(expression, logger=None):
     # Sum factorisation
     def construct(ordering):
         """Construct tensor product from a given ordering."""
+        # deps: Indices for each term that need to be summed over.
         deps = [set(sum_indices) & set(factor.free_indices)
                 for factor in ordering]
 
+        # scan_deps: Scan deps to the right with union operation.
         scan_deps = [None] * len(ordering)
         scan_deps[0] = deps[0]
         for i in range(1, len(ordering)):
             scan_deps[i] = scan_deps[i - 1] | deps[i]
 
+        # sum_at: What IndexSum nodes should be inserted before each
+        # term.  An IndexSum binds all terms to its right.
         sum_at = [None] * len(ordering)
         sum_at[0] = scan_deps[0]
         for i in range(1, len(ordering)):
             sum_at[i] = scan_deps[i] - scan_deps[i - 1]
 
+        # Construct expression and count floating-point operations
         expr = None
         flops = 0
         for s, f in reversed(list(zip(sum_at, ordering))):
