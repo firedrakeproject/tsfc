@@ -308,21 +308,19 @@ def contraction(expression):
     factors = [e for e in factors if e != Literal(1)]
 
     # Sum factorisation
-    expression = None
-    best_flops = numpy.inf
-
-    for ordering in permutations(factors):
+    def construct(ordering):
+        """Construct tensor product from a given ordering."""
         deps = [set(sum_indices) & set(factor.free_indices)
                 for factor in ordering]
 
-        scan_deps = [None] * len(factors)
+        scan_deps = [None] * len(ordering)
         scan_deps[0] = deps[0]
-        for i in range(1, len(factors)):
+        for i in range(1, len(ordering)):
             scan_deps[i] = scan_deps[i - 1] | deps[i]
 
-        sum_at = [None] * len(factors)
+        sum_at = [None] * len(ordering)
         sum_at[0] = scan_deps[0]
-        for i in range(1, len(factors)):
+        for i in range(1, len(ordering)):
             sum_at[i] = scan_deps[i] - scan_deps[i - 1]
 
         expr = None
@@ -336,10 +334,25 @@ def contraction(expression):
             if s:
                 flops += numpy.prod([i.extent for i in s])
             expr = IndexSum(expr, tuple(i for i in sum_indices if i in s))
+        return expr, flops
 
-        if flops < best_flops:
-            expression = expr
-            best_flops = flops
+    if len(factors) <= 5:
+        expression = None
+        best_flops = numpy.inf
+
+        for ordering in permutations(factors):
+            expr, flops = construct(ordering)
+            if flops < best_flops:
+                expression = expr
+                best_flops = flops
+    else:
+        # Cheap heuristic
+        def key(factor):
+            return len(set(sum_indices) & set(factor.free_indices))
+        ordering = sorted(factors, key=key)
+
+        # FIXME: Log this unexpected case.
+        expression, flops = construct(ordering)
 
     return expression
 
