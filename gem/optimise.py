@@ -256,7 +256,7 @@ def pull_delta_from_listtensor(expression):
     return mapper(expression)
 
 
-def contraction(expression):
+def contraction(expression, logger=None):
     """Optimise the contractions of the tensor product at the root of
     the expression, including:
 
@@ -347,11 +347,13 @@ def contraction(expression):
                 best_flops = flops
     else:
         # Cheap heuristic
+        logger.warning("Unexpectedly many terms for sum factorisation: %d"
+                       "; falling back on cheap heuristic.", len(factors))
+
         def key(factor):
             return len(set(sum_indices) & set(factor.free_indices))
         ordering = sorted(factors, key=key)
 
-        # FIXME: Log this unexpected case.
         expression, flops = construct(ordering)
 
     return expression
