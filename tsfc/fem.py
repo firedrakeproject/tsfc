@@ -20,6 +20,7 @@ from finat.quadrature import make_quadrature
 from tsfc import ufl2gem, geometric
 from tsfc.finatinterface import create_element, as_fiat_cell
 from tsfc.kernel_interface import ProxyKernelInterface
+from tsfc.logging import logger
 from tsfc.modified_terminals import analyse_modified_terminal
 from tsfc.parameters import PARAMETERS
 from tsfc.ufl_utils import ModifiedTerminalMixin, PickRestriction, simplify_abs
@@ -189,10 +190,7 @@ def translate_argument(terminal, mt, ctx):
     vi = tuple(gem.Index(extent=d) for d in mt.expr.ufl_shape)
     argument_index = ctx.argument_indices[terminal.number()]
     result = gem.Indexed(M, argument_index + vi)
-    if vi:
-        return gem.ComponentTensor(result, vi)
-    else:
-        return result
+    return gem.ComponentTensor(result, vi)
 
 
 @translate.register(Coefficient)
@@ -217,12 +215,8 @@ def translate_coefficient(terminal, mt, ctx):
     vi = tuple(gem.Index(extent=d) for d in mt.expr.ufl_shape)
     result = gem.Product(gem.Indexed(M, alpha + vi),
                          gem.Indexed(vec, alpha))
-    for i in alpha:
-        result = gem.IndexSum(result, i)
-    if vi:
-        return gem.ComponentTensor(result, vi)
-    else:
-        return result
+    result = gem.optimise.contraction(gem.IndexSum(result, alpha), logger=logger)
+    return gem.ComponentTensor(result, vi)
 
 
 def compile_ufl(expression, interior_facet=False, point_sum=False, **kwargs):
@@ -241,6 +235,5 @@ def compile_ufl(expression, interior_facet=False, point_sum=False, **kwargs):
     translator = Translator(context)
     result = map_expr_dags(translator, expressions)
     if point_sum:
-        for index in context.point_set.indices:
-            result = [gem.index_sum(expr, index) for expr in result]
+        result = [gem.index_sum(expr, context.point_set.indices) for expr in result]
     return result
