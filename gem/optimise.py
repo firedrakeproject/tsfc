@@ -17,7 +17,6 @@ from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
                      VariableIndex, Indexed, FlexiblyIndexed,
                      IndexSum, ComponentTensor, ListTensor, Delta,
                      partial_indexed)
-from gem.utils import OrderedSet
 
 
 @singledispatch
@@ -195,67 +194,6 @@ def select_expression(expressions, index):
     return ComponentTensor(selected, alpha)
 
 
-@singledispatch
-def _pull_delta_from_listtensor(node, self):
-    """Pull common delta factors out of ListTensor entries.
-
-    :arg node: root of the expression
-    :arg self: function for recursive calls
-    """
-    raise AssertionError("cannot handle type %s" % type(node))
-
-
-_pull_delta_from_listtensor.register(Node)(reuse_if_untouched)
-
-
-@_pull_delta_from_listtensor.register(ListTensor)
-def _pull_delta_from_listtensor_listtensor(node, self):
-    # Separate Delta nodes from other expressions
-    deltaz = []
-    rests = []
-
-    for child in node.children:
-        deltas = OrderedSet()
-        others = []
-
-        # Traverse Product tree
-        queue = deque([child])
-        while queue:
-            expr = queue.popleft()
-            if isinstance(expr, Product):
-                queue.extend(expr.children)
-            elif isinstance(expr, Delta):
-                assert expr not in deltas
-                deltas.add(expr)
-            else:
-                others.append(self(expr))  # looks for more ListTensors inside
-
-        deltaz.append(deltas)
-        rests.append(reduce(Product, others))
-
-    # Factor out common Delta factors
-    common_deltas = set.intersection(*[set(ds) for ds in deltaz])
-    deltaz = [[d for d in ds if d not in common_deltas] for ds in deltaz]
-
-    # Rebuild ListTensor
-    new_children = [reduce(Product, ds, rest)
-                    for ds, rest in zip(deltaz, rests)]
-    result = node.reconstruct(*new_children)
-
-    # Apply common Delta factors
-    if common_deltas:
-        alpha = tuple(Index(extent=d) for d in result.shape)
-        expr = reduce(Product, common_deltas, Indexed(result, alpha))
-        result = ComponentTensor(expr, alpha)
-    return result
-
-
-def pull_delta_from_listtensor(expression):
-    """Pull common delta factors out of ListTensor entries."""
-    mapper = Memoizer(_pull_delta_from_listtensor)
-    return mapper(expression)
-
-
 def contraction(expression, logger=None):
     """Optimise the contractions of the tensor product at the root of
     the expression, including:
@@ -266,10 +204,7 @@ def contraction(expression, logger=None):
     This routine was designed with finite element coefficient
     evaluation in mind.
     """
-    # Pull Delta nodes out of annoying ListTensors, and eliminate
-    # annoying ComponentTensors
-    expression, = remove_componenttensors([expression])
-    expression = pull_delta_from_listtensor(expression)
+    # Eliminate annoying ComponentTensors
     expression, = remove_componenttensors([expression])
 
     # Flatten a product tree
