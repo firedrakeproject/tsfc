@@ -448,6 +448,10 @@ class Indexed(Scalar):
             if isinstance(index, Index):
                 index.set_extent(extent)
 
+        # Empty multiindex
+        if not multiindex:
+            return aggregate
+
         # Zero folding
         if isinstance(aggregate, Zero):
             return Zero()
