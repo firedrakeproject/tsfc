@@ -209,6 +209,10 @@ class Sum(Scalar):
         if isinstance(a, Constant) and isinstance(b, Constant):
             return Literal(a.value + b.value)
 
+        # Distributivity
+        if isinstance(a, IndexSum) and isinstance(b, IndexSum) and a.multiindex == b.multiindex:
+            return IndexSum(Sum(a.children[0], b.children[0]), a.multiindex)
+
         self = super(Sum, cls).__new__(cls)
         self.children = a, b
         return self
