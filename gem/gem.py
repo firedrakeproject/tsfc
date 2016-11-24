@@ -200,11 +200,14 @@ class Sum(Scalar):
         assert not a.shape
         assert not b.shape
 
-        # Zero folding
+        # Constant folding
         if isinstance(a, Zero):
             return b
         elif isinstance(b, Zero):
             return a
+
+        if isinstance(a, Constant) and isinstance(b, Constant):
+            return Literal(a.value + b.value)
 
         self = super(Sum, cls).__new__(cls)
         self.children = a, b
@@ -218,9 +221,17 @@ class Product(Scalar):
         assert not a.shape
         assert not b.shape
 
-        # Zero folding
+        # Constant folding
         if isinstance(a, Zero) or isinstance(b, Zero):
             return Zero()
+
+        if a == one:
+            return b
+        if b == one:
+            return a
+
+        if isinstance(a, Constant) and isinstance(b, Constant):
+            return Literal(a.value * b.value)
 
         self = super(Product, cls).__new__(cls)
         self.children = a, b
@@ -234,11 +245,17 @@ class Division(Scalar):
         assert not a.shape
         assert not b.shape
 
-        # Zero folding
+        # Constant folding
         if isinstance(b, Zero):
             raise ValueError("division by zero")
         if isinstance(a, Zero):
             return Zero()
+
+        if b == one:
+            return a
+
+        if isinstance(a, Constant) and isinstance(b, Constant):
+            return Literal(a.value / b.value)
 
         self = super(Division, cls).__new__(cls)
         self.children = a, b
@@ -258,7 +275,7 @@ class Power(Scalar):
                 raise ValueError("cannot solve 0^0")
             return Zero()
         elif isinstance(exponent, Zero):
-            return Literal(1)
+            return one
 
         self = super(Power, cls).__new__(cls)
         self.children = base, exponent
@@ -646,7 +663,7 @@ class Delta(Scalar, Terminal):
 
         # \delta_{i,i} = 1
         if i == j:
-            return Literal(1)
+            return one
 
         # Fixed indices
         if isinstance(i, int) and isinstance(j, int):
@@ -768,3 +785,7 @@ def reshape(variable, *shapes):
         dim2idxs.append((0, tuple(idxs)))
     expr = FlexiblyIndexed(variable, tuple(dim2idxs))
     return ComponentTensor(expr, tuple(indices))
+
+
+# Static one object for quicker constant folding
+one = Literal(1)
