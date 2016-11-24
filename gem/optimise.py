@@ -446,3 +446,19 @@ def unroll_indexsum(expressions, max_extent):
     mapper = Memoizer(_unroll_indexsum)
     mapper.max_extent = max_extent
     return list(map(mapper, expressions))
+
+
+def aggressive_unroll(expression):
+    """Aggressively unrolls all loop structures."""
+    # Unroll expression shape
+    if expression.shape:
+        tensor = numpy.empty(expression.shape, dtype=object)
+        for alpha in numpy.ndindex(expression.shape):
+            tensor[alpha] = Indexed(expression, alpha)
+        expression = ListTensor(tensor)
+        expression, = remove_componenttensors((ListTensor(tensor),))
+
+    # Unroll summation
+    expression, = unroll_indexsum((expression,), max_extent=numpy.inf)
+    expression, = remove_componenttensors((expression,))
+    return expression
