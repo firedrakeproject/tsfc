@@ -16,7 +16,7 @@ from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
                      Product, Sum, Comparison, Conditional, Index,
                      VariableIndex, Indexed, FlexiblyIndexed,
                      IndexSum, ComponentTensor, ListTensor, Delta,
-                     partial_indexed)
+                     partial_indexed, one)
 
 
 @singledispatch
@@ -240,7 +240,7 @@ def contraction(expression, logger=None):
                        for index in (f.i, f.j) if index in sum_indices]
 
     # Drop ones
-    factors = [e for e in factors if e != Literal(1)]
+    factors = [e for e in factors if e != one]
 
     # Sum factorisation
     def construct(ordering):
@@ -331,7 +331,7 @@ def _replace_delta_delta(node, self):
                 raise ValueError("Cannot convert running index to expression.")
         e_i = expression(i)
         e_j = expression(j)
-        return Conditional(Comparison("==", e_i, e_j), Literal(1), Zero())
+        return Conditional(Comparison("==", e_i, e_j), one, Zero())
 
 
 def replace_delta(expressions):
