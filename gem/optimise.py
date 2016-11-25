@@ -2,9 +2,10 @@
 expressions."""
 
 from __future__ import absolute_import, print_function, division
-from six.moves import map, range, zip
+from six import itervalues
+from six.moves import map, zip
 
-from collections import deque
+from collections import OrderedDict, deque
 from functools import reduce
 from itertools import permutations
 
@@ -242,59 +243,35 @@ def contraction(expression, logger=None):
     # Drop ones
     factors = [e for e in factors if e != one]
 
+    # Form groups by free indices
+    groups = OrderedDict()
+    for factor in factors:
+        groups[factor.free_indices] = []
+    for factor in factors:
+        groups[factor.free_indices].append(factor)
+    groups = [reduce(Product, terms) for terms in itervalues(groups)]
+
     # Sum factorisation
-    def construct(ordering):
-        """Construct tensor product from a given ordering."""
-        # deps: Indices for each term that need to be summed over.
-        deps = [set(sum_indices) & set(factor.free_indices)
-                for factor in ordering]
+    expression = None
+    best_flops = numpy.inf
 
-        # scan_deps: Scan deps to the right with union operation.
-        scan_deps = [None] * len(ordering)
-        scan_deps[0] = deps[0]
-        for i in range(1, len(ordering)):
-            scan_deps[i] = scan_deps[i - 1] | deps[i]
-
-        # sum_at: What IndexSum nodes should be inserted before each
-        # term.  An IndexSum binds all terms to its right.
-        sum_at = [None] * len(ordering)
-        sum_at[0] = scan_deps[0]
-        for i in range(1, len(ordering)):
-            sum_at[i] = scan_deps[i] - scan_deps[i - 1]
-
-        # Construct expression and count floating-point operations
-        expr = None
+    for ordering in permutations(sum_indices):
+        terms = groups[:]
         flops = 0
-        for s, f in reversed(list(zip(sum_at, ordering))):
-            if expr is None:
-                expr = f
-            else:
-                expr = Product(f, expr)
-                flops += numpy.prod([i.extent for i in expr.free_indices], dtype=int)
-            if s:
-                flops += numpy.prod([i.extent for i in s])
-            expr = IndexSum(expr, tuple(i for i in sum_indices if i in s))
-        return expr, flops
+        for sum_index in ordering:
+            contract = [t for t in terms if sum_index in t.free_indices]
+            deferred = [t for t in terms if sum_index not in t.free_indices]
 
-    if len(factors) <= 5:
-        expression = None
-        best_flops = numpy.inf
+            product = reduce(Product, contract)
+            term = IndexSum(product, (sum_index,))
+            flops += len(contract) * numpy.prod([i.extent for i in product.free_indices], dtype=int)
+            terms = deferred + [term]
+        expr = reduce(Product, terms)
+        flops += (len(terms) - 1) * numpy.prod([i.extent for i in expr.free_indices], dtype=int)
 
-        for ordering in permutations(factors):
-            expr, flops = construct(ordering)
-            if flops < best_flops:
-                expression = expr
-                best_flops = flops
-    else:
-        # Cheap heuristic
-        logger.warning("Unexpectedly many terms for sum factorisation: %d"
-                       "; falling back on cheap heuristic.", len(factors))
-
-        def key(factor):
-            return len(set(sum_indices) & set(factor.free_indices))
-        ordering = sorted(factors, key=key)
-
-        expression, flops = construct(ordering)
+        if flops < best_flops:
+            expression = expr
+            best_flops = flops
 
     return expression
 
