@@ -401,7 +401,6 @@ def aggressive_unroll(expression):
         tensor = numpy.empty(expression.shape, dtype=object)
         for alpha in numpy.ndindex(expression.shape):
             tensor[alpha] = Indexed(expression, alpha)
-        expression = ListTensor(tensor)
         expression, = remove_componenttensors((ListTensor(tensor),))
 
     # Unroll summation
