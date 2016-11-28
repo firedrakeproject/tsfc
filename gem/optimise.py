@@ -237,9 +237,7 @@ def sum_factorise(sum_indices, factors):
     # Form groups by free indices
     groups = OrderedDict()
     for factor in factors:
-        groups[factor.free_indices] = []
-    for factor in factors:
-        groups[factor.free_indices].append(factor)
+        groups.setdefault(factor.free_indices, []).append(factor)
     groups = [reduce(Product, terms) for terms in itervalues(groups)]
 
     # Sum factorisation
