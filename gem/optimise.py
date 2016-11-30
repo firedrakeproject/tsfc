@@ -2,17 +2,22 @@
 expressions."""
 
 from __future__ import absolute_import, print_function, division
-from six.moves import map
+from six import itervalues
+from six.moves import map, zip
 
+from collections import OrderedDict, deque
 from functools import reduce
+from itertools import permutations
+
+import numpy
 from singledispatch import singledispatch
 
 from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
 from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
-                     Sum, Comparison, Conditional, Index,
+                     Product, Sum, Comparison, Conditional, Index,
                      VariableIndex, Indexed, FlexiblyIndexed,
                      IndexSum, ComponentTensor, ListTensor, Delta,
-                     partial_indexed)
+                     partial_indexed, one)
 
 
 @singledispatch
@@ -190,6 +195,121 @@ def select_expression(expressions, index):
     return ComponentTensor(selected, alpha)
 
 
+def delta_elimination(sum_indices, factors):
+    """IndexSum-Delta cancellation.
+
+    :arg sum_indices: free indices for contractions
+    :arg factors: product factors
+    :returns: optimised (sum_indices, factors)
+    """
+    sum_indices = list(sum_indices)  # copy for modification
+
+    delta_queue = [(f, index)
+                   for f in factors if isinstance(f, Delta)
+                   for index in (f.i, f.j) if index in sum_indices]
+    while delta_queue:
+        delta, from_ = delta_queue[0]
+        to_, = list({delta.i, delta.j} - {from_})
+
+        sum_indices.remove(from_)
+
+        mapper = MemoizerArg(filtered_replace_indices)
+        factors = [mapper(e, ((from_, to_),)) for e in factors]
+
+        delta_queue = [(f, index)
+                       for f in factors if isinstance(f, Delta)
+                       for index in (f.i, f.j) if index in sum_indices]
+
+    # Drop ones
+    return sum_indices, [e for e in factors if e != one]
+
+
+def sum_factorise(sum_indices, factors):
+    """Optimise a tensor product throw sum factorisation.
+
+    :arg sum_indices: free indices for contractions
+    :arg factors: product factors
+    :returns: optimised GEM expression
+    """
+    if len(sum_indices) > 5:
+        raise NotImplementedError("Too many indices for sum factorisation!")
+
+    # Form groups by free indices
+    groups = OrderedDict()
+    for factor in factors:
+        groups.setdefault(factor.free_indices, []).append(factor)
+    groups = [reduce(Product, terms) for terms in itervalues(groups)]
+
+    # Sum factorisation
+    expression = None
+    best_flops = numpy.inf
+
+    # Consider all orderings of contraction indices
+    for ordering in permutations(sum_indices):
+        terms = groups[:]
+        flops = 0
+        # Apply contraction index by index
+        for sum_index in ordering:
+            # Select terms that need to be part of the contraction
+            contract = [t for t in terms if sum_index in t.free_indices]
+            deferred = [t for t in terms if sum_index not in t.free_indices]
+
+            # A further optimisation opportunity is to consider
+            # various ways of building the product tree.
+            product = reduce(Product, contract)
+            term = IndexSum(product, (sum_index,))
+            # For the operation count estimation we assume that no
+            # operations were saved with the particular product tree
+            # that we built above.
+            flops += len(contract) * numpy.prod([i.extent for i in product.free_indices], dtype=int)
+
+            # Replace the contracted terms with the result of the
+            # contraction.
+            terms = deferred + [term]
+
+        # If some contraction indices were independent, then we may
+        # still have several terms at this point.
+        expr = reduce(Product, terms)
+        flops += (len(terms) - 1) * numpy.prod([i.extent for i in expr.free_indices], dtype=int)
+
+        if flops < best_flops:
+            expression = expr
+            best_flops = flops
+
+    return expression
+
+
+def contraction(expression):
+    """Optimise the contractions of the tensor product at the root of
+    the expression, including:
+
+    - IndexSum-Delta cancellation
+    - Sum factorisation
+
+    This routine was designed with finite element coefficient
+    evaluation in mind.
+    """
+    # Eliminate annoying ComponentTensors
+    expression, = remove_componenttensors([expression])
+
+    # Flatten a product tree
+    sum_indices = []
+    factors = []
+
+    queue = deque([expression])
+    while queue:
+        expr = queue.popleft()
+        if isinstance(expr, IndexSum):
+            queue.append(expr.children[0])
+            sum_indices.extend(expr.multiindex)
+        elif isinstance(expr, Product):
+            queue.extend(expr.children)
+        else:
+            factors.append(expr)
+
+    return sum_factorise(*delta_elimination(sum_indices, factors))
+
+
 @singledispatch
 def _replace_delta(node, self):
     raise AssertionError("cannot handle type %s" % type(node))
@@ -222,13 +342,13 @@ def _replace_delta_delta(node, self):
                 raise ValueError("Cannot convert running index to expression.")
         e_i = expression(i)
         e_j = expression(j)
-        return Conditional(Comparison("==", e_i, e_j), Literal(1), Zero())
+        return Conditional(Comparison("==", e_i, e_j), one, Zero())
 
 
 def replace_delta(expressions):
     """Lowers all Deltas in a multi-root expression DAG."""
     mapper = Memoizer(_replace_delta)
-    return map(mapper, expressions)
+    return list(map(mapper, expressions))
 
 
 @singledispatch
@@ -246,13 +366,18 @@ _unroll_indexsum.register(Node)(reuse_if_untouched)
 
 @_unroll_indexsum.register(IndexSum)  # noqa
 def _(node, self):
-    if node.index.extent <= self.max_extent:
+    unroll = tuple(index for index in node.multiindex
+                   if index.extent <= self.max_extent)
+    if unroll:
         # Unrolling
         summand = self(node.children[0])
-        return reduce(Sum,
-                      (Indexed(ComponentTensor(summand, (node.index,)), (i,))
-                       for i in range(node.index.extent)),
-                      Zero())
+        shape = tuple(index.extent for index in unroll)
+        unrolled = reduce(Sum,
+                          (Indexed(ComponentTensor(summand, unroll), alpha)
+                           for alpha in numpy.ndindex(shape)),
+                          Zero())
+        return IndexSum(unrolled, tuple(index for index in node.multiindex
+                                        if index not in unroll))
     else:
         return reuse_if_untouched(node, self)
 
@@ -267,3 +392,18 @@ def unroll_indexsum(expressions, max_extent):
     mapper = Memoizer(_unroll_indexsum)
     mapper.max_extent = max_extent
     return list(map(mapper, expressions))
+
+
+def aggressive_unroll(expression):
+    """Aggressively unrolls all loop structures."""
+    # Unroll expression shape
+    if expression.shape:
+        tensor = numpy.empty(expression.shape, dtype=object)
+        for alpha in numpy.ndindex(expression.shape):
+            tensor[alpha] = Indexed(expression, alpha)
+        expression, = remove_componenttensors((ListTensor(tensor),))
+
+    # Unroll summation
+    expression, = unroll_indexsum((expression,), max_extent=numpy.inf)
+    expression, = remove_componenttensors((expression,))
+    return expression

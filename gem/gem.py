@@ -200,11 +200,14 @@ class Sum(Scalar):
         assert not a.shape
         assert not b.shape
 
-        # Zero folding
+        # Constant folding
         if isinstance(a, Zero):
             return b
         elif isinstance(b, Zero):
             return a
+
+        if isinstance(a, Constant) and isinstance(b, Constant):
+            return Literal(a.value + b.value)
 
         self = super(Sum, cls).__new__(cls)
         self.children = a, b
@@ -218,9 +221,17 @@ class Product(Scalar):
         assert not a.shape
         assert not b.shape
 
-        # Zero folding
+        # Constant folding
         if isinstance(a, Zero) or isinstance(b, Zero):
             return Zero()
+
+        if a == one:
+            return b
+        if b == one:
+            return a
+
+        if isinstance(a, Constant) and isinstance(b, Constant):
+            return Literal(a.value * b.value)
 
         self = super(Product, cls).__new__(cls)
         self.children = a, b
@@ -234,11 +245,17 @@ class Division(Scalar):
         assert not a.shape
         assert not b.shape
 
-        # Zero folding
+        # Constant folding
         if isinstance(b, Zero):
             raise ValueError("division by zero")
         if isinstance(a, Zero):
             return Zero()
+
+        if b == one:
+            return a
+
+        if isinstance(a, Constant) and isinstance(b, Constant):
+            return Literal(a.value / b.value)
 
         self = super(Division, cls).__new__(cls)
         self.children = a, b
@@ -258,7 +275,7 @@ class Power(Scalar):
                 raise ValueError("cannot solve 0^0")
             return Zero()
         elif isinstance(exponent, Zero):
-            return Literal(1)
+            return one
 
         self = super(Power, cls).__new__(cls)
         self.children = base, exponent
@@ -448,6 +465,10 @@ class Indexed(Scalar):
             if isinstance(index, Index):
                 index.set_extent(extent)
 
+        # Empty multiindex
+        if not multiindex:
+            return aggregate
+
         # Zero folding
         if isinstance(aggregate, Zero):
             return Zero()
@@ -553,26 +574,27 @@ class ComponentTensor(Node):
 
 
 class IndexSum(Scalar):
-    __slots__ = ('children', 'index')
-    __back__ = ('index',)
+    __slots__ = ('children', 'multiindex')
+    __back__ = ('multiindex',)
 
-    def __new__(cls, summand, index):
+    def __new__(cls, summand, multiindex):
         # Sum zeros
         assert not summand.shape
         if isinstance(summand, Zero):
             return summand
 
-        # Sum a single expression
-        if index.extent == 1:
-            return Indexed(ComponentTensor(summand, (index,)), (0,))
+        # No indices case
+        multiindex = tuple(multiindex)
+        if not multiindex:
+            return summand
 
         self = super(IndexSum, cls).__new__(cls)
         self.children = (summand,)
-        self.index = index
+        self.multiindex = multiindex
 
         # Collect shape and free indices
-        assert index in summand.free_indices
-        self.free_indices = unique(set(summand.free_indices) - {index})
+        assert set(multiindex) <= set(summand.free_indices)
+        self.free_indices = unique(set(summand.free_indices) - set(multiindex))
 
         return self
 
@@ -641,7 +663,7 @@ class Delta(Scalar, Terminal):
 
         # \delta_{i,i} = 1
         if i == j:
-            return Literal(1)
+            return one
 
         # Fixed indices
         if isinstance(i, int) and isinstance(j, int):
@@ -714,14 +736,13 @@ def unique(indices):
     return tuple(sorted(set(indices), key=id))
 
 
-def index_sum(expression, index):
-    """Eliminates an index from the free indices of an expression by
-    summing over it.  Returns the expression unchanged if the index is
-    not a free index of the expression."""
-    if index in expression.free_indices:
-        return IndexSum(expression, index)
-    else:
-        return expression
+def index_sum(expression, indices):
+    """Eliminates indices from the free indices of an expression by
+    summing over them.  Skips any index that is not a free index of
+    the expression."""
+    multiindex = tuple(index for index in indices
+                       if index in expression.free_indices)
+    return IndexSum(expression, multiindex)
 
 
 def partial_indexed(tensor, indices):
@@ -764,3 +785,7 @@ def reshape(variable, *shapes):
         dim2idxs.append((0, tuple(idxs)))
     expr = FlexiblyIndexed(variable, tuple(dim2idxs))
     return ComponentTensor(expr, tuple(indices))
+
+
+# Static one object for quicker constant folding
+one = Literal(1)

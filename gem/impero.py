@@ -146,6 +146,17 @@ class For(Node):
     __slots__ = ('index', 'children')
     __front__ = ('index',)
 
+    def __new__(cls, index, statement):
+        # In case of an empty loop, create a Noop instead.
+        # Related: https://github.com/coneoproject/COFFEE/issues/98
+        assert isinstance(statement, Block)
+        if not statement.children:
+            # This "works" because the loop_shape of this node is not
+            # asked any more.
+            return Noop(None)
+        else:
+            return super(For, cls).__new__(cls)
+
     def __init__(self, index, statement):
         self.index = index
         self.children = (statement,)
