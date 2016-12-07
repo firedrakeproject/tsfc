@@ -38,13 +38,11 @@ literal_rounding.register(Node)(reuse_if_untouched)
 def literal_rounding_literal(node, self):
     table = node.array
     epsilon = self.epsilon
-    # Copied from FFC (ffc/quadrature/quadratureutils.py)
-    table[abs(table) < epsilon] = 0
-    table[abs(table - 1.0) < epsilon] = 1.0
-    table[abs(table + 1.0) < epsilon] = -1.0
-    table[abs(table - 0.5) < epsilon] = 0.5
-    table[abs(table + 0.5) < epsilon] = -0.5
-    return Literal(table)
+    # Mimic the rounding applied at COFFEE formatting, which in turn
+    # mimics FFC formatting.
+    one_decimal = numpy.round(table, 1)
+    one_decimal[numpy.logical_not(one_decimal)] = 0  # no minus zeros
+    return Literal(numpy.where(abs(table - one_decimal) < epsilon, one_decimal, table))
 
 
 def ffc_rounding(expression, epsilon):
@@ -149,25 +147,33 @@ def _select_expression(expressions, index):
     if all(e == expr for e in expressions):
         return expr
 
-    cls = type(expr)
-    if all(type(e) == cls for e in expressions):
-        if not cls.__front__ and not cls.__back__:
-            assert all(len(e.children) == len(expr.children) for e in expressions)
-            assert len(expr.children) > 0
+    types = set(map(type, expressions))
+    if types <= {Indexed, Zero}:
+        multiindex, = set(e.multiindex for e in expressions if isinstance(e, Indexed))
+        shape = tuple(i.extent for i in multiindex)
 
-            return expr.reconstruct(*[_select_expression(nth_children, index)
-                                      for nth_children in zip(*[e.children
-                                                                for e in expressions])])
-        elif issubclass(cls, Indexed):
-            assert all(e.multiindex == expr.multiindex for e in expressions)
-            return Indexed(_select_expression([e.children[0]
-                                               for e in expressions], index), expr.multiindex)
-        elif issubclass(cls, (Literal, Failure)):
-            return partial_indexed(ListTensor(expressions), (index,))
-        else:
-            assert False
-    else:
-        assert False
+        def child(expression):
+            if isinstance(expression, Indexed):
+                return expression.children[0]
+            elif isinstance(expression, Zero):
+                return Zero(shape)
+        return Indexed(_select_expression(list(map(child, expressions)), index), multiindex)
+
+    if types <= {Literal, Zero, Failure}:
+        return partial_indexed(ListTensor(expressions), (index,))
+
+    if len(types) == 1:
+        cls, = types
+        if cls.__front__ or cls.__back__:
+            raise NotImplementedError
+        assert all(len(e.children) == len(expr.children) for e in expressions)
+        assert len(expr.children) > 0
+
+        return expr.reconstruct(*[_select_expression(nth_children, index)
+                                  for nth_children in zip(*[e.children
+                                                            for e in expressions])])
+
+    raise NotImplementedError
 
 
 def select_expression(expressions, index):

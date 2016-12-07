@@ -583,6 +583,15 @@ class IndexSum(Scalar):
         if isinstance(summand, Zero):
             return summand
 
+        # Unroll singleton sums
+        unroll = tuple(index for index in multiindex if index.extent <= 1)
+        if unroll:
+            assert numpy.prod([index.extent for index in unroll]) == 1
+            summand = Indexed(ComponentTensor(summand, unroll),
+                              (0,) * len(unroll))
+            multiindex = tuple(index for index in multiindex
+                               if index not in unroll)
+
         # No indices case
         multiindex = tuple(multiindex)
         if not multiindex:
