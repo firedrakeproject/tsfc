@@ -33,8 +33,7 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
            'Index', 'VariableIndex', 'Indexed', 'FlexiblyIndexed',
            'ComponentTensor', 'IndexSum', 'ListTensor', 'Delta',
-           'IndexIterator', 'affine_index_group', 'index_sum',
-           'partial_indexed', 'reshape']
+           'index_sum', 'partial_indexed', 'reshape']
 
 
 class NodeMeta(type):
@@ -413,22 +412,6 @@ class Index(IndexBase):
         return id(self) < id(other)
 
 
-class AffineIndex(Index):
-    """An index in an affine_index_group. Do not instantiate directly but
-    instead call :func:`affine_index_group`."""
-    __slots__ = ('name', 'extent', 'count', 'group')
-
-    def __str__(self):
-        if self.name is None:
-            return "i_%d" % self.count
-        return self.name
-
-    def __repr__(self):
-        if self.name is None:
-            return "AffineIndex(%r)" % self.count
-        return "AffineIndex(%r)" % self.name
-
-
 class VariableIndex(IndexBase):
     """An index that is constant during a single execution of the
     kernel, but whose value is not known at compile time."""
@@ -685,55 +668,6 @@ class Delta(Scalar, Terminal):
         free_indices = tuple(index for index in (i, j) if isinstance(index, Index))
         self.free_indices = tuple(unique(free_indices))
         return self
-
-
-class IndexIterator(object):
-    """An iterator whose value is a multi-index (tuple) iterating over the
-    extent of the supplied :class:`.Index` objects in a last index varies
-    fastest (ie 'c') ordering.
-
-    :arg *indices: the indices over whose extent to iterate."""
-    def __init__(self, *indices):
-
-        self.affine_groups = set()
-        for i in indices:
-            if isinstance(i, AffineIndex):
-                try:
-                    pos = tuple(indices.index(g) for g in i.group)
-                except ValueError:
-                    raise ValueError("Only able to iterate over all indices in an affine group at once")
-                self.affine_groups.add((i.group, pos))
-
-        self.ndindex = numpy.ndindex(tuple(i.extent for i in indices))
-
-    def _affine_groups_legal(self, multiindex):
-        for group, pos in self.affine_groups:
-            if sum(multiindex[p] for p in pos) >= group[0].extent:
-                return False
-        return True
-
-    def __iter__(self):
-        # Fix this for affine index groups.
-        while True:
-            multiindex = self.ndindex.next()
-            if self._affine_groups_legal(multiindex):
-                yield multiindex
-
-
-def affine_index_group(n, extent):
-    """A set of indices whose values are constrained to lie in a simplex
-    subset of the iteration space.
-
-    :arg n: the number of indices in the group.
-    :arg extent: sum(indices) < extent
-    """
-
-    group = tuple(AffineIndex(extent=extent) for i in range(n))
-
-    for g in group:
-        g.group = group
-
-    return group
 
 
 def unique(indices):
