@@ -34,6 +34,13 @@ class NoopError(Exception):
     pass
 
 
+def preprocess_gem(expressions):
+    """Lower GEM nodes that cannot be translated to C directly."""
+    expressions = optimise.replace_delta(expressions)
+    expressions = optimise.remove_componenttensors(expressions)
+    return expressions
+
+
 def compile_gem(return_variables, expressions, prefix_ordering, remove_zeros=False):
     """Compiles GEM to Impero.
 
@@ -42,9 +49,6 @@ def compile_gem(return_variables, expressions, prefix_ordering, remove_zeros=Fal
     :arg prefix_ordering: outermost loop indices
     :arg remove_zeros: remove zero assignment to return variables
     """
-    expressions = optimise.replace_delta(expressions)
-    expressions = optimise.remove_componenttensors(expressions)
-
     # Remove zeros
     if remove_zeros:
         rv = []
