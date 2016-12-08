@@ -735,10 +735,12 @@ def reshape(var, *shapes):
         variable = var
         indexes = tuple(Index(extent=extent) for extent in variable.shape)
         dim2idxs = tuple((0, ((index, 1),)) for index in indexes)
+        assert len(indexes) == len(shapes)
         shape_of = dict(zip(indexes, shapes))
     elif isinstance(var, ComponentTensor) and isinstance(var.children[0], FlexiblyIndexed):
         variable = var.children[0].children[0]
         dim2idxs = var.children[0].dim2idxs
+        assert len(var.multiindex) == len(shapes)
         shape_of = dict(zip(var.multiindex, shapes))
     else:
         raise ValueError("Cannot view {} objects.".format(type(var).__name__))
@@ -775,10 +777,12 @@ def view(var, *slices):
         variable = var
         indexes = tuple(Index(extent=extent) for extent in variable.shape)
         dim2idxs = tuple((0, ((index, 1),)) for index in indexes)
+        assert len(indexes) == len(slices)
         slice_of = dict(zip(indexes, slices))
     elif isinstance(var, ComponentTensor) and isinstance(var.children[0], FlexiblyIndexed):
         variable = var.children[0].children[0]
         dim2idxs = var.children[0].dim2idxs
+        assert len(var.multiindex) == len(slices)
         slice_of = dict(zip(var.multiindex, slices))
     else:
         raise ValueError("Cannot view {} objects.".format(type(var).__name__))
@@ -791,7 +795,6 @@ def view(var, *slices):
         for idx in idxs:
             index, stride = idx
             assert isinstance(index, Index)
-            assert index.extent is not None
             dim = index.extent
             s = slice_of[index]
             start = s.start or 0
