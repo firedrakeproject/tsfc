@@ -748,27 +748,50 @@ def reshape(variable, *shapes):
     return ComponentTensor(expr, tuple(indices))
 
 
-def view(variable, *slices):
+def view(var, *slices):
     """View a part of a variable.
 
-    :arg variable: a :py:class:`Variable`
+    :arg var: a :py:class:`Variable`
     :arg slices: one slice object for each dimension of the variable.
     """
-    dim2idxs = []
+    if isinstance(var, Variable):
+        variable = var
+        indexes = tuple(Index(extent=extent) for extent in variable.shape)
+        dim2idxs = tuple((0, ((index, 1),)) for index in indexes)
+        slice_of = dict(zip(indexes, slices))
+    elif isinstance(var, ComponentTensor) and isinstance(var.children[0], FlexiblyIndexed):
+        variable = var.children[0].children[0]
+        dim2idxs = var.children[0].dim2idxs
+        slice_of = dict(zip(var.multiindex, slices))
+    else:
+        raise ValueError("Cannot view {} objects.".format(type(var).__name__))
+
+    dim2idxs_ = []
     indices = []
-    for s, dim in zip(slices, variable.shape):
-        start = s.start or 0
-        stop = s.stop or dim
-        if stop is None:
-            raise ValueError("Unknown extent!")
-        if dim is not None and stop > dim:
-            raise ValueError("Slice exceeds dimension extent!")
-        step = s.step or 1
-        extent = 1 + (stop - start - 1) // step
-        index = Index(extent=extent)
-        dim2idxs.append((s.start, ((index, step),)))
-        indices.append(index)
-    expr = FlexiblyIndexed(variable, tuple(dim2idxs))
+    for offset, idxs in dim2idxs:
+        offset_ = offset
+        idxs_ = []
+        for idx in idxs:
+            index, stride = idx
+            assert isinstance(index, Index)
+            assert index.extent is not None
+            dim = index.extent
+            s = slice_of[index]
+            start = s.start or 0
+            stop = s.stop or dim
+            if stop is None:
+                raise ValueError("Unknown extent!")
+            if dim is not None and stop > dim:
+                raise ValueError("Slice exceeds dimension extent!")
+            step = s.step or 1
+            offset_ += start * stride
+            extent = 1 + (stop - start - 1) // step
+            index_ = Index(extent=extent)
+            indices.append(index_)
+            idxs_.append((index_, step * stride))
+        dim2idxs_.append((offset_, tuple(idxs_)))
+
+    expr = FlexiblyIndexed(variable, tuple(dim2idxs_))
     return ComponentTensor(expr, tuple(indices))
 
 
