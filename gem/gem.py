@@ -32,9 +32,9 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'Variable', 'Sum', 'Product', 'Division', 'Power',
            'MathFunction', 'MinValue', 'MaxValue', 'Comparison',
            'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
-           'Index', 'VariableIndex', 'Indexed', 'FlexiblyIndexed',
-           'ComponentTensor', 'IndexSum', 'ListTensor', 'Delta',
-           'index_sum', 'partial_indexed', 'reshape', 'view']
+           'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
+           'IndexSum', 'ListTensor', 'Delta', 'index_sum',
+           'partial_indexed', 'reshape', 'view']
 
 
 class NodeMeta(type):
@@ -725,26 +725,43 @@ def strides_of(shape):
     return list(temp) + [1]
 
 
-def reshape(variable, *shapes):
+def reshape(var, *shapes):
     """Reshape a variable (splitting indices only).
 
-    :arg variable: a :py:class:`Variable`
+    :arg var: a :py:class:`Variable`
     :arg shapes: one shape tuple for each dimension of the variable.
     """
-    dim2idxs = []
-    indices = []
-    for shape, dim in zip(shapes, variable.shape):
-        if dim is not None and numpy.prod(shape) != dim:
-            raise ValueError("Shape {} does not match extent {}.".format(shape, dim))
+    if isinstance(var, Variable):
+        variable = var
+        indexes = tuple(Index(extent=extent) for extent in variable.shape)
+        dim2idxs = tuple((0, ((index, 1),)) for index in indexes)
+        shape_of = dict(zip(indexes, shapes))
+    elif isinstance(var, ComponentTensor) and isinstance(var.children[0], FlexiblyIndexed):
+        variable = var.children[0].children[0]
+        dim2idxs = var.children[0].dim2idxs
+        shape_of = dict(zip(var.multiindex, shapes))
+    else:
+        raise ValueError("Cannot view {} objects.".format(type(var).__name__))
 
-        strides = strides_of(shape)
-        idxs = []
-        for extent, stride in zip(shape, strides):
-            index = Index(extent=extent)
-            idxs.append((index, stride))
-            indices.append(index)
-        dim2idxs.append((0, tuple(idxs)))
-    expr = FlexiblyIndexed(variable, tuple(dim2idxs))
+    dim2idxs_ = []
+    indices = []
+    for offset, idxs in dim2idxs:
+        idxs_ = []
+        for idx in idxs:
+            index, stride = idx
+            assert isinstance(index, Index)
+            dim = index.extent
+            shape = shape_of[index]
+            if dim is not None and numpy.prod(shape) != dim:
+                raise ValueError("Shape {} does not match extent {}.".format(shape, dim))
+            strides = strides_of(shape)
+            for extent, stride_ in zip(shape, strides):
+                index = Index(extent=extent)
+                idxs_.append((index, stride_ * stride))
+                indices.append(index)
+        dim2idxs_.append((offset, tuple(idxs_)))
+
+    expr = FlexiblyIndexed(variable, tuple(dim2idxs_))
     return ComponentTensor(expr, tuple(indices))
 
 
