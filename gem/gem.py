@@ -16,6 +16,7 @@ indices.
 
 from __future__ import absolute_import, print_function, division
 from six import with_metaclass
+from six.moves import range, zip
 
 from abc import ABCMeta
 from itertools import chain
@@ -33,7 +34,7 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
            'Index', 'VariableIndex', 'Indexed', 'FlexiblyIndexed',
            'ComponentTensor', 'IndexSum', 'ListTensor', 'Delta',
-           'index_sum', 'partial_indexed', 'reshape']
+           'index_sum', 'partial_indexed', 'reshape', 'view']
 
 
 class NodeMeta(type):
@@ -488,7 +489,7 @@ class FlexiblyIndexed(Scalar):
 
         For example, if ``variable`` is rank two, and ``dim2idxs`` is
 
-            ((1, ((i, 2), (j, 3), (k, 4))), (0, ()))
+            ((1, ((i, 12), (j, 4), (k, 1))), (0, ()))
 
         then this corresponds to the indexing:
 
@@ -498,31 +499,32 @@ class FlexiblyIndexed(Scalar):
         assert isinstance(variable, Variable)
         assert len(variable.shape) == len(dim2idxs)
 
-        indices = []
+        dim2idxs_ = []
+        free_indices = []
         for dim, (offset, idxs) in zip(variable.shape, dim2idxs):
-            strides = []
+            offset_ = offset
+            idxs_ = []
+            last = 0
             for idx in idxs:
                 index, stride = idx
-                strides.append(stride)
-
                 if isinstance(index, Index):
-                    if index.extent is None:
-                        index.set_extent(stride)
-                    elif not (index.extent <= stride):
-                        raise ValueError("Index extent cannot exceed stride")
-                    indices.append(index)
+                    assert index.extent is not None
+                    free_indices.append(index)
+                    idxs_.append((index, stride))
+                    last += (index.extent - 1) * stride
                 elif isinstance(index, int):
-                    if not (index <= stride):
-                        raise ValueError("Index cannot exceed stride")
+                    offset_ += index * stride
                 else:
                     raise ValueError("Unexpected index type for flexible indexing")
 
-            if dim is not None and offset + numpy.prod(strides) > dim:
+            if dim is not None and offset_ + last >= dim:
                 raise ValueError("Offset {0} and indices {1} exceed dimension {2}".format(offset, idxs, dim))
 
+            dim2idxs_.append((offset_, tuple(idxs_)))
+
         self.children = (variable,)
-        self.dim2idxs = dim2idxs
-        self.free_indices = unique(indices)
+        self.dim2idxs = tuple(dim2idxs_)
+        self.free_indices = unique(free_indices)
 
 
 class ComponentTensor(Node):
@@ -711,6 +713,18 @@ def partial_indexed(tensor, indices):
         raise ValueError("More indices than rank!")
 
 
+def strides_of(shape):
+    """Calculate cumulative strides from per-dimension capacities.
+
+    For example:
+
+        [2, 3, 4] ==> [12, 4, 1]
+
+    """
+    temp = numpy.flipud(numpy.cumprod(numpy.flipud(list(shape)[1:])))
+    return list(temp) + [1]
+
+
 def reshape(variable, *shapes):
     """Reshape a variable (splitting indices only).
 
@@ -719,13 +733,41 @@ def reshape(variable, *shapes):
     """
     dim2idxs = []
     indices = []
-    for shape in shapes:
+    for shape, dim in zip(shapes, variable.shape):
+        if dim is not None and numpy.prod(shape) != dim:
+            raise ValueError("Shape {} does not match extent {}.".format(shape, dim))
+
+        strides = strides_of(shape)
         idxs = []
-        for e in shape:
-            i = Index(extent=e)
-            idxs.append((i, e))
-            indices.append(i)
+        for extent, stride in zip(shape, strides):
+            index = Index(extent=extent)
+            idxs.append((index, stride))
+            indices.append(index)
         dim2idxs.append((0, tuple(idxs)))
+    expr = FlexiblyIndexed(variable, tuple(dim2idxs))
+    return ComponentTensor(expr, tuple(indices))
+
+
+def view(variable, *slices):
+    """View a part of a variable.
+
+    :arg variable: a :py:class:`Variable`
+    :arg slices: one slice object for each dimension of the variable.
+    """
+    dim2idxs = []
+    indices = []
+    for s, dim in zip(slices, variable.shape):
+        start = s.start or 0
+        stop = s.stop or dim
+        if stop is None:
+            raise ValueError("Unknown extent!")
+        if dim is not None and stop > dim:
+            raise ValueError("Slice exceeds dimension extent!")
+        step = s.step or 1
+        extent = 1 + (stop - start - 1) // step
+        index = Index(extent=extent)
+        dim2idxs.append((s.start, ((index, step),)))
+        indices.append(index)
     expr = FlexiblyIndexed(variable, tuple(dim2idxs))
     return ComponentTensor(expr, tuple(indices))
 
