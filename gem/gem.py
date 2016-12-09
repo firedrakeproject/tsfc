@@ -725,25 +725,31 @@ def strides_of(shape):
     return list(temp) + [1]
 
 
-def reshape(var, *shapes):
+def decompose_variable_view(expression):
+    """Extract ComponentTensor + FlexiblyIndexed view onto a variable."""
+    if isinstance(expression, Variable):
+        variable = expression
+        indexes = tuple(Index(extent=extent) for extent in expression.shape)
+        dim2idxs = tuple((0, ((index, 1),)) for index in indexes)
+    elif isinstance(expression, ComponentTensor) and isinstance(expression.children[0], FlexiblyIndexed):
+        variable = expression.children[0].children[0]
+        indexes = expression.multiindex
+        dim2idxs = expression.children[0].dim2idxs
+    else:
+        raise ValueError("Cannot handle {} objects.".format(type(expression).__name__))
+
+    return variable, dim2idxs, indexes
+
+
+def reshape(expression, *shapes):
     """Reshape a variable (splitting indices only).
 
-    :arg var: a :py:class:`Variable`
+    :arg expression: view of a :py:class:`Variable`
     :arg shapes: one shape tuple for each dimension of the variable.
     """
-    if isinstance(var, Variable):
-        variable = var
-        indexes = tuple(Index(extent=extent) for extent in variable.shape)
-        dim2idxs = tuple((0, ((index, 1),)) for index in indexes)
-        assert len(indexes) == len(shapes)
-        shape_of = dict(zip(indexes, shapes))
-    elif isinstance(var, ComponentTensor) and isinstance(var.children[0], FlexiblyIndexed):
-        variable = var.children[0].children[0]
-        dim2idxs = var.children[0].dim2idxs
-        assert len(var.multiindex) == len(shapes)
-        shape_of = dict(zip(var.multiindex, shapes))
-    else:
-        raise ValueError("Cannot view {} objects.".format(type(var).__name__))
+    variable, dim2idxs, indexes = decompose_variable_view(expression)
+    assert len(indexes) == len(shapes)
+    shape_of = dict(zip(indexes, shapes))
 
     dim2idxs_ = []
     indices = []
@@ -767,25 +773,15 @@ def reshape(var, *shapes):
     return ComponentTensor(expr, tuple(indices))
 
 
-def view(var, *slices):
+def view(expression, *slices):
     """View a part of a variable.
 
-    :arg var: a :py:class:`Variable`
+    :arg expression: view of a :py:class:`Variable`
     :arg slices: one slice object for each dimension of the variable.
     """
-    if isinstance(var, Variable):
-        variable = var
-        indexes = tuple(Index(extent=extent) for extent in variable.shape)
-        dim2idxs = tuple((0, ((index, 1),)) for index in indexes)
-        assert len(indexes) == len(slices)
-        slice_of = dict(zip(indexes, slices))
-    elif isinstance(var, ComponentTensor) and isinstance(var.children[0], FlexiblyIndexed):
-        variable = var.children[0].children[0]
-        dim2idxs = var.children[0].dim2idxs
-        assert len(var.multiindex) == len(slices)
-        slice_of = dict(zip(var.multiindex, slices))
-    else:
-        raise ValueError("Cannot view {} objects.".format(type(var).__name__))
+    variable, dim2idxs, indexes = decompose_variable_view(expression)
+    assert len(indexes) == len(slices)
+    slice_of = dict(zip(indexes, slices))
 
     dim2idxs_ = []
     indices = []
