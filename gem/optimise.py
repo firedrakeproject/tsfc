@@ -231,7 +231,7 @@ def delta_elimination(sum_indices, factors):
 
 
 def sum_factorise(sum_indices, factors):
-    """Optimise a tensor product throw sum factorisation.
+    """Optimise a tensor product through sum factorisation.
 
     :arg sum_indices: free indices for contractions
     :arg factors: product factors
