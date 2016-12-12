@@ -165,7 +165,7 @@ def _select_expression(expressions, index):
     if len(types) == 1:
         cls, = types
         if cls.__front__ or cls.__back__:
-            raise NotImplementedError
+            raise NotImplementedError("How to factorise {} expressions?".format(cls.__name__))
         assert all(len(e.children) == len(expr.children) for e in expressions)
         assert len(expr.children) > 0
 
@@ -173,7 +173,7 @@ def _select_expression(expressions, index):
                                   for nth_children in zip(*[e.children
                                                             for e in expressions])])
 
-    raise NotImplementedError
+    raise NotImplementedError("No rule for factorising expressions of this kind.")
 
 
 def select_expression(expressions, index):
