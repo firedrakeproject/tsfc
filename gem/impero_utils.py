@@ -92,10 +92,10 @@ def compile_gem(return_variables, expressions, prefix_ordering, remove_zeros=Fal
     tree = make_loop_tree(ops, get_indices)
 
     # Collect temporaries
-    temporaries = collect_temporaries(ops)
+    temporaries = collect_temporaries(tree)
 
     # Determine declarations
-    declare, indices = place_declarations(ops, tree, temporaries, get_indices)
+    declare, indices = place_declarations(tree, temporaries, get_indices)
 
     # Prepare ImperoC (Impero AST + other data for code generation)
     return ImperoC(tree, temporaries, declare, indices)
@@ -147,18 +147,18 @@ def inline_temporaries(expressions, ops):
     return [op for op in ops if not (isinstance(op, imp.Evaluate) and op.expression in candidates)]
 
 
-def collect_temporaries(ops):
+def collect_temporaries(tree):
     """Collects GEM expressions to assign to temporaries from a list
     of Impero terminals."""
     result = []
-    for op in ops:
+    for node in traversal((tree,)):
         # IndexSum temporaries should be added either at Initialise or
         # at Accumulate.  The difference is only in ordering
         # (numbering).  We chose Accumulate here.
-        if isinstance(op, imp.Accumulate):
-            result.append(op.indexsum)
-        elif isinstance(op, imp.Evaluate):
-            result.append(op.expression)
+        if isinstance(node, imp.Accumulate):
+            result.append(node.indexsum)
+        elif isinstance(node, imp.Evaluate):
+            result.append(node.expression)
     return result
 
 
@@ -185,10 +185,9 @@ def make_loop_tree(ops, get_indices, level=0):
     return imp.Block(statements)
 
 
-def place_declarations(ops, tree, temporaries, get_indices):
+def place_declarations(tree, temporaries, get_indices):
     """Determines where and how to declare temporaries for an Impero AST.
 
-    :arg ops: terminals of ``tree``
     :arg tree: Impero AST to determine the declarations for
     :arg temporaries: list of GEM expressions which are assigned to
                       temporaries
@@ -200,8 +199,9 @@ def place_declarations(ops, tree, temporaries, get_indices):
 
     # Collect the total number of temporary references
     total_refcount = collections.Counter()
-    for op in ops:
-        total_refcount.update(temp_refcount(temporaries_set, op))
+    for node in traversal((tree,)):
+        if isinstance(node, imp.Terminal):
+            total_refcount.update(temp_refcount(temporaries_set, node))
     assert temporaries_set == set(total_refcount)
 
     # Result
@@ -264,17 +264,18 @@ def place_declarations(ops, tree, temporaries, get_indices):
 
     # Set in ``declare`` for Impero terminals whether they should
     # declare the temporary that they are writing to.
-    for op in ops:
-        declare[op] = False
-        if isinstance(op, imp.Evaluate):
-            e = op.expression
-        elif isinstance(op, imp.Initialise):
-            e = op.indexsum
-        else:
-            continue
+    for node in traversal((tree,)):
+        if isinstance(node, imp.Terminal):
+            declare[node] = False
+            if isinstance(node, imp.Evaluate):
+                e = node.expression
+            elif isinstance(node, imp.Initialise):
+                e = node.indexsum
+            else:
+                continue
 
-        if len(indices[e]) == 0:
-            declare[op] = True
+            if len(indices[e]) == 0:
+                declare[node] = True
 
     return declare, indices
 

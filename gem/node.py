@@ -113,7 +113,7 @@ def traversal(expression_dags):
     while lifo:
         node = lifo.pop()
         yield node
-        for child in node.children:
+        for child in reversed(node.children):
             if child not in seen:
                 seen.add(child)
                 lifo.append(child)
