@@ -68,7 +68,8 @@ def pprint(expression_dags, context=global_context):
             print(make_decl(node, name, context), '=', to_str(node, context, top=True))
 
     for i, root in enumerate(expression_dags):
-        print(make_decl(root, "#%d" % (i + 1), context), '=', to_str(root, context))
+        name = "#%d" % (i + 1)
+        print(make_decl(root, name, context), '=', to_str(root, context))
 
 
 def make_decl(node, name, ctx):
@@ -80,23 +81,23 @@ def make_decl(node, name, ctx):
     return result
 
 
-def to_str(expr, ctx, top=False):
+def to_str(expr, ctx, prec=None, top=False):
     if not top and ctx.expression(expr):
         result = ctx.expression(expr)
         if expr.free_indices:
             result += '{' + ','.join(map(ctx.index, expr.free_indices)) + '}'
         return result
     else:
-        return _to_str(expr, ctx)
+        return _to_str(expr, ctx, prec=prec)
 
 
 @singledispatch
-def _to_str(node, ctx):
+def _to_str(node, ctx, prec):
     raise AssertionError("GEM node expected")
 
 
 @_to_str.register(gem.Node)
-def _to_str_node(node, ctx):
+def _to_str_node(node, ctx, prec):
     front_args = [repr(getattr(node, name)) for name in node.__front__]
     back_args = [repr(getattr(node, name)) for name in node.__back__]
     children = [to_str(child, ctx) for child in node.children]
@@ -104,13 +105,13 @@ def _to_str_node(node, ctx):
 
 
 @_to_str.register(gem.Zero)
-def _to_str_zero(node, ctx):
+def _to_str_zero(node, ctx, prec):
     assert not node.shape
     return "%g" % node.value
 
 
 @_to_str.register(gem.Literal)
-def _to_str_literal(node, ctx):
+def _to_str_literal(node, ctx, prec):
     if node.shape:
         return repr(node.array.tolist())
     else:
@@ -118,12 +119,12 @@ def _to_str_literal(node, ctx):
 
 
 @_to_str.register(gem.Variable)
-def _to_str_variable(node, ctx):
+def _to_str_variable(node, ctx, prec):
     return node.name
 
 
 @_to_str.register(gem.ListTensor)
-def _to_str_listtensor(node, ctx):
+def _to_str_listtensor(node, ctx, prec):
     def recurse_rank(array):
         if len(array.shape) > 1:
             return '[' + ', '.join(map(recurse_rank, array)) + ']'
@@ -134,11 +135,9 @@ def _to_str_listtensor(node, ctx):
 
 
 @_to_str.register(gem.Indexed)
-def _to_str_indexed(node, ctx):
+def _to_str_indexed(node, ctx, prec):
     child, = node.children
     result = to_str(child, ctx)
-    # if child.free_indices:
-    #     result += '{' + ','.join(index_names[i] for i in child.free_indices) + '}'
     dimensions = []
     for index in node.multiindex:
         if isinstance(index, gem.Index):
@@ -152,7 +151,7 @@ def _to_str_indexed(node, ctx):
 
 
 @_to_str.register(gem.FlexiblyIndexed)
-def _to_str_flexiblyindexed(node, ctx):
+def _to_str_flexiblyindexed(node, ctx, prec):
     child, = node.children
     result = to_str(child, ctx)
     dimensions = []
@@ -177,29 +176,37 @@ def _to_str_flexiblyindexed(node, ctx):
 
 
 @_to_str.register(gem.IndexSum)
-def _to_str_indexsum(node, ctx):
-    index, = node.multiindex
-    return u'\u03A3_{' + ctx.index(index) + '}(' + to_str(node.children[0], ctx) + ')'
+def _to_str_indexsum(node, ctx, prec):
+    result = 'Sum_{' + ','.join(map(ctx.index, node.multiindex)) + '} ' + to_str(node.children[0], ctx, prec=2)
+    if prec is not None and prec > 2:
+        result = '({})'.format(result)
+    return result
 
 
 @_to_str.register(gem.ComponentTensor)
-def _to_str_componenttensor(node, ctx):
+def _to_str_componenttensor(node, ctx, prec):
     return to_str(node.children[0], ctx) + '|' + ','.join(ctx.index(i) for i in node.multiindex)
 
 
 @_to_str.register(gem.Sum)
-def _to_str_sum(node, ctx):
-    children = [to_str(child, ctx) for child in node.children]
-    return "(" + " + ".join(children) + ")"
+def _to_str_sum(node, ctx, prec):
+    children = [to_str(child, ctx, prec=1) for child in node.children]
+    result = " + ".join(children)
+    if prec is not None and prec > 1:
+        result = "({})".format(result)
+    return result
 
 
 @_to_str.register(gem.Product)
-def _to_str_product(node, ctx):
-    children = [to_str(child, ctx) for child in node.children]
-    return "(" + "*".join(children) + ")"
+def _to_str_product(node, ctx, prec):
+    children = [to_str(child, ctx, prec=3) for child in node.children]
+    result = "*".join(children)
+    if prec is not None and prec > 3:
+        result = "({})".format(result)
+    return result
 
 
 @_to_str.register(gem.MathFunction)
-def _to_str_mathfunction(node, ctx):
+def _to_str_mathfunction(node, ctx, prec):
     child, = node.children
     return node.name + "(" + to_str(child, ctx) + ")"
