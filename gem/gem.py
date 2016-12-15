@@ -451,6 +451,12 @@ class VariableIndex(IndexBase):
     def __hash__(self):
         return hash((VariableIndex, self.expression))
 
+    def __str__(self):
+        return str(self.expression)
+
+    def __repr__(self):
+        return repr(self.expression)
+
     def __reduce__(self):
         return VariableIndex, (self.expression,)
 
