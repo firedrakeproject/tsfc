@@ -145,7 +145,7 @@ def _to_str_indexed(node, ctx, prec):
         elif isinstance(index, int):
             dimensions.append(str(index))
         else:
-            assert False
+            dimensions.append(to_str(index.expression, ctx))
     result += '[' + ','.join(dimensions) + ']'
     return result
 
