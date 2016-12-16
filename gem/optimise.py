@@ -63,7 +63,6 @@ def _replace_div(node, self):
 
     :param node: root of expression
     :param self: function for recursive calls
-    :return:
     """
     raise AssertionError("cannot handle type %s" % type(node))
 
@@ -84,6 +83,60 @@ def replace_division(expressions):
     """Replace divisions with multiplications in expressions"""
     mapper = Memoizer(_replace_div)
     return list(map(mapper, expressions))
+
+
+def _sort_product_factors(product):
+    """sort the factors of products
+
+    :param product:
+    :return: sorted list of factors
+    """
+    factors = []  # collected factors
+    queue = []  # queue of factors to process
+    queue += product.children
+    while len(queue) > 0:
+        factor = queue.pop()
+        if isinstance(factor, Product):
+            queue += factor.children
+        else:
+            factors.append(factor)
+    # function for sorting factors
+    sort_func = lambda node: len(node.free_indices)
+    return sorted(factors, key=sort_func)
+
+
+def _reassociate_product(node):
+    """Rearrange sequence of chain of products in increasing order of node rank.
+     For example, the product ::
+
+        a*b[i]*c[i][j]*d
+
+    are reordered as ::
+
+        a*d*b[i]*c[i][j]
+
+    :param node: root of expression
+    :return:
+    """
+    if isinstance(node, Terminal):
+        return node
+    if isinstance(node, Product):
+        factors = _sort_product_factors(node)
+        map(reassociate_product, factors)  # recursion
+        product = factors[0]
+        for factor in factors[1:]:
+            product = Product(product, factor)
+        return product
+    elif node.children:
+        new_children = list(map(_reassociate_product, node.children))
+        node.reconstruct(*new_children)
+        return node
+    else:
+        return node
+
+
+def reassociate_product(expressions):
+    return list(map(_reassociate_product, expressions))
 
 
 @singledispatch
