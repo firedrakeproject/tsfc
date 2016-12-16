@@ -167,7 +167,7 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     ir = list(reduce(gem.Sum, e, gem.Zero()) for e in zip(*irs))
 
     def fast_sum_factorise(sum_indices, factors):
-        return gem.optimise.sum_factorise(list(reversed(sum_indices)), factors)
+        return gem.optimise.sum_factorise(*gem.optimise.delta_elimination(list(reversed(sum_indices)), factors))
 
     def classify(argument_indices, expression):
         from gem.optimise import ATOMIC, COMPOUND, OTHER
