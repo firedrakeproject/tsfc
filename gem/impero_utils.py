@@ -38,6 +38,7 @@ def preprocess_gem(expressions):
     """Lower GEM nodes that cannot be translated to C directly."""
     expressions = optimise.replace_delta(expressions)
     expressions = optimise.remove_componenttensors(expressions)
+    expressions = optimise.replace_division(expressions)
     return expressions
 
 

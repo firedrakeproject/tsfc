@@ -17,7 +17,7 @@ from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
                      Product, Sum, Comparison, Conditional, Index,
                      VariableIndex, Indexed, FlexiblyIndexed,
                      IndexSum, ComponentTensor, ListTensor, Delta,
-                     partial_indexed, one)
+                     partial_indexed, one, Division)
 
 
 @singledispatch
@@ -55,6 +55,35 @@ def ffc_rounding(expression, epsilon):
     mapper = Memoizer(literal_rounding)
     mapper.epsilon = epsilon
     return mapper(expression)
+
+
+@singledispatch
+def _replace_div(node, self):
+    """Replace division with multiplication
+
+    :param node: root of expression
+    :param self: function for recursive calls
+    :return:
+    """
+    raise AssertionError("cannot handle type %s" % type(node))
+
+
+_replace_div.register(Node)(reuse_if_untouched)
+
+
+@_replace_div.register(Division)
+def _replace_div_division(node, self):
+    a, b = node.children
+    if isinstance(division, Literal):
+        return Product(self(a), Literal(1.0/b.array))
+    else:
+        return Product(self(a), Division(Literal(1.0), self(b)))
+
+
+def replace_division(expressions):
+    """Replace divisions with multiplications in expressions"""
+    mapper = Memoizer(_replace_div)
+    return list(map(mapper, expressions))
 
 
 @singledispatch
