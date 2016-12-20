@@ -101,6 +101,7 @@ def _sort_product_factors(product):
         else:
             factors.append(factor)
     # function for sorting factors
+    # should use more sophisticated method later on for optimal result
     sort_func = lambda node: len(node.free_indices)
     return sorted(factors, key=sort_func)
 
@@ -116,20 +117,22 @@ def _reassociate_product(node):
         a*d*b[i]*c[i][j]
 
     :param node: root of expression
-    :return:
+    :return: reassociated product node
     """
     if isinstance(node, Terminal):
         return node
     if isinstance(node, Product):
         factors = _sort_product_factors(node)
-        map(reassociate_product, factors)  # recursion
-        product = factors[0]
-        for factor in factors[1:]:
+        # need to optimise away iterator <==> list
+        new_factors = list(map(_reassociate_product, factors))  # recursion
+        product = new_factors[0]
+        for factor in new_factors[1:]:
             product = Product(product, factor)
         return product
     elif node.children:
         new_children = list(map(_reassociate_product, node.children))
-        node.reconstruct(*new_children)
+        # not sure if this is correct way to do reconstruct
+        node = node.reconstruct(*new_children)
         return node
     else:
         return node
