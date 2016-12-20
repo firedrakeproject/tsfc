@@ -94,8 +94,8 @@ def _sort_product_factors(product):
     factors = []  # collected factors
     queue = []  # queue of factors to process
     queue += product.children
-    while len(queue) > 0:
-        factor = queue.pop()
+    while queue:
+        factor = queue.pop(0)
         if isinstance(factor, Product):
             queue += factor.children
         else:
@@ -123,22 +123,15 @@ def _reassociate_product(node, self):
     raise AssertionError("cannot handle type %s" % type(node))
 
 
+_reassociate_product.register(Node)(reuse_if_untouched)
+
+
 @_reassociate_product.register(Product)
 def _reassociate_product_prod(node, self):
     factors = _sort_product_factors(node)
     # need to optimise away iterator <==> list
     new_factors = list(map(self, factors))  # recursion
     return reduce(Product, new_factors)
-
-
-@_reassociate_product.register(Node)
-def _reassociate_product_node(node, self):
-    if node.children:
-        new_children = list(map(self, node.children))
-        # not sure if this is correct way to do reconstruct
-        node = node.reconstruct(*new_children)
-
-    return node
 
 
 def reassociate_product(expressions):
