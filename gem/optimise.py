@@ -106,7 +106,8 @@ def _sort_product_factors(product):
     return sorted(factors, key=sort_func)
 
 
-def _reassociate_product(node):
+@singledispatch
+def _reassociate_product(node, self):
     """Rearrange sequence of chain of products in increasing order of node rank.
      For example, the product ::
 
@@ -119,27 +120,30 @@ def _reassociate_product(node):
     :param node: root of expression
     :return: reassociated product node
     """
-    if isinstance(node, Terminal):
-        return node
-    if isinstance(node, Product):
-        factors = _sort_product_factors(node)
-        # need to optimise away iterator <==> list
-        new_factors = list(map(_reassociate_product, factors))  # recursion
-        product = new_factors[0]
-        for factor in new_factors[1:]:
-            product = Product(product, factor)
-        return product
-    elif node.children:
-        new_children = list(map(_reassociate_product, node.children))
+    raise AssertionError("cannot handle type %s" % type(node))
+
+
+@_reassociate_product.register(Product)
+def _reassociate_product_prod(node, self):
+    factors = _sort_product_factors(node)
+    # need to optimise away iterator <==> list
+    new_factors = list(map(self, factors))  # recursion
+    return reduce(Product, new_factors)
+
+
+@_reassociate_product.register(Node)
+def _reassociate_product_node(node, self):
+    if node.children:
+        new_children = list(map(self, node.children))
         # not sure if this is correct way to do reconstruct
         node = node.reconstruct(*new_children)
-        return node
-    else:
-        return node
+
+    return node
 
 
 def reassociate_product(expressions):
-    return list(map(_reassociate_product, expressions))
+    mapper = Memoizer(_reassociate_product)
+    return list(map(mapper, expressions))
 
 
 @singledispatch
