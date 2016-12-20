@@ -73,7 +73,7 @@ _replace_div.register(Node)(reuse_if_untouched)
 @_replace_div.register(Division)
 def _replace_div_division(node, self):
     a, b = node.children
-    if isinstance(division, Literal):
+    if isinstance(b, Literal):
         return Product(self(a), Literal(1.0/b.array))
     else:
         return Product(self(a), Division(Literal(1.0), self(b)))
