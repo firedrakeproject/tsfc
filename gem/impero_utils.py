@@ -40,6 +40,7 @@ def preprocess_gem(expressions):
     expressions = optimise.remove_componenttensors(expressions)
     expressions = optimise.replace_division(expressions)
     expressions = optimise.reassociate_product(expressions)
+    expressions = optimise.factorise(expressions)
     return expressions
 
 

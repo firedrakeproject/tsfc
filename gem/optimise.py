@@ -85,25 +85,29 @@ def replace_division(expressions):
     return list(map(mapper, expressions))
 
 
-def _sort_product_factors(product):
-    """sort the factors of products
+def _collect_terms(node, node_type, sort_func=None):
+    """Helper function to recursively collect all children into a list from
+    :param:`node` and its children of class :param:`node_type`.
 
-    :param product:
-    :return: sorted list of factors
+    :param node: root of expression
+    :param node_type: class of node (e.g. Sum or Product)
+    :param sort_func: function to sort the returned list
+    :return: list of all terms
     """
-    factors = []  # collected factors
-    queue = []  # queue of factors to process
-    queue += product.children
+    from collections import deque
+    terms = []  # collected terms
+    queue = deque(node.children)  # queue of children nodes to process
     while queue:
-        factor = queue.pop(0)
-        if isinstance(factor, Product):
-            queue += factor.children
+        child = queue.popleft()
+        if isinstance(child, node_type):
+            queue.appendleft(child.children[1])
+            queue.appendleft(child.children[0])
         else:
-            factors.append(factor)
-    # function for sorting factors
-    # should use more sophisticated method later on for optimal result
-    sort_func = lambda node: len(node.free_indices)
-    return sorted(factors, key=sort_func)
+            terms.append(child)
+    if sort_func:
+        return sorted(terms, key=sort_func)
+    else:
+        return terms
 
 
 @singledispatch
@@ -128,7 +132,10 @@ _reassociate_product.register(Node)(reuse_if_untouched)
 
 @_reassociate_product.register(Product)
 def _reassociate_product_prod(node, self):
-    factors = _sort_product_factors(node)
+    # collect all factors of product, sort by rank
+    # should use more sophisticated method later on for optimal result
+    sort_func = lambda node: len(node.free_indices)
+    factors = _collect_terms(node, Product, sort_func)
     # need to optimise away iterator <==> list
     new_factors = list(map(self, factors))  # recursion
     return reduce(Product, new_factors)
@@ -136,6 +143,97 @@ def _reassociate_product_prod(node, self):
 
 def reassociate_product(expressions):
     mapper = Memoizer(_reassociate_product)
+    return list(map(mapper, expressions))
+
+
+def _collect_factors(sum):
+    """Collect factors of a summation into a list of lists. For example, ::
+
+        A[i]*B[j] + A[i]*C[j] + D[i]
+
+    returns [[A[i], B[j]], [A[i], C[j]], [D[i]]]
+
+    :param sum: Sum node
+    :return: list of tuples of factors in :param sum
+    """
+    factors = []  # collected factors
+    # collect summands of sum
+    summands = _collect_terms(sum, Sum)
+    for summand in summands:
+        if isinstance(summand, Product):
+            # collect all factors of products
+            factors.append(_collect_terms(summand, Product))
+        else:
+            factors.append([summand])
+    return factors
+
+
+@singledispatch
+def _factorise(node, self):
+    """Factorize terms in the expression. For example: ::
+
+        A[i]*B[j] + A[i]*C[j] + D[i]
+
+    becomes ::
+
+        A[i]*(B[j] + C[j]) + D[i].
+
+    :param node: root of expression
+    :return: reassociated product node
+    """
+    raise AssertionError("cannot handle type %s" % type(node))
+
+
+_factorise.register(Node)(reuse_if_untouched)
+
+
+@_factorise.register(Sum)
+def _factorise_sum(node, self):
+    from collections import OrderedDict
+    factors = _collect_factors(node)
+    unique_factors = set([f for l in factors for f in l])
+    occurrence = OrderedDict((f, set()) for f in unique_factors)
+    for product in factors:
+        for factor in product:
+            occurrence[factor].add(tuple(product))
+    # sort function for factorisation algorithm
+    # here we choose the factor by most occurrences
+    sort_func = lambda (k, v): len(v)
+    # might be better way to do this than building a new list here
+    sorted_occur = sorted(occurrence.items(), key=sort_func, reverse=True)
+    # if len(sorted_occur[0][1]) <= 1:
+    #     # nothing to do
+    #     new_children = list(map(self, node.children))
+    #     return reduce(Sum, new_children)
+
+
+    common_factor = sorted_occur[0][0]
+    summands = []  # collect Sum children
+    multiplicands = []  # collect Product children
+
+    # refactor into Sum(Sum(multiplicands)*common_factor, summands)
+    for product in factors:
+        if common_factor in product:
+            # remove the first occurrence only, in case there are squares of common_factor
+            product.remove(common_factor)
+            if product:
+                new_children = list(map(self, product))
+                multiplicands.append(reduce(Product, new_children))
+            else:
+                multiplicands.append(Literal(1))
+        else:
+            new_children = list(map(self, product))
+            # reduction handles single element list as well
+            summands.append(reduce(Product, new_children))
+    # new_multi = list(map(self, multiplicands))
+    # still need to continue factorising the multiplicands
+    summands.insert(0, Product(common_factor, self(reduce(Sum, multiplicands))))
+    new_sum = list(map(self, summands))
+    return reduce(Sum, new_sum)
+
+
+def factorise(expressions):
+    mapper = Memoizer(_factorise)
     return list(map(mapper, expressions))
 
 
