@@ -191,20 +191,20 @@ _factorise.register(Node)(reuse_if_untouched)
 def _factorise_sum(node, self):
     from collections import OrderedDict
     factors = _collect_factors(node)
-    unique_factors = set([f for l in factors for f in l])
-    occurrence = OrderedDict((f, set()) for f in unique_factors)
+    occurrence = OrderedDict((f, set()) for l in factors for f in l)
+
     for product in factors:
         for factor in product:
             occurrence[factor].add(tuple(product))
     # sort function for factorisation algorithm
     # here we choose the factor by most occurrences
-    sort_func = lambda (k, v): len(v)
+    sort_func = lambda (k, v): -len(v)
     # might be better way to do this than building a new list here
-    sorted_occur = sorted(occurrence.items(), key=sort_func, reverse=True)
-    # if len(sorted_occur[0][1]) <= 1:
+    sorted_occur = sorted(occurrence.items(), key=sort_func)
+    if len(sorted_occur[0][1]) <= 1:
     #     # nothing to do
-    #     new_children = list(map(self, node.children))
-    #     return reduce(Sum, new_children)
+        new_children = list(map(self, node.children))
+        return reduce(Sum, new_children)
 
 
     common_factor = sorted_occur[0][0]
