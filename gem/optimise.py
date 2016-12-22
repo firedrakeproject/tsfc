@@ -100,8 +100,7 @@ def _collect_terms(node, node_type, sort_func=None):
     while queue:
         child = queue.popleft()
         if isinstance(child, node_type):
-            queue.appendleft(child.children[1])
-            queue.appendleft(child.children[0])
+            queue.extendleft(reversed(child.children))
         else:
             terms.append(child)
     if sort_func:
@@ -189,8 +188,9 @@ _factorise.register(Node)(reuse_if_untouched)
 
 @_factorise.register(Sum)
 def _factorise_sum(node, self):
-    from collections import OrderedDict
     factors = _collect_factors(node)
+    from collections import OrderedDict
+    # OrderedDict for stable sorting later on
     occurrence = OrderedDict((f, set()) for l in factors for f in l)
 
     for product in factors:
@@ -214,7 +214,7 @@ def _factorise_sum(node, self):
     # refactor into Sum(Sum(multiplicands)*common_factor, summands)
     for product in factors:
         if common_factor in product:
-            # remove the first occurrence only, in case there are squares of common_factor
+            # remove only the first occurrence, in case there are squares of common_factor
             product.remove(common_factor)
             if product:
                 new_children = list(map(self, product))
@@ -225,7 +225,7 @@ def _factorise_sum(node, self):
             new_children = list(map(self, product))
             # reduction handles single element list as well
             summands.append(reduce(Product, new_children))
-    # new_multi = list(map(self, multiplicands))
+    new_multi = list(map(self, multiplicands))
     # still need to continue factorising the multiplicands
     summands.insert(0, Product(common_factor, self(reduce(Sum, multiplicands))))
     new_sum = list(map(self, summands))
