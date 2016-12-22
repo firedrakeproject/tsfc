@@ -229,7 +229,8 @@ def _factorise_sum(node, self):
     # still need to continue factorising the multiplicands
     summands.insert(0, Product(common_factor, self(reduce(Sum, multiplicands))))
     new_sum = list(map(self, summands))
-    return reduce(Sum, new_sum)
+    # need to continue factorising the resultant Sum
+    return self(reduce(Sum, new_sum))
 
 
 def factorise(expressions):

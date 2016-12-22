@@ -3,7 +3,7 @@ from __future__ import absolute_import, print_function, division
 import pytest
 
 from gem.gem import Index, Indexed, Product, Variable, Division, Literal, Sum
-from gem.optimise import replace_division, reassociate_product
+from gem.optimise import replace_division, reassociate_product, factorise
 
 
 def test_replace_div():
@@ -54,6 +54,78 @@ def test_reassociate_product():
     # C[i,j]
     assert result.children[0].children[1] == Cij
 
+
+def test_factorise():
+    """Test factorising a summation. For example: ::
+
+        A[i] + A[i]*B[j] + A[i]*(C[j]+D[j]) + A[i]*E[i]*F[i] + G[i]
+
+    becomes: ::
+
+        A[i] * (1 + B[j] + C[j] + D[j] + E[i]*F[i]) + G[i]
+
+    """
+    i = Index()
+    j = Index()
+    A = Variable('A', (6,))
+    B = Variable('B', (6,))
+    C = Variable('C', (6,))
+    D = Variable('D', (6,))
+    E = Variable('E', (6,))
+    F = Variable('F', (6,))
+    G = Variable('G', (6,))
+    Ai = Indexed(A, (i,))
+    Bj = Indexed(B, (j,))
+    Cj = Indexed(C, (j,))
+    Dj = Indexed(D, (j,))
+    Ei = Indexed(E, (i,))
+    Fi = Indexed(F, (i,))
+    Gi = Indexed(G, (i,))
+    p1 = Product(Ai, Bj)
+    p2 = Product(Ai, Sum(Cj, Dj))
+    p3 = Product(Ei, Fi)
+    s = Sum(Sum(Sum(Sum(p1, p2), Product(Ai, p3)), Ai), Gi)
+    result = factorise([s])[0]
+    # G[i]
+    assert result.children[1] == Gi
+    # A[i]
+    assert result.children[0].children[0] == Ai
+    # 1
+    assert result.children[0].children[1].children[1] == Literal(1)
+    # E[i]*F[i]
+    assert result.children[0].children[1].children[0].children[1] == p3
+    # B[j]+C[j]+D[j]
+    assert result.children[0].children[1].children[0].children[0] == Sum(Bj, Sum(Cj, Dj))
+
+
+def test_factorise_recursion():
+    """Test recursive factorisation. For example: ::
+
+        A[i]*C[i] + A[i]*D[i] + B[i]*C[i] + B[i]*D[i]
+
+    becomes: ::
+
+        (A[i]+B[i]) * (C[i]+D[i])
+
+    """
+    i = Index()
+    A = Variable('A', (6,))
+    B = Variable('B', (6,))
+    C = Variable('C', (6,))
+    D = Variable('D', (6,))
+    Ai = Indexed(A, (i,))
+    Bi = Indexed(B, (i,))
+    Ci = Indexed(C, (i,))
+    Di = Indexed(D, (i,))
+    p1 = Product(Ai, Ci)
+    p2 = Product(Ai, Di)
+    p3 = Product(Bi, Ci)
+    p4 = Product(Bi, Di)
+    s = reduce(Sum, [p1, p2, p3, p4])
+    result = factorise([s])[0]
+    assert isinstance(result, Product)
+    assert result.children[0] == Sum(Ci, Di)
+    assert result.children[1] == Sum(Bi, Ai)
 
 if __name__ == "__main__":
     import os
