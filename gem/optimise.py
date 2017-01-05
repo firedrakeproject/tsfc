@@ -3,11 +3,11 @@ expressions."""
 
 from __future__ import absolute_import, print_function, division
 from six import itervalues
-from six.moves import filter, map, zip
+from six.moves import filter, intern, map, zip
 
-from collections import OrderedDict, deque
+from collections import OrderedDict, deque, namedtuple
 from functools import reduce
-from itertools import permutations
+from itertools import chain, permutations, product
 
 import numpy
 from singledispatch import singledispatch
@@ -275,7 +275,7 @@ def sum_factorise(sum_indices, factors):
 
         # If some contraction indices were independent, then we may
         # still have several terms at this point.
-        expr = reduce(Product, terms)
+        expr = reduce(Product, terms, one)
         flops += (len(terms) - 1) * numpy.prod([i.extent for i in expr.free_indices], dtype=int)
 
         if flops < best_flops:
@@ -355,6 +355,78 @@ def traverse_sum(expression, stop_at=None):
             stack.extend(reversed(expr.children))
         else:
             result.append(expr)
+    return result
+
+
+ATOMIC = intern('atomic')
+COMPOUND = intern('compound')
+OTHER = intern('other')
+
+Monomial = namedtuple('Monomial', ['sum_indices', 'atomics', 'rest'])
+
+
+class FactorisationError(Exception):
+    """Raised when factorisation fails to achieve some desired form."""
+    pass
+
+
+def collect_monomials(expression, classifier):
+    def stop_at(expr):
+        return classifier(expr) == OTHER
+    common_indices, terms = traverse_product(expression, stop_at=stop_at)
+
+    common_atomics = []
+    common_others = []
+    compounds = []
+    for term in terms:
+        cls = classifier(term)
+        if cls == ATOMIC:
+            common_atomics.append(term)
+        elif cls == COMPOUND:
+            compounds.append(term)
+        elif cls == OTHER:
+            common_others.append(term)
+        else:
+            raise ValueError("Classifier returned illegal value.")
+
+    sums = []
+    for expr in compounds:
+        summands = traverse_sum(expr, stop_at=stop_at)
+        if len(summands) <= 1:
+            raise FactorisationError(expr)
+        sums.append(chain.from_iterable(collect_monomials(summand, classifier)
+                                        for summand in summands))
+
+    unfactored = OrderedDict()
+    for partials in product(*sums):
+        all_indices = list(common_indices)
+        atomics = list(common_atomics)
+        others = list(common_others)
+        for monomial in partials:
+            all_indices.extend(monomial.sum_indices)
+            atomics.extend(monomial.atomics)
+            others.append(monomial.rest)
+        atomic_indices = set().union(*[atomic.free_indices
+                                       for atomic in atomics])
+        sum_indices = tuple(index for index in all_indices
+                            if index in atomic_indices)
+        rest_indices = tuple(index for index in all_indices
+                             if index not in atomic_indices)
+
+        # Not really sum factorisation, but rather just an optimised
+        # way of building a product.
+        rest = sum_factorise(rest_indices, others)
+
+        monomial = Monomial(sum_indices, tuple(atomics), rest)
+        key = (frozenset(sum_indices), frozenset(atomics))
+        unfactored.setdefault(key, []).append(monomial)
+
+    result = []
+    for monomials in itervalues(unfactored):
+        sum_indices = monomials[0].sum_indices
+        atomics = monomials[0].atomics
+        rest = reduce(Sum, [m.rest for m in monomials])
+        result.append(Monomial(sum_indices, atomics, rest))
     return result
 
 
