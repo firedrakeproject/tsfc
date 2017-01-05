@@ -14,8 +14,8 @@ from singledispatch import singledispatch
 
 from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
 from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
-                     Product, Sum, Comparison, Conditional, Index,
-                     VariableIndex, Indexed, FlexiblyIndexed,
+                     Product, Sum, Comparison, Conditional, Division,
+                     Index, VariableIndex, Indexed, FlexiblyIndexed,
                      IndexSum, ComponentTensor, ListTensor, Delta,
                      partial_indexed, one)
 
@@ -314,6 +314,48 @@ def contraction(expression):
             factors.append(expr)
 
     return sum_factorise(*delta_elimination(sum_indices, factors))
+
+
+def traverse_product(expression, stop_at=None):
+    sum_indices = []
+    terms = []
+
+    stack = [expression]
+    while stack:
+        expr = stack.pop()
+        if stop_at is not None and stop_at(expr):
+            terms.append(expr)
+        elif isinstance(expr, IndexSum):
+            stack.append(expr.children[0])
+            sum_indices.extend(expr.multiindex)
+        elif isinstance(expr, Product):
+            stack.extend(reversed(expr.children))
+        elif isinstance(expr, Division):
+            # Break up products in the dividend, but not in divisor.
+            dividend, divisor = expr.children
+            if dividend == one:
+                terms.append(expr)
+            else:
+                terms.append(Division(one, divisor))
+                terms.append(dividend)
+        else:
+            terms.append(expr)
+
+    return sum_indices, terms
+
+
+def traverse_sum(expression, stop_at=None):
+    stack = [expression]
+    result = []
+    while stack:
+        expr = stack.pop()
+        if stop_at is not None and stop_at(expr):
+            result.append(expr)
+        elif isinstance(expr, Sum):
+            stack.extend(reversed(expr.children))
+        else:
+            result.append(expr)
+    return result
 
 
 @singledispatch
