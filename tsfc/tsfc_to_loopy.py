@@ -204,7 +204,7 @@ def index_aggregate_to_name(c, ctx):
     if isinstance(c, g.Variable):
         return ctx.variable_to_name(c)
 
-    elif isinstance(c, g.Literal):
+    elif isinstance(c, g.Constant):
         return ctx.literal_to_name(c)
 
     else:
@@ -277,7 +277,7 @@ def map_index_sum(node, ctx):
             arg_names,
             lp.Reduction(
                 "sum",
-                (ctx.index_to_iname(node.index),),
+                tuple(ctx.index_to_iname(index) for index in node.multiindex),
                 subexpr)))
 
     return p.Variable(name)(*tuple(p.Variable(n) for n in arg_names))
