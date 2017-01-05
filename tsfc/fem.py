@@ -1,121 +1,40 @@
+"""Functions to translate UFL finite element objects and reference
+geometric quantities into GEM expressions."""
+
 from __future__ import absolute_import, print_function, division
-from six import iteritems
-from six.moves import map, range
+from six import iterkeys, iteritems, itervalues
+from six.moves import map, range, zip
 
 import collections
 import itertools
-from functools import reduce
 
 import numpy
 from singledispatch import singledispatch
 
 from ufl.corealg.map_dag import map_expr_dag, map_expr_dags
 from ufl.corealg.multifunction import MultiFunction
-from ufl.classes import (Argument, Coefficient, CellVolume,
-                         FacetArea, FormArgument,
-                         GeometricQuantity, QuadratureWeight)
+from ufl.classes import (Argument, CellCoordinate, CellEdgeVectors,
+                         CellFacetJacobian, CellOrientation,
+                         CellVolume, Coefficient, FacetArea,
+                         FacetCoordinate, GeometricQuantity,
+                         QuadratureWeight, ReferenceCellVolume,
+                         ReferenceFacetVolume, ReferenceNormal)
+
+from FIAT.reference_element import make_affine_mapping
 
 import gem
+from gem.node import traversal
+from gem.optimise import ffc_rounding
 from gem.utils import cached_property
 
-from tsfc import compat, ufl2gem, geometric
-from tsfc.fiatinterface import create_element, create_quadrature, as_fiat_cell
+from finat.quadrature import make_quadrature
+
+from tsfc import ufl2gem
+from tsfc.finatinterface import create_element, as_fiat_cell
 from tsfc.kernel_interface import ProxyKernelInterface
 from tsfc.modified_terminals import analyse_modified_terminal
-from tsfc.parameters import PARAMETERS
-from tsfc.ufl_utils import (CollectModifiedTerminals,
-                            ModifiedTerminalMixin, PickRestriction,
-                            spanning_degree, simplify_abs)
-
-
-def _tabulate(ufl_element, order, points):
-    """Ask FIAT to tabulate ``points`` up to order ``order``, then
-    rearranges the result into a series of ``(c, D, table)`` tuples,
-    where:
-
-    c: component index (for vector-valued and tensor-valued elements)
-    D: derivative tuple (e.g. (1, 2) means d/dx d^2/dy^2)
-    table: tabulation matrix for the given component and derivative.
-           shape: len(points) x space_dimension
-
-    :arg ufl_element: element to tabulate
-    :arg order: FIAT gives all derivatives up to this order
-    :arg points: points to tabulate the element on
-    """
-    element = create_element(ufl_element)
-    phi = element.space_dimension()
-    C = ufl_element.reference_value_size()
-    q = len(points)
-    for D, fiat_table in iteritems(element.tabulate(order, points)):
-        reordered_table = fiat_table.reshape(phi, C, q).transpose(1, 2, 0)  # (C, q, phi)
-        for c, table in enumerate(reordered_table):
-            yield c, D, table
-
-
-def tabulate(ufl_element, order, points, epsilon):
-    """Same as the above, but also applies FFC rounding with
-    threshold epsilon and recognises cellwise constantness.
-    Cellwise constantness is determined symbolically, but we
-    also check the numerics to be safe."""
-    for c, D, table in _tabulate(ufl_element, order, points):
-        # Copied from FFC (ffc/quadrature/quadratureutils.py)
-        table[abs(table) < epsilon] = 0
-        table[abs(table - 1.0) < epsilon] = 1.0
-        table[abs(table + 1.0) < epsilon] = -1.0
-        table[abs(table - 0.5) < epsilon] = 0.5
-        table[abs(table + 0.5) < epsilon] = -0.5
-
-        if spanning_degree(ufl_element) <= sum(D):
-            assert compat.allclose(table, table.mean(axis=0, keepdims=True), equal_nan=True)
-            table = table[0]
-
-        yield c, D, table
-
-
-def make_tabulator(points, epsilon):
-    """Creates a tabulator for an array of points with rounding
-    parameter epsilon."""
-    return lambda elem, order: tabulate(elem, order, points, epsilon)
-
-
-class TabulationManager(object):
-    """Manages the generation of tabulation matrices for the different
-    integral types."""
-
-    def __init__(self, entity_points, epsilon):
-        """Constructs a TabulationManager.
-
-        :arg entity_points: An array of points in cell coordinates for
-                            each integration entity, i.e. an iterable
-                            of arrays of points.
-        :arg epsilon: precision for rounding FE tables to 0, +-1/2, +-1
-        """
-        epsilons = itertools.repeat(epsilon, len(entity_points))
-        self.tabulators = list(map(make_tabulator, entity_points, epsilons))
-        self.tables = {}
-
-    def tabulate(self, ufl_element, max_deriv):
-        """Prepare the tabulations of a finite element up to a given
-        derivative order.
-
-        :arg ufl_element: UFL element to tabulate
-        :arg max_deriv: tabulate derivatives up this order
-        """
-        store = collections.defaultdict(list)
-        for tabulator in self.tabulators:
-            for c, D, table in tabulator(ufl_element, max_deriv):
-                store[(ufl_element, c, D)].append(table)
-
-        for key, tables in iteritems(store):
-            table = numpy.array(tables)
-            if len(table.shape) == 2:
-                # Cellwise constant; must not depend on the facet
-                assert compat.allclose(table, table.mean(axis=0, keepdims=True), equal_nan=True)
-                table = table[0]
-            self.tables[key] = table
-
-    def __getitem__(self, key):
-        return self.tables[key]
+from tsfc.parameters import NUMPY_TYPE, PARAMETERS
+from tsfc.ufl_utils import ModifiedTerminalMixin, PickRestriction, simplify_abs
 
 
 class Context(ProxyKernelInterface):
@@ -125,10 +44,9 @@ class Context(ProxyKernelInterface):
                 'entity_ids',
                 'quadrature_degree',
                 'quadrature_rule',
-                'points',
-                'weights',
+                'point_set',
+                'weight_expr',
                 'precision',
-                'point_index',
                 'argument_indices',
                 'cellvolume',
                 'facetarea',
@@ -155,15 +73,15 @@ class Context(ProxyKernelInterface):
     @cached_property
     def quadrature_rule(self):
         integration_cell = self.fiat_cell.construct_subelement(self.integration_dim)
-        return create_quadrature(integration_cell, self.quadrature_degree)
+        return make_quadrature(integration_cell, self.quadrature_degree)
 
     @cached_property
-    def points(self):
-        return self.quadrature_rule.get_points()
+    def point_set(self):
+        return self.quadrature_rule.point_set
 
     @cached_property
-    def weights(self):
-        return self.quadrature_rule.get_weights()
+    def weight_expr(self):
+        return self.quadrature_rule.weight_expression
 
     precision = PARAMETERS["precision"]
 
@@ -171,26 +89,6 @@ class Context(ProxyKernelInterface):
     def epsilon(self):
         # Rounding tolerance mimicking FFC
         return 10.0 * eval("1e-%d" % self.precision)
-
-    @cached_property
-    def entity_points(self):
-        """An array of points in cell coordinates for each entity,
-        i.e. a list of arrays of points."""
-        result = []
-        for entity_id in self.entity_ids:
-            t = self.fiat_cell.get_entity_transform(self.integration_dim, entity_id)
-            result.append(numpy.asarray(list(map(t, self.points))))
-        return result
-
-    def _selector(self, callback, opts, restriction):
-        """Helper function for selecting code for the correct entity
-        at run-time."""
-        if len(opts) == 1:
-            return callback(opts[0])
-        else:
-            results = gem.ListTensor(list(map(callback, opts)))
-            f = self.facet_number(restriction)
-            return gem.partial_indexed(results, (f,))
 
     def entity_selector(self, callback, restriction):
         """Selects code for the correct entity at run-time.  Callback
@@ -203,21 +101,11 @@ class Context(ProxyKernelInterface):
         :arg restriction: Restriction of the modified terminal, used
                           for entity selection.
         """
-        return self._selector(callback, self.entity_ids, restriction)
-
-    def index_selector(self, callback, restriction):
-        """Selects code for the correct entity at run-time.  Callback
-        generates code for a specified entity.
-
-        This function passes ``callback`` an index of the entity
-        numbers array.
-
-        :arg callback: A function to be called with an entity index
-                       that generates code for that entity.
-        :arg restriction: Restriction of the modified terminal, used
-                          for entity selection.
-        """
-        return self._selector(callback, list(range(len(self.entity_ids))), restriction)
+        if len(self.entity_ids) == 1:
+            return callback(self.entity_ids[0])
+        else:
+            f = self.facet_number(restriction)
+            return gem.select_expression(list(map(callback, self.entity_ids)), f)
 
     argument_indices = ()
 
@@ -229,11 +117,10 @@ class Context(ProxyKernelInterface):
 class Translator(MultiFunction, ModifiedTerminalMixin, ufl2gem.Mixin):
     """Contains all the context necessary to translate UFL into GEM."""
 
-    def __init__(self, tabulation_manager, context):
+    def __init__(self, context):
         MultiFunction.__init__(self)
         ufl2gem.Mixin.__init__(self)
 
-        context.tabulation_manager = tabulation_manager
         self.context = context
 
     def modified_terminal(self, o):
@@ -241,42 +128,6 @@ class Translator(MultiFunction, ModifiedTerminalMixin, ufl2gem.Mixin):
         :class:`ModifiedTerminalMixin`."""
         mt = analyse_modified_terminal(o)
         return translate(mt.terminal, mt, self.context)
-
-
-def iterate_shape(mt, callback):
-    """Iterates through the components of a modified terminal, and
-    calls ``callback`` with ``(ufl_element, c, D)`` keys which are
-    used to look up tabulation matrix for that component.  Then
-    assembles the result into a GEM tensor (if tensor-valued)
-    corresponding to the modified terminal.
-
-    :arg mt: analysed modified terminal
-    :arg callback: callback to get the GEM translation of a component
-    :returns: GEM translation of the modified terminal
-
-    This is a helper for translating Arguments and Coefficients.
-    """
-    ufl_element = mt.terminal.ufl_element()
-    dim = ufl_element.cell().topological_dimension()
-
-    def flat_index(ordered_deriv):
-        return tuple((numpy.asarray(ordered_deriv) == d).sum() for d in range(dim))
-
-    ordered_derivs = itertools.product(range(dim), repeat=mt.local_derivatives)
-    flat_derivs = list(map(flat_index, ordered_derivs))
-
-    result = []
-    for c in range(ufl_element.reference_value_size()):
-        for flat_deriv in flat_derivs:
-            result.append(callback((ufl_element, c, flat_deriv)))
-
-    shape = mt.expr.ufl_shape
-    assert len(result) == numpy.prod(shape)
-
-    if shape:
-        return gem.ListTensor(numpy.asarray(result).reshape(shape))
-    else:
-        return result[0]
 
 
 @singledispatch
@@ -293,12 +144,105 @@ def translate(terminal, mt, ctx):
 
 @translate.register(QuadratureWeight)
 def translate_quadratureweight(terminal, mt, ctx):
-    return gem.Indexed(gem.Literal(ctx.weights), (ctx.point_index,))
+    return ctx.weight_expr
 
 
 @translate.register(GeometricQuantity)
 def translate_geometricquantity(terminal, mt, ctx):
-    return geometric.translate(terminal, mt, ctx)
+    raise NotImplementedError("Cannot handle geometric quantity type: %s" % type(terminal))
+
+
+@translate.register(CellOrientation)
+def translate_cell_orientation(terminal, mt, ctx):
+    return ctx.cell_orientation(mt.restriction)
+
+
+@translate.register(ReferenceCellVolume)
+def translate_reference_cell_volume(terminal, mt, ctx):
+    return gem.Literal(ctx.fiat_cell.volume())
+
+
+@translate.register(ReferenceFacetVolume)
+def translate_reference_facet_volume(terminal, mt, ctx):
+    # FIXME: simplex only code path
+    dim = ctx.fiat_cell.get_spatial_dimension()
+    facet_cell = ctx.fiat_cell.construct_subelement(dim - 1)
+    return gem.Literal(facet_cell.volume())
+
+
+@translate.register(CellFacetJacobian)
+def translate_cell_facet_jacobian(terminal, mt, ctx):
+    cell = ctx.fiat_cell
+    facet_dim = ctx.integration_dim
+    assert facet_dim != cell.get_dimension()
+
+    def callback(entity_id):
+        return gem.Literal(make_cell_facet_jacobian(cell, facet_dim, entity_id))
+    return ctx.entity_selector(callback, mt.restriction)
+
+
+def make_cell_facet_jacobian(cell, facet_dim, facet_i):
+    facet_cell = cell.construct_subelement(facet_dim)
+    xs = facet_cell.get_vertices()
+    ys = cell.get_vertices_of_subcomplex(cell.get_topology()[facet_dim][facet_i])
+
+    # Use first 'dim' points to make an affine mapping
+    dim = cell.get_spatial_dimension()
+    A, b = make_affine_mapping(xs[:dim], ys[:dim])
+
+    for x, y in zip(xs[dim:], ys[dim:]):
+        # The rest of the points are checked to make sure the
+        # mapping really *is* affine.
+        assert numpy.allclose(y, A.dot(x) + b)
+
+    return A
+
+
+@translate.register(ReferenceNormal)
+def translate_reference_normal(terminal, mt, ctx):
+    def callback(facet_i):
+        n = ctx.fiat_cell.compute_reference_normal(ctx.integration_dim, facet_i)
+        return gem.Literal(n)
+    return ctx.entity_selector(callback, mt.restriction)
+
+
+@translate.register(CellEdgeVectors)
+def translate_cell_edge_vectors(terminal, mt, ctx):
+    from FIAT.reference_element import TensorProductCell as fiat_TensorProductCell
+    fiat_cell = ctx.fiat_cell
+    if isinstance(fiat_cell, fiat_TensorProductCell):
+        raise NotImplementedError("CellEdgeVectors not implemented on TensorProductElements yet")
+
+    nedges = len(fiat_cell.get_topology()[1])
+    vecs = numpy.vstack(map(fiat_cell.compute_edge_tangent, range(nedges))).astype(NUMPY_TYPE)
+    assert vecs.shape == terminal.ufl_shape
+    return gem.Literal(vecs)
+
+
+@translate.register(CellCoordinate)
+def translate_cell_coordinate(terminal, mt, ctx):
+    ps = ctx.point_set
+    if ctx.integration_dim == ctx.fiat_cell.get_dimension():
+        return ps.expression
+
+    # This destroys the structure of the quadrature points, but since
+    # this code path is only used to implement CellCoordinate in facet
+    # integrals, hopefully it does not matter much.
+    point_shape = tuple(index.extent for index in ps.indices)
+
+    def callback(entity_id):
+        t = ctx.fiat_cell.get_entity_transform(ctx.integration_dim, entity_id)
+        data = numpy.asarray(list(map(t, ps.points)))
+        return gem.Literal(data.reshape(point_shape + data.shape[1:]))
+
+    return gem.partial_indexed(ctx.entity_selector(callback, mt.restriction),
+                               ps.indices)
+
+
+@translate.register(FacetCoordinate)
+def translate_facet_coordinate(terminal, mt, ctx):
+    assert ctx.integration_dim != ctx.fiat_cell.get_dimension()
+    return ctx.point_set.expression
 
 
 @translate.register(CellVolume)
@@ -311,21 +255,51 @@ def translate_facetarea(terminal, mt, ctx):
     return ctx.facetarea()
 
 
+def fiat_to_ufl(fiat_dict, order):
+    # All derivative multiindices must be of the same dimension.
+    dimension, = list(set(len(alpha) for alpha in iterkeys(fiat_dict)))
+
+    # All derivative tables must have the same shape.
+    shape, = list(set(table.shape for table in itervalues(fiat_dict)))
+    sigma = tuple(gem.Index(extent=extent) for extent in shape)
+
+    # Convert from FIAT to UFL format
+    eye = numpy.eye(dimension, dtype=int)
+    tensor = numpy.empty((dimension,) * order, dtype=object)
+    for multiindex in numpy.ndindex(tensor.shape):
+        alpha = tuple(eye[multiindex, :].sum(axis=0))
+        tensor[multiindex] = gem.Indexed(fiat_dict[alpha], sigma)
+    delta = tuple(gem.Index(extent=dimension) for _ in range(order))
+    if order > 0:
+        tensor = gem.Indexed(gem.ListTensor(tensor), delta)
+    else:
+        tensor = tensor[()]
+    return gem.ComponentTensor(tensor, sigma + delta)
+
+
 @translate.register(Argument)
 def translate_argument(terminal, mt, ctx):
     argument_index = ctx.argument_indices[terminal.number()]
+    sigma = tuple(gem.Index(extent=d) for d in mt.expr.ufl_shape)
+    element = create_element(terminal.ufl_element())
 
-    def callback(key):
-        table = ctx.tabulation_manager[key]
-        if len(table.shape) == 1:
-            # Cellwise constant
-            row = gem.Literal(table)
-        else:
-            table = ctx.index_selector(lambda i: gem.Literal(table[i]), mt.restriction)
-            row = gem.partial_indexed(table, (ctx.point_index,))
-        return gem.Indexed(row, (argument_index,))
+    def callback(entity_id):
+        finat_dict = element.basis_evaluation(mt.local_derivatives,
+                                              ctx.point_set,
+                                              (ctx.integration_dim, entity_id))
+        # Filter out irrelevant derivatives
+        filtered_dict = {alpha: table
+                         for alpha, table in iteritems(finat_dict)
+                         if sum(alpha) == mt.local_derivatives}
 
-    return iterate_shape(mt, callback)
+        # Change from FIAT to UFL arrangement
+        square = fiat_to_ufl(filtered_dict, mt.local_derivatives)
+
+        # A numerical hack that FFC used to apply on FIAT tables still
+        # lives on after ditching FFC and switching to FInAT.
+        return ffc_rounding(square, ctx.epsilon)
+    table = ctx.entity_selector(callback, mt.restriction)
+    return gem.ComponentTensor(gem.Indexed(table, argument_index + sigma), sigma)
 
 
 @translate.register(Coefficient)
@@ -336,52 +310,64 @@ def translate_coefficient(terminal, mt, ctx):
         assert mt.local_derivatives == 0
         return vec
 
-    def callback(key):
-        table = ctx.tabulation_manager[key]
-        if len(table.shape) == 1:
-            # Cellwise constant
-            row = gem.Literal(table)
-            if numpy.count_nonzero(table) <= 2:
-                assert row.shape == vec.shape
-                return reduce(gem.Sum,
-                              [gem.Product(gem.Indexed(row, (i,)), gem.Indexed(vec, (i,)))
-                               for i in range(row.shape[0])],
-                              gem.Zero())
-        else:
-            table = ctx.index_selector(lambda i: gem.Literal(table[i]), mt.restriction)
-            row = gem.partial_indexed(table, (ctx.point_index,))
+    element = create_element(terminal.ufl_element())
 
-        r = ctx.index_cache[terminal.ufl_element()]
-        return gem.IndexSum(gem.Product(gem.Indexed(row, (r,)),
-                                        gem.Indexed(vec, (r,))), r)
+    # Collect FInAT tabulation for all entities
+    per_derivative = collections.defaultdict(list)
+    for entity_id in ctx.entity_ids:
+        finat_dict = element.basis_evaluation(mt.local_derivatives,
+                                              ctx.point_set,
+                                              (ctx.integration_dim, entity_id))
+        for alpha, table in iteritems(finat_dict):
+            # Filter out irrelevant derivatives
+            if sum(alpha) == mt.local_derivatives:
+                # A numerical hack that FFC used to apply on FIAT
+                # tables still lives on after ditching FFC and
+                # switching to FInAT.
+                table = ffc_rounding(table, ctx.epsilon)
+                per_derivative[alpha].append(table)
 
-    return iterate_shape(mt, callback)
+    # Merge entity tabulations for each derivative
+    if len(ctx.entity_ids) == 1:
+        def take_singleton(xs):
+            x, = xs  # asserts singleton
+            return x
+        per_derivative = {alpha: take_singleton(tables)
+                          for alpha, tables in iteritems(per_derivative)}
+    else:
+        f = ctx.facet_number(mt.restriction)
+        per_derivative = {alpha: gem.select_expression(tables, f)
+                          for alpha, tables in iteritems(per_derivative)}
+
+    # Coefficient evaluation
+    beta = element.get_indices()
+    zeta = element.get_value_indices()
+    value_dict = {}
+    for alpha, table in iteritems(per_derivative):
+        value = gem.IndexSum(gem.Product(gem.Indexed(table, beta + zeta),
+                                         gem.Indexed(vec, beta)),
+                             beta)
+        optimised_value = gem.optimise.contraction(value)
+        value_dict[alpha] = gem.ComponentTensor(optimised_value, zeta)
+
+    # Change from FIAT to UFL arrangement
+    result = fiat_to_ufl(value_dict, mt.local_derivatives)
+    assert result.shape == mt.expr.ufl_shape
+    assert set(result.free_indices) <= set(ctx.point_set.indices)
+
+    # Detect Jacobian of affine cells
+    if not result.free_indices and all(numpy.count_nonzero(node.array) <= 2
+                                       for node in traversal((result,))
+                                       if isinstance(node, gem.Literal)):
+        result = gem.optimise.aggressive_unroll(result)
+    return result
 
 
-def compile_ufl(expression, interior_facet=False, **kwargs):
+def compile_ufl(expression, interior_facet=False, point_sum=False, **kwargs):
     context = Context(**kwargs)
 
     # Abs-simplification
     expression = simplify_abs(expression)
-
-    # Collect modified terminals
-    modified_terminals = []
-    map_expr_dag(CollectModifiedTerminals(modified_terminals), expression)
-
-    # Collect maximal derivatives that needs tabulation
-    max_derivs = collections.defaultdict(int)
-
-    for mt in map(analyse_modified_terminal, modified_terminals):
-        if isinstance(mt.terminal, FormArgument):
-            ufl_element = mt.terminal.ufl_element()
-            max_derivs[ufl_element] = max(mt.local_derivatives, max_derivs[ufl_element])
-
-    # Collect tabulations for all components and derivatives
-    tabulation_manager = TabulationManager(context.entity_points, context.epsilon)
-    for ufl_element, max_deriv in max_derivs.items():
-        if ufl_element.family() != 'Real':
-            tabulation_manager.tabulate(ufl_element, max_deriv)
-
     if interior_facet:
         expressions = []
         for rs in itertools.product(("+", "-"), repeat=len(context.argument_indices)):
@@ -390,5 +376,8 @@ def compile_ufl(expression, interior_facet=False, **kwargs):
         expressions = [expression]
 
     # Translate UFL to GEM, lowering finite element specific nodes
-    translator = Translator(tabulation_manager, context)
-    return map_expr_dags(translator, expressions)
+    translator = Translator(context)
+    result = map_expr_dags(translator, expressions)
+    if point_sum:
+        result = [gem.index_sum(expr, context.point_set.indices) for expr in result]
+    return result

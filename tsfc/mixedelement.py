@@ -76,14 +76,10 @@ class MixedElement(object):
     def num_components(self):
         return self.value_shape()[0]
 
-    def tabulate(self, order, points):
+    def tabulate(self, order, points, entity):
         """Tabulate a mixed element by appropriately splatting
         together the tabulation of the individual elements.
         """
-        # FIXME: Could we reorder the basis functions so that indexing
-        # in the form compiler for mixed interior facets becomes
-        # easier?
-        # Would probably need to redo entity_dofs as well.
         shape = (self.space_dimension(), self.num_components(), len(points))
 
         output = {}
@@ -95,7 +91,7 @@ class MixedElement(object):
         crange = numpy.cumsum(sub_cmps)
 
         for i, e in enumerate(self.elements()):
-            table = e.tabulate(order, points)
+            table = e.tabulate(order, points, entity)
 
             for d, tab in table.items():
                 try:
