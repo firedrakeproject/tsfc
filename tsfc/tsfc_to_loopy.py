@@ -239,16 +239,9 @@ def map_flexibly_indexed(node, ctx):
 
     def flex_idx_to_loopy(f):
         off, idxs = f
-        if idxs:
-            indices, strides = zip(*idxs)
-            strides = cumulative_strides(strides)
-        else:
-            indices = ()
-            strides = ()
 
-        result = f[0]
-
-        for i, s in zip(indices, strides):
+        result = off
+        for i, s in idxs:
             result += index_to_loopy(i, ctx)*s
 
         return result
