@@ -96,7 +96,7 @@ def _collect_terms(node, node_type, sort_func=None):
     """
     from collections import deque
     terms = []  # collected terms
-    queue = deque(node.children)  # queue of children nodes to process
+    queue = deque([node])  # queue of children nodes to process
     while queue:
         child = queue.popleft()
         if isinstance(child, node_type):

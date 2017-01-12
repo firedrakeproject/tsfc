@@ -34,7 +34,7 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
            'IndexSum', 'ListTensor', 'Delta', 'index_sum',
-           'partial_indexed', 'reshape', 'view']
+           'partial_indexed', 'reshape', 'view', 'Terminal']
 
 
 class NodeMeta(type):
@@ -163,6 +163,12 @@ class Literal(Constant):
     def __init__(self, array):
         self.array = asarray(array, dtype=float)
 
+    def _repr_latex_(self):
+        if self.array.shape == (1,):
+            return str(self.array[0])
+        else:
+            return str(self.array)
+
     def is_equal(self, other):
         if type(self) != type(other):
             return False
@@ -192,6 +198,9 @@ class Variable(Terminal):
         self.name = name
         self.shape = shape
 
+    def _repr_latex_(self):
+        return self.name
+
 
 class Sum(Scalar):
     __slots__ = ('children',)
@@ -213,6 +222,24 @@ class Sum(Scalar):
         self.children = a, b
         return self
 
+
+    def _repr_latex_(self):
+        a, b = self.children
+        return r'({0} + {1})'.format(a._repr_latex_(), b._repr_latex_())
+
+
+    def is_equal(self, other):
+        a, b = self.children
+        c, d = other.children
+        return (a == c and b == d) or (a == d and  b== c)
+
+
+    def get_hash(self):
+        a, b = self.children
+        if hash(a) < hash(b):
+            return hash((Sum, a, b))
+        else:
+            return hash((Sum, b, a))
 
 class Product(Scalar):
     __slots__ = ('children',)
@@ -236,6 +263,10 @@ class Product(Scalar):
         self = super(Product, cls).__new__(cls)
         self.children = a, b
         return self
+
+    def _repr_latex_(self):
+        a, b = self.children
+        return r'{0} * {1}'.format(a._repr_latex_(), b._repr_latex_())
 
 
 class Division(Scalar):
@@ -408,6 +439,12 @@ class Index(IndexBase):
             return "Index(%r)" % self.count
         return "Index(%r)" % self.name
 
+    def _repr_latex_(self):
+        if self.name:
+            return name
+        else:
+            return r'$i_{{{0}}}$'.format(self.count)
+
     def __lt__(self, other):
         # Allow sorting of free indices in Python 3
         return id(self) < id(other)
@@ -472,6 +509,13 @@ class Indexed(Scalar):
         self.free_indices = unique(aggregate.free_indices + new_indices)
 
         return self
+
+    def _repr_latex_(self):
+        if not self.multiindex:
+            return self.children[0]._repr_latex_()
+        else:
+            index = ','.join([x._repr_latex_() for x in self.multiindex])
+            return r'${0}_{{{1}}}$'.format(self.children[0]._repr_latex_(), index)
 
 
 class FlexiblyIndexed(Scalar):
