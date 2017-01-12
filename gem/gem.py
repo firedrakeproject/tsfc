@@ -163,11 +163,14 @@ class Literal(Constant):
     def __init__(self, array):
         self.array = asarray(array, dtype=float)
 
-    def _repr_latex_(self):
+    def latex(self):
         if self.array.shape == (1,):
             return str(self.array[0])
         else:
             return str(self.array)
+
+    def _repr_latex_(self):
+        return r'${0}$'.format(self.latex())
 
     def is_equal(self, other):
         if type(self) != type(other):
@@ -198,9 +201,11 @@ class Variable(Terminal):
         self.name = name
         self.shape = shape
 
-    def _repr_latex_(self):
-        return self.name
+    def latex(self):
+        return  self.name
 
+    def _repr_latex_(self):
+        return r'${0}$'.format(self.latex())
 
 class Sum(Scalar):
     __slots__ = ('children',)
@@ -222,11 +227,12 @@ class Sum(Scalar):
         self.children = a, b
         return self
 
+    def latex(self):
+        a, b = self.children
+        return r'({0} + {1})'.format(a.latex(), b.latex())
 
     def _repr_latex_(self):
-        a, b = self.children
-        return r'({0} + {1})'.format(a._repr_latex_(), b._repr_latex_())
-
+        return r'${0}$'.format(self.latex())
 
     def is_equal(self, other):
         a, b = self.children
@@ -264,9 +270,13 @@ class Product(Scalar):
         self.children = a, b
         return self
 
+    def latex(self):
+        a, b = self.children
+        return r'{0} * {1}'.format(a.latex(), b.latex())
+
     def _repr_latex_(self):
         a, b = self.children
-        return r'{0} * {1}'.format(a._repr_latex_(), b._repr_latex_())
+        return r'${0}$'.format(a.latex(), b.latex())
 
 
 class Division(Scalar):
@@ -439,11 +449,14 @@ class Index(IndexBase):
             return "Index(%r)" % self.count
         return "Index(%r)" % self.name
 
-    def _repr_latex_(self):
+    def latex(self):
         if self.name:
             return name
         else:
-            return r'$i_{{{0}}}$'.format(self.count)
+            return r'i_{{{0}}}'.format(self.count)
+
+    def _repr_latex_(self):
+        return r'${0}$'.format(self.latex())
 
     def __lt__(self, other):
         # Allow sorting of free indices in Python 3
@@ -510,12 +523,15 @@ class Indexed(Scalar):
 
         return self
 
-    def _repr_latex_(self):
+    def latex(self):
         if not self.multiindex:
-            return self.children[0]._repr_latex_()
+            return self.children[0].latex()
         else:
-            index = ','.join([x._repr_latex_() for x in self.multiindex])
-            return r'${0}_{{{1}}}$'.format(self.children[0]._repr_latex_(), index)
+            index = ','.join([x.latex() for x in self.multiindex])
+            return r'{0}_{{{1}}}'.format(self.children[0].latex(), index)
+
+    def _repr_latex_(self):
+        return r'${0}$'.format(self.latex())
 
 
 class FlexiblyIndexed(Scalar):
