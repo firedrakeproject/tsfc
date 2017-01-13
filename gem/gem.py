@@ -33,7 +33,7 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'MathFunction', 'MinValue', 'MaxValue', 'Comparison',
            'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
-           'IndexSum', 'ListTensor', 'Delta', 'index_sum',
+           'IndexSum', 'ListTensor', 'Delta', 'index_sum', 'Scalar',
            'partial_indexed', 'reshape', 'view', 'Terminal', 'FlexiblyIndexed']
 
 
@@ -169,6 +169,10 @@ class Literal(Constant):
     def latex(self):
         if self.array.shape == (1,):
             return str(self.array[0])
+        elif len(self.array.shape) == 1:
+            return 'V'
+        elif len(self.array.shape) == 2:
+            return 'M'
         else:
             return str(self.array)
 
@@ -275,11 +279,11 @@ class Product(Scalar):
 
     def latex(self):
         a, b = self.children
-        return r'{0} * {1}'.format(a.latex(), b.latex())
+        return r'{0} \times {1}'.format(a.latex(), b.latex())
 
     def _repr_latex_(self):
         a, b = self.children
-        return r'${0}$'.format(a.latex(), b.latex())
+        return r'${0}$'.format(self.latex())
 
 
 class Division(Scalar):
@@ -305,6 +309,13 @@ class Division(Scalar):
         self.children = a, b
         return self
 
+    def latex(self):
+        a, b = self.children
+        return r'\displaystyle\frac{{{0}}}{{{1}}}'.format(a.latex(), b.latex())
+
+    def _repr_latex_(self):
+        a, b = self.children
+        return r'${0}$'.format(self.latex())
 
 class Power(Scalar):
     __slots__ = ('children',)
@@ -461,7 +472,7 @@ class Index(IndexBase):
 
     def latex(self):
         if self.name:
-            return name
+            return self.name
         else:
             return r'i_{{{0}}}'.format(self.count)
 

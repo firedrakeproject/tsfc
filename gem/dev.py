@@ -1,6 +1,6 @@
 from __future__ import absolute_import, print_function, division
 from singledispatch import singledispatch
-from gem import Product, Sum, Terminal, Node
+from gem.gem import Product, Sum, Node, Terminal, Constant, Scalar, Division
 from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
 from gem.optimise import _collect_terms
 
@@ -24,10 +24,18 @@ def _count_flop_product(node, self):
     a, b = node.children
     return self(a) + self(b) + 1
 
-@_count_flop.register(Terminal)
-def _count_flop_terminal(node, self):
+@_count_flop.register(Division)
+def _count_flop_division(node, self):
+    a, b = node.children
+    return self(a) + self(b) + 1
+
+@_count_flop.register(Constant)
+def _count_flop_const(node, self):
     return 0
 
+@_count_flop.register(Scalar)
+def _count_flop_scalar(node, self):
+    return 0
 
 def count_flop(expression):
     """Replace divisions with multiplications in expressions"""
@@ -112,29 +120,32 @@ def _factorise(expression):
     return factorise(expression, nodes)
 
 def factorise(expression, nodes):
-    print("--------------")
-    print(expression._repr_latex_())
-    print(count_flop(expression))
-    print(nodes)
+    # find optimal factorised expression, return (optimal expr, flops)
+    flops = count_flop(expression)
     if not isinstance(expression, Sum):
-        return
+        # nothing to factorise
+        return (expression, flops)
+    # collect all possible factors
     queue = []
     for node, factors in nodes.iteritems():
         if len(factors)>1:
             queue.append(node)
+    optimal_factor = None
     for factor in queue:
-        print(factor)
         new_node = reduce(Sum, nodes[factor])
-        old_list = list(nodes[factor])
+        old_list = list(nodes[factor])  # remember old list
         for node in nodes[factor]:
-            nodes[node].remove(factor)
+            nodes[node].remove(factor)  # remove common factor
         nodes[factor] = [new_node]
         if new_node in nodes:
             nodes[new_node].append(factor)
         else:
             nodes[new_node] = [factor]
-        expression = extract_factor(expression, factor)
-        factorise(expression, nodes)
+        expression = extract_factor(expression, factor)  # do the factorisation
+        _, new_flops = factorise(expression, nodes)
+        if new_flops < flops:
+            flops = new_flops
+            optimal_factor = factor
         # restore expression
         expression = expand_factor(expression, factor)
         # restore node dictionary
@@ -142,8 +153,7 @@ def factorise(expression, nodes):
             nodes[node].append(factor)
         nodes[new_node].remove(factor)
         nodes[factor] = old_list
-
-
-
-    # restore expression and nodes
-    return
+    if not optimal_factor:
+        return (expression, flops)
+    else:
+        return (extract_factor(expression, optimal_factor), flops)
