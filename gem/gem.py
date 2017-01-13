@@ -34,7 +34,7 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
            'IndexSum', 'ListTensor', 'Delta', 'index_sum',
-           'partial_indexed', 'reshape', 'view', 'Terminal']
+           'partial_indexed', 'reshape', 'view', 'Terminal', 'FlexiblyIndexed']
 
 
 class NodeMeta(type):
@@ -72,6 +72,9 @@ class Node(with_metaclass(NodeMeta, NodeBase)):
         if result:
             self.children = other.children
         return result
+
+    # def _repr_latex_(self):
+    #     return r'${0}$'.format(self.latex())
 
 
 class Terminal(Node):
@@ -334,6 +337,13 @@ class MathFunction(Scalar):
         self.name = name
         self.children = argument,
 
+    def latex(self):
+        if self.name == 'abs':
+            return r'\lvert {0} \rvert'.format(self.children[0].latex())
+
+    def _repr_latex_(self):
+        return r'${0}$'.format(self.latex())
+
 
 class MinValue(Scalar):
     __slots__ = ('children',)
@@ -586,6 +596,23 @@ class FlexiblyIndexed(Scalar):
         self.dim2idxs = tuple(dim2idxs_)
         self.free_indices = unique(free_indices)
 
+    def latex(self):
+        indices = []
+        for (offset, dixs) in self.dim2idxs:
+            expr = u'{0}'.format(offset)
+            for dix in dixs:
+                if dix[1] == 1:
+                    step = ''
+                else:
+                    step = dix[1]
+                expr += u'+{0}{1}'.format(step, dix[0])
+            indices.append(expr)
+        index = ','.join(indices)
+        return r'{0}_{{{1}}}'.format(self.children[0].latex(), index)
+
+    def _repr_latex_(self):
+        return r'${0}$'.format(self.latex())
+
 
 class ComponentTensor(Node):
     __slots__ = ('children', 'multiindex', 'shape')
@@ -651,6 +678,13 @@ class IndexSum(Scalar):
         self.free_indices = unique(set(summand.free_indices) - set(multiindex))
 
         return self
+
+    def latex(self):
+        index = ','.join([x.latex() for x in self.multiindex])
+        return r'\sum\limits_{{{0}}}{1}'.format(index, self.children[0].latex())
+
+    def _repr_latex_(self):
+        return r'${0}$'.format(self.latex())
 
 
 class ListTensor(Node):
