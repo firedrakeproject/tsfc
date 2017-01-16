@@ -26,7 +26,7 @@ ExpressionKernel = namedtuple('ExpressionKernel', ['ast', 'oriented', 'coefficie
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
                  "domain_number",
-                 "coefficient_numbers", "__weakref__",  "_ir")
+                 "coefficient_numbers", "__weakref__",  "_ir", "_return_variables")
     """A compiled Kernel object.
 
     :kwarg ast: The COFFEE ast for the kernel.

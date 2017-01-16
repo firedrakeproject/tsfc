@@ -152,10 +152,10 @@ class Identity(Constant):
 class Literal(Constant):
     """Tensor-valued constant"""
 
-    __slots__ = ('array',)
-    __front__ = ('array',)
+    __slots__ = ('name', 'array')
+    __front__ = ('name', 'array')
 
-    def __new__(cls, array):
+    def __new__(cls, array, name=None):
         array = asarray(array)
         if (array == 0).all():
             # All zeros, make symbolic zero
@@ -163,18 +163,24 @@ class Literal(Constant):
         else:
             return super(Literal, cls).__new__(cls)
 
-    def __init__(self, array):
+    def __init__(self, array, name=None):
+        self.name = name
         self.array = asarray(array, dtype=float)
 
     def latex(self):
-        if self.array.shape == (1,):
-            return str(self.array[0])
-        elif len(self.array.shape) == 1:
-            return 'V'
-        elif len(self.array.shape) == 2:
-            return 'M'
-        else:
+        shape = self.shape
+        if self.name:
+            return  r'{{{0}}}'.format(self.name)
+        elif shape == ():
             return str(self.array)
+        elif shape == (1,):
+            return str(self.array[0])
+        elif len(shape) == 1:
+            return r'V^{{{0}}}'.format(shape[0])
+        elif len(shape) == 2:
+            return r'M^{{{0}}}'.format(r'\times '.join(map(str,shape)))
+        else:
+            return r'T^{{{0}}}'.format(r'\times '.join(map(str, shape)))
 
     def _repr_latex_(self):
         return r'${0}$'.format(self.latex())
@@ -209,7 +215,7 @@ class Variable(Terminal):
         self.shape = shape
 
     def latex(self):
-        return  self.name
+        return  r'{{{0}}}'.format(self.name)
 
     def _repr_latex_(self):
         return r'${0}$'.format(self.latex())
@@ -548,7 +554,7 @@ class Indexed(Scalar):
         if not self.multiindex:
             return self.children[0].latex()
         else:
-            index = ','.join([x.latex() for x in self.multiindex])
+            index = ','.join([x.latex() if isinstance(x, Index) else str(x) for x in self.multiindex])
             return r'{0}_{{{1}}}'.format(self.children[0].latex(), index)
 
     def _repr_latex_(self):
@@ -610,13 +616,19 @@ class FlexiblyIndexed(Scalar):
     def latex(self):
         indices = []
         for (offset, dixs) in self.dim2idxs:
-            expr = u'{0}'.format(offset)
+            if offset == 0:
+                expr = ''
+            else:
+                expr = u'{0}'.format(offset)
             for dix in dixs:
                 if dix[1] == 1:
                     step = ''
                 else:
                     step = dix[1]
-                expr += u'+{0}{1}'.format(step, dix[0])
+                if expr == '':
+                    expr += u'{0}{1}'.format(step, dix[0].latex())
+                else:
+                    expr += u'+{0}{1}'.format(step, dix[0].latex())
             indices.append(expr)
         index = ','.join(indices)
         return r'{0}_{{{1}}}'.format(self.children[0].latex(), index)

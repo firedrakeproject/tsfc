@@ -5,49 +5,63 @@ from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouch
 from gem.optimise import _collect_terms
 
 # ---------------------------------------
-# Count flop
+# Count flop of expression, "as it is", no reordering etc
 @singledispatch
-def _count_flop(node, self):
+def _count_flop(node, self, index):
     raise AssertionError("cannot handle type %s" % type(node))
 
-
-_count_flop.register(Node)(reuse_if_untouched)
-
-
 @_count_flop.register(Sum)
-def _count_flop_sum(node, self):
-    a, b = node.children
-    return self(a) + self(b) + 1
-
 @_count_flop.register(Product)
-def _count_flop_product(node, self):
-    a, b = node.children
-    return self(a) + self(b) + 1
-
 @_count_flop.register(Division)
-def _count_flop_division(node, self):
-    a, b = node.children
-    return self(a) + self(b) + 1
-
-@_count_flop.register(Constant)
-def _count_flop_const(node, self):
-    return 0
+def _count_flop_common(node, self, index):
+    # The sum/product itself
+    flop = 1
+    for i in node.free_indices:
+        flop *= i.extent
+    # Hoisting the factors
+    for child in node.children:
+        flop += self(child, child.free_indices)
+    return flop
 
 @_count_flop.register(Scalar)
-def _count_flop_scalar(node, self):
+@_count_flop.register(Constant)
+def _count_flop_const(node, self, index):
     return 0
 
-def count_flop(expression):
-    """Replace divisions with multiplications in expressions"""
-    mapper = Memoizer(_count_flop)
-    return mapper(expression)
+def count_flop(expression, index):
+    mapper = MemoizerArg(_count_flop)
+    return mapper(expression, index)
 
+
+# ---------------------------------------
+# Expand all products recursively
+# e.g (a+(b+c)d)e = ae + bde + cde
+
+@singledispatch
+def _expand_all_product(node, self):
+    raise AssertionError("cannot handle type %s" % type(node))
+
+_expand_all_product.register(Node)(reuse_if_untouched)
+
+@_expand_all_product.register(Product)
+def _expand_all_product_common(node, self):
+    a, b = map(self, node.children)
+    if isinstance(b, Sum):
+        return Sum(self(Product(a, b.children[0])), self(Product(a, b.children[1])))
+    elif isinstance(a, Sum):
+        return Sum(self(Product(a.children[0], b)), self(Product(a.children[1], b)))
+    else:
+        return node
+
+def expand_all_product(node):
+    mapper = Memoizer(_expand_all_product)
+    return mapper(node)
 
 # ---------------------------------------
 # Collect factors
 # assuming only + and *, all expanded out
 
-# corrently not memoized yet
+# currently not memoized yet
 def collect_factors(node, result):
     if isinstance(node, Terminal):
         return
@@ -114,14 +128,14 @@ def extract_factor(expression, factor):
         return Product(factor, reduce(Sum, common))
     return Sum(Product(factor, reduce(Sum, common)), reduce(Sum, rest))
 
-def _factorise(expression):
+def _factorise(expression, index):
     nodes = {}
     collect_factors(expression, nodes)
-    return factorise(expression, nodes)
+    return factorise(expression, index, nodes)
 
-def factorise(expression, nodes):
+def factorise(expression, index, nodes):
     # find optimal factorised expression, return (optimal expr, flops)
-    flops = count_flop(expression)
+    flops = count_flop(expression, index)
     if not isinstance(expression, Sum):
         # nothing to factorise
         return (expression, flops)
@@ -142,7 +156,7 @@ def factorise(expression, nodes):
         else:
             nodes[new_node] = [factor]
         expression = extract_factor(expression, factor)  # do the factorisation
-        _, new_flops = factorise(expression, nodes)
+        _, new_flops = factorise(expression, index, nodes)
         if new_flops < flops:
             flops = new_flops
             optimal_factor = factor
