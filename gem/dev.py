@@ -1,8 +1,8 @@
 from __future__ import absolute_import, print_function, division
 from singledispatch import singledispatch
-from gem.gem import Product, Sum, Node, Terminal, Constant, Scalar, Division
+from gem.gem import Product, Sum, Node, Terminal, Constant, Scalar, Division, Zero
 from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
-from gem.optimise import _collect_terms
+from gem.optimise import one
 
 # ---------------------------------------
 # Count flop of expression, "as it is", no reordering etc
@@ -57,6 +57,152 @@ def expand_all_product(node):
     mapper = Memoizer(_expand_all_product)
     return mapper(node)
 
+
+# ---------------------------------------
+# Collect terms
+
+def _collect_terms(node, self, node_type):
+    """Helper function to recursively collect all children into a list from
+    :param:`node` and its children of class :param:`node_type`.
+
+    :param node: root of expression
+    :param node_type: class of node (e.g. Sum or Product)
+    :param sort_func: function to sort the returned list
+    :return: list of all terms
+    """
+    from collections import deque
+    terms = []  # collected terms
+    queue = deque([node])  # queue of children nodes to process
+    while queue:
+        child = queue.popleft()
+        if isinstance(child, node_type):
+            queue.extendleft(reversed(child.children))
+        else:
+            terms.append(child)
+    return terms
+
+def collect_terms(node, node_type):
+    mapper = MemoizerArg(_collect_terms)
+    return mapper(node, node_type)
+
+def _flatten_sum(node, self, index):
+    """
+    factorise into sum of products, group product factors based on dependency
+    on index:
+    1) nothing (key = 0)
+    2) i (key = 1)
+    3) (i)j (key = j)
+    4) (i)k (key = k)
+    ...
+    :param node:
+    :param self:
+    :return:
+    """
+    sums = collect_terms(node, Sum)
+    result = []
+    for sum in sums:
+        d = {}
+        for i in [0, 1] + list(index):
+            d[i] = list()
+        for factor in collect_terms(sum, Product):
+            fi = factor.free_indices
+            if fi == ():
+                d[0].append(factor)
+            else:
+                flag = True
+                for i in index:
+                    if i in fi:
+                        flag = False
+                        d[i].append(factor)
+                        break
+                if flag:
+                    d[1].append(factor)
+        result.append(d)
+    return result
+
+def flatten_sum(node, index):
+    mapper = MemoizerArg(_flatten_sum)
+    return mapper(node, index)
+
+
+# ---------------------------------------
+# Find common factor
+def _find_common_factor(node, self, index):
+    # index = (free index, i)
+    factors = flatten_sum(node, index[0])
+    from collections import Counter
+    return list(reduce(lambda a,b : a&b, [Counter(f[index[1]]) for f in factors]))
+
+def find_common_factor(node, index):
+    mapper = MemoizerArg(_find_common_factor)
+    return mapper(node, index)
+
+
+# ---------------------------------------
+# Factorisation
+
+def _factorise_i(node, self, index):
+    # index = (free index, i)
+    sumproduct = flatten_sum(node, index[0])
+    # collect all factors with correct index
+    factors = set([p[index[1]][0] for p in sumproduct])  # only 1 element due to linearity
+    sums = {}
+    for f in factors:
+        sums[f] = []
+    sums[0] = []
+    for p in sumproduct:
+        p_const = reduce(Product, p[0], one)
+        p_i = reduce(Product, p[1], one)
+        p_jk = reduce(Product, [p[i][0] for i in index[0] if i != index[1]], one)
+        new_node = reduce(Product, [p_const, p_i, p_jk], one)
+        if p[index[1]]:
+            sums[p[index[1]][0]].append(new_node)
+        else:
+            sums[0].append(new_node)
+    sum_i = []
+    new_index = list(index[0])
+    new_index.remove(index[1])
+    new_index = tuple(new_index)
+    for f in factors:
+        # recursion
+        sum_i.append(Product(f, factorise(reduce(Sum, sums[f], Zero()), new_index)))
+    return reduce(Sum, sum_i + sums[0], Zero())
+
+def factorise_i(node, index):
+    mapper = MemoizerArg(_factorise_i)
+    return mapper(node, index)
+
+def factorise(node, index):
+    flop = count_flop(node, index)
+    optimal_i = None
+    node = expand_all_product(node)
+    sumproduct = flatten_sum(node, index)
+    factor_const = find_common_factor(node, (index, 0))
+    factor_1 = find_common_factor(node, (index, 1))
+    if factor_const or factor_1:
+        for p in sumproduct:
+            for x in factor_const:
+                p[0].remove(x)
+            for x in factor_1:
+                p[1].remove(x)
+    child_sum = []
+    for p in sumproduct:
+        child_sum.append(reduce(Product, p[0] + p[1] + [x for i in index for x in p[i]], one))
+    p_const = reduce(Product, factor_const, one)
+    p_1 = reduce(Product, factor_1, one)
+    child = reduce(Sum, child_sum, Zero())
+    if index:
+        for i in index:
+            child = factorise_i(child, (index, i))
+        new_node = Product(Product(p_const,p_1), child)
+        new_flop = count_flop(new_node, index)
+        if new_flop<flop:
+            optimal_i = i
+            flop = new_flop
+    if optimal_i:
+        child = factorise_i(child, (index, optimal_i))
+    return Product(Product(p_const, p_1), child)
+
 # ---------------------------------------
 # Collect factors
 # assuming only + and *, all expanded out
@@ -79,7 +225,6 @@ def collect_factors(node, result):
     collect_factors(a, result)
     collect_factors(b, result)
     return
-
 
 # ---------------------------------------
 # Factorisation
@@ -108,7 +253,7 @@ def expand_factor(expression, factor):
 
 
 
-def extract_factor(expression, factor):
+def extract_factor_old(expression, factor):
     queue = [expression.children[0], expression.children[1]]
     common = []
     rest = []
@@ -133,7 +278,7 @@ def _factorise(expression, index):
     collect_factors(expression, nodes)
     return factorise(expression, index, nodes)
 
-def factorise(expression, index, nodes):
+def factorise_old(expression, index, nodes):
     # find optimal factorised expression, return (optimal expr, flops)
     flops = count_flop(expression, index)
     if not isinstance(expression, Sum):

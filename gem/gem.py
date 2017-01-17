@@ -276,8 +276,9 @@ class Product(Scalar):
         if b == one:
             return a
 
-        if isinstance(a, Constant) and isinstance(b, Constant):
-            return Literal(a.value * b.value)
+        # disable for now -- TJ
+        # if isinstance(a, Constant) and isinstance(b, Constant):
+        #     return Literal(a.value * b.value)
 
         self = super(Product, cls).__new__(cls)
         self.children = a, b
