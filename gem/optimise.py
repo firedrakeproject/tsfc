@@ -14,8 +14,8 @@ from singledispatch import singledispatch
 
 from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
 from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
-                     Product, Sum, Comparison, Conditional, Index,
-                     VariableIndex, Indexed, FlexiblyIndexed,
+                     Product, Sum, Comparison, Conditional, Index, Constant,
+                     VariableIndex, Indexed, FlexiblyIndexed, Scalar,
                      IndexSum, ComponentTensor, ListTensor, Delta,
                      partial_indexed, one, Division)
 
@@ -85,30 +85,6 @@ def replace_division(expressions):
     return list(map(mapper, expressions))
 
 
-def _collect_terms(node, node_type, sort_func=None):
-    """Helper function to recursively collect all children into a list from
-    :param:`node` and its children of class :param:`node_type`.
-
-    :param node: root of expression
-    :param node_type: class of node (e.g. Sum or Product)
-    :param sort_func: function to sort the returned list
-    :return: list of all terms
-    """
-    from collections import deque
-    terms = []  # collected terms
-    queue = deque([node])  # queue of children nodes to process
-    while queue:
-        child = queue.popleft()
-        if isinstance(child, node_type):
-            queue.extendleft(reversed(child.children))
-        else:
-            terms.append(child)
-    if sort_func:
-        return sorted(terms, key=sort_func)
-    else:
-        return terms
-
-
 @singledispatch
 def _reassociate_product(node, self):
     """Rearrange sequence of chain of products in increasing order of node rank.
@@ -134,7 +110,7 @@ def _reassociate_product_prod(node, self):
     # collect all factors of product, sort by rank
     # should use more sophisticated method later on for optimal result
     sort_func = lambda node: len(node.free_indices)
-    factors = _collect_terms(node, Product, sort_func)
+    factors = sorted(_collect_terms(node, Product, sort_func), key=sort_func)
     # need to optimise away iterator <==> list
     new_factors = list(map(self, factors))  # recursion
     return reduce(Product, new_factors)
@@ -143,100 +119,6 @@ def _reassociate_product_prod(node, self):
 def reassociate_product(expressions):
     mapper = Memoizer(_reassociate_product)
     return list(map(mapper, expressions))
-
-
-def _collect_factors(sum):
-    """Collect factors of a summation into a list of lists. For example, ::
-
-        A[i]*B[j] + A[i]*C[j] + D[i]
-
-    returns [[A[i], B[j]], [A[i], C[j]], [D[i]]]
-
-    :param sum: Sum node
-    :return: list of tuples of factors in :param sum
-    """
-    factors = []  # collected factors
-    # collect summands of sum
-    summands = _collect_terms(sum, Sum)
-    for summand in summands:
-        if isinstance(summand, Product):
-            # collect all factors of products
-            factors.append(_collect_terms(summand, Product))
-        else:
-            factors.append([summand])
-    return factors
-
-
-@singledispatch
-def _factorise(node, self):
-    """Factorize terms in the expression. For example: ::
-
-        A[i]*B[j] + A[i]*C[j] + D[i]
-
-    becomes ::
-
-        A[i]*(B[j] + C[j]) + D[i].
-
-    :param node: root of expression
-    :return: reassociated product node
-    """
-    raise AssertionError("cannot handle type %s" % type(node))
-
-
-_factorise.register(Node)(reuse_if_untouched)
-
-
-@_factorise.register(Sum)
-def _factorise_sum(node, self):
-    factors = _collect_factors(node)
-    from collections import OrderedDict
-    # OrderedDict for stable sorting later on
-    occurrence = OrderedDict((f, set()) for l in factors for f in l)
-
-    for product in factors:
-        for factor in product:
-            occurrence[factor].add(tuple(product))
-    # sort function for factorisation algorithm
-    # here we choose the factor by most occurrences
-    sort_func = lambda (k, v): -len(v)
-    # might be better way to do this than building a new list here
-    sorted_occur = sorted(occurrence.items(), key=sort_func)
-    if len(sorted_occur[0][1]) <= 1:
-    #     # nothing to do
-        new_children = list(map(self, node.children))
-        return reduce(Sum, new_children)
-
-
-    common_factor = sorted_occur[0][0]
-    summands = []  # collect Sum children
-    multiplicands = []  # collect Product children
-
-    # refactor into Sum(Sum(multiplicands)*common_factor, summands)
-    for product in factors:
-        if common_factor in product:
-            # remove only the first occurrence, in case there are squares of common_factor
-            product.remove(common_factor)
-            if product:
-                new_children = list(map(self, product))
-                multiplicands.append(reduce(Product, new_children))
-            else:
-                multiplicands.append(Literal(1))
-        else:
-            new_children = list(map(self, product))
-            # reduction handles single element list as well
-            summands.append(reduce(Product, new_children))
-    new_multi = list(map(self, multiplicands))
-    # still need to continue factorising the multiplicands
-    summands.insert(0, Product(common_factor, self(reduce(Sum, multiplicands))))
-    new_sum = list(map(self, summands))
-    # need to continue factorising the resultant Sum
-    return self(reduce(Sum, new_sum))
-
-
-def factorise(expressions):
-    mapper = Memoizer(_factorise)
-    return list(map(mapper, expressions))
-
 
 @singledispatch
 def replace_indices(node, self, subst):
@@ -594,3 +476,229 @@ def aggressive_unroll(expression):
     expression, = unroll_indexsum((expression,), max_extent=numpy.inf)
     expression, = remove_componenttensors((expression,))
     return expression
+
+
+# ---------------------------------------
+# Count flop of expression, "as it is", no reordering etc
+@singledispatch
+def _count_flop(node, self):
+    raise AssertionError("cannot handle type %s" % type(node))
+
+@_count_flop.register(Sum)
+@_count_flop.register(Product)
+@_count_flop.register(Division)
+def _count_flop_common(node, self):
+    flop = numpy.product([i.extent for i in node.free_indices])
+    # Hoisting the factors
+    for child in node.children:
+        flop += self(child)
+    return flop
+
+@_count_flop.register(Scalar)
+@_count_flop.register(Constant)
+def _count_flop_const(node, self):
+    return 0
+
+def count_flop(expression):
+    mapper = Memoizer(_count_flop)
+    return mapper(expression)
+
+
+# ---------------------------------------
+# Expand all products recursively
+# e.g (a+(b+c)d)e = ae + bde + cde
+
+@singledispatch
+def _expand_all_product(node, self):
+    raise AssertionError("cannot handle type %s" % type(node))
+
+_expand_all_product.register(Node)(reuse_if_untouched)
+
+@_expand_all_product.register(Product)
+def _expand_all_product_common(node, self):
+    a, b = map(self, node.children)
+    if isinstance(b, Sum):
+        return Sum(self(Product(a, b.children[0])), self(Product(a, b.children[1])))
+    elif isinstance(a, Sum):
+        return Sum(self(Product(a.children[0], b)), self(Product(a.children[1], b)))
+    else:
+        return node
+
+def expand_all_product(node):
+    mapper = Memoizer(_expand_all_product)
+    return mapper(node)
+
+
+def _collect_terms(node, self, node_type):
+    from collections import deque
+    terms = []  # collected terms
+    queue = deque([node])  # queue of children nodes to process
+    while queue:
+        child = queue.popleft()
+        if isinstance(child, node_type):
+            queue.extendleft(reversed(child.children))
+        else:
+            terms.append(child)
+    return terms
+
+def collect_terms(node, node_type):
+    """Recursively collect all children into a list from :param:`node`
+    and its children of class :param:`node_type`.
+
+    :param node: root of expression
+    :param node_type: class of node (e.g. Sum or Product)
+    :return: list of all terms
+    """
+
+    mapper = MemoizerArg(_collect_terms)
+    return mapper(node, node_type)
+
+def _flatten_sum(node, self, index):
+    sums = collect_terms(node, Sum)
+    result = []
+    for sum in sums:
+        d = {}
+        for i in [0, 1] + list(index):
+            d[i] = list()
+        for factor in collect_terms(sum, Product):
+            fi = factor.free_indices
+            if fi == ():
+                d[0].append(factor)
+            else:
+                flag = True
+                for i in index:
+                    if i in fi:
+                        flag = False
+                        d[i].append(factor)
+                        break
+                if flag:
+                    d[1].append(factor)
+        result.append(d)
+    return result
+
+def flatten_sum(node, index):
+    """
+    factorise :param:`node` into sum of products, group factors of each product
+    based on its dependency on index:
+    1) nothing (key = 0)
+    2) i (key = 1)
+    3) (i)j (key = j)
+    4) (i)k (key = k)
+    ...
+    :param node: root of expression
+    :param index: tuple of argument (linear) indices
+    :return: dictionary to list of factors
+    """
+    mapper = MemoizerArg(_flatten_sum)
+    return mapper(node, index)
+
+
+def _find_common_factor(node, self, index):
+    fi, i = index  # free index and current index
+    sumproduct = flatten_sum(node, fi)
+    from collections import Counter
+    return list(reduce(lambda a,b : a & b,
+                       [Counter(f[i]) for f in sumproduct]))
+
+def find_common_factor(node, index):
+    """
+    find common factors of :param `node`
+    :param node: root of expression, usually sum of products
+    :param index: tuple (free indices, current index)
+    :return: list of common factors categorized by current index
+    """
+    mapper = MemoizerArg(_find_common_factor)
+    return mapper(node, index)
+
+
+def _factorise_i(node, self, index):
+    fi, i = index  # free index, current index
+    sumproduct = flatten_sum(node, fi)
+    # collect all factors with correct index
+    factors = sorted(set([p[i][0] for p in sumproduct]))
+    # only 1 element per list due to linearity, thus p[i][0]
+    # sort to ensure deterministic result
+    sums = {}
+    for f in factors:
+        sums[f] = []
+    sums[0] = []
+    for p in sumproduct:
+        # extract out common factor
+        p_const = reduce(Product, p[0], one)  # constants
+        p_i = reduce(Product, p[1], one)  # quadrature index
+        # argument index
+        p_jk = reduce(Product, [p[j][0] for j in fi if j != i and p[j]], one)
+        new_node = reduce(Product, [p_const, p_i, p_jk], one)
+        if p[i]:
+            # add to corresponding factor list if product contains
+            # factor of index i
+            sums[p[i][0]].append(new_node)
+        else:
+            # add to list of the rest
+            sums[0].append(new_node)
+    sum_i = []
+    # create tuple of free indices with the current index removed
+    new_index = list(fi)
+    new_index.remove(i)
+    new_index = tuple(new_index)
+    for f in factors:
+        # factor * subexpression
+        # recursively factorise newly creately subexpression (a sumproduct)
+        sum_i.append(Product(
+            f,
+            _factorise(reduce(Sum, sums[f], Zero()), _factorise, new_index)))
+    return reduce(Sum, sum_i + sums[0], Zero())
+
+def factorise_i(node, index):
+    """
+    factorise :param `node` using factors with current index as common factor
+    :param node: root of expression
+    :param index: tuple (free indices, current index)
+    :return: factorised new node
+    """
+    mapper = MemoizerArg(_factorise_i)
+    return mapper(node, index)
+
+
+def _factorise(node, self, index):
+    flop = count_flop(node)
+    optimal_i = None
+    node = expand_all_product(node)
+    sumproduct = flatten_sum(node, index)
+    # find common factors that are constants or dependent on quadrature index
+    factor_const = find_common_factor(node, (index, 0))
+    factor_1 = find_common_factor(node, (index, 1))
+    # extract common factors
+    if factor_const or factor_1:
+        for p in sumproduct:
+            for x in factor_const:
+                p[0].remove(x)
+            for x in factor_1:
+                p[1].remove(x)
+    # node = factor_const * factor_1 * Sum(child_sum)
+    child_sum = []
+    for p in sumproduct:
+        child_sum.append(reduce(Product,
+                                p[0] + p[1] + [x for i in index for x in p[i]],
+                                one))
+    p_const = reduce(Product, factor_const, one)
+    p_1 = reduce(Product, factor_1, one)
+    # new child node
+    child = reduce(Sum, child_sum, Zero())
+    if index:
+        # try factorisation on each argument dimension
+        for i in index:
+            child = factorise_i(child, (index, i))
+            new_node = Product(Product(p_const, p_1), child)
+            new_flop = count_flop(new_node)
+            if new_flop<flop:
+                optimal_i = i
+                flop = new_flop
+            child = expand_all_product(child)
+    if optimal_i:
+        child = factorise_i(child, (index, optimal_i))
+    return Product(Product(p_const, p_1), child)
+
+def factorise(expressions):
+    mapper = MemoizerArg(_factorise)
+    return [mapper(expr, expr.free_indices) for expr in expressions]
