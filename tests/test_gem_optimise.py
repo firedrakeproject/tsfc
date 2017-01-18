@@ -127,6 +127,7 @@ def test_factorise_recursion():
     assert result.children[0] == Sum(Ci, Di)
     assert result.children[1] == Sum(Bi, Ai)
 
+
 if __name__ == "__main__":
     import os
     import sys

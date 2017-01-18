@@ -170,7 +170,7 @@ class Literal(Constant):
     def latex(self):
         shape = self.shape
         if self.name:
-            return  r'{{{0}}}'.format(self.name)
+            return r'{{{0}}}'.format(self.name)
         elif shape == ():
             return str(self.array)
         elif shape == (1,):
@@ -178,7 +178,7 @@ class Literal(Constant):
         elif len(shape) == 1:
             return r'V^{{{0}}}'.format(shape[0])
         elif len(shape) == 2:
-            return r'M^{{{0}}}'.format(r'\times '.join(map(str,shape)))
+            return r'M^{{{0}}}'.format(r'\times '.join(map(str, shape)))
         else:
             return r'T^{{{0}}}'.format(r'\times '.join(map(str, shape)))
 
@@ -215,10 +215,11 @@ class Variable(Terminal):
         self.shape = shape
 
     def latex(self):
-        return  r'{{{0}}}'.format(self.name)
+        return r'{{{0}}}'.format(self.name)
 
     def _repr_latex_(self):
         return r'${0}$'.format(self.latex())
+
 
 class Sum(Scalar):
     __slots__ = ('children',)
@@ -250,8 +251,7 @@ class Sum(Scalar):
     def is_equal(self, other):
         a, b = self.children
         c, d = other.children
-        return (a == c and b == d) or (a == d and  b== c)
-
+        return (a == c and b == d) or (a == d and b == c)
 
     def get_hash(self):
         a, b = self.children
@@ -259,6 +259,7 @@ class Sum(Scalar):
             return hash((Sum, a, b))
         else:
             return hash((Sum, b, a))
+
 
 class Product(Scalar):
     __slots__ = ('children',)
@@ -323,6 +324,7 @@ class Division(Scalar):
     def _repr_latex_(self):
         a, b = self.children
         return r'${0}$'.format(self.latex())
+
 
 class Power(Scalar):
     __slots__ = ('children',)

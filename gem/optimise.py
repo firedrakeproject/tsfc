@@ -120,6 +120,7 @@ def reassociate_product(expressions):
     mapper = Memoizer(_reassociate_product)
     return list(map(mapper, expressions))
 
+
 @singledispatch
 def replace_indices(node, self, subst):
     """Replace free indices in a GEM expression.
@@ -484,6 +485,7 @@ def aggressive_unroll(expression):
 def _count_flop(node, self):
     raise AssertionError("cannot handle type %s" % type(node))
 
+
 @_count_flop.register(Sum)
 @_count_flop.register(Product)
 @_count_flop.register(Division)
@@ -494,10 +496,12 @@ def _count_flop_common(node, self):
         flop += self(child)
     return flop
 
+
 @_count_flop.register(Scalar)
 @_count_flop.register(Constant)
 def _count_flop_const(node, self):
     return 0
+
 
 def count_flop(expression):
     mapper = Memoizer(_count_flop)
@@ -512,7 +516,9 @@ def count_flop(expression):
 def _expand_all_product(node, self):
     raise AssertionError("cannot handle type %s" % type(node))
 
+
 _expand_all_product.register(Node)(reuse_if_untouched)
+
 
 @_expand_all_product.register(Product)
 def _expand_all_product_common(node, self):
@@ -523,6 +529,7 @@ def _expand_all_product_common(node, self):
         return Sum(self(Product(a.children[0], b)), self(Product(a.children[1], b)))
     else:
         return node
+
 
 def expand_all_product(node):
     mapper = Memoizer(_expand_all_product)
@@ -541,6 +548,7 @@ def _collect_terms(node, self, node_type):
             terms.append(child)
     return terms
 
+
 def collect_terms(node, node_type):
     """Recursively collect all children into a list from :param:`node`
     and its children of class :param:`node_type`.
@@ -552,6 +560,7 @@ def collect_terms(node, node_type):
 
     mapper = MemoizerArg(_collect_terms)
     return mapper(node, node_type)
+
 
 def _flatten_sum(node, self, index):
     sums = collect_terms(node, Sum)
@@ -576,6 +585,7 @@ def _flatten_sum(node, self, index):
         result.append(d)
     return result
 
+
 def flatten_sum(node, index):
     """
     factorise :param:`node` into sum of products, group factors of each product
@@ -597,8 +607,9 @@ def _find_common_factor(node, self, index):
     fi, i = index  # free index and current index
     sumproduct = flatten_sum(node, fi)
     from collections import Counter
-    return list(reduce(lambda a,b : a & b,
+    return list(reduce(lambda a, b: a & b,
                        [Counter(f[i]) for f in sumproduct]))
+
 
 def find_common_factor(node, index):
     """
@@ -649,6 +660,7 @@ def _factorise_i(node, self, index):
             _factorise(reduce(Sum, sums[f], Zero()), _factorise, new_index)))
     return reduce(Sum, sum_i + sums[0], Zero())
 
+
 def factorise_i(node, index):
     """
     factorise :param `node` using factors with current index as common factor
@@ -691,13 +703,14 @@ def _factorise(node, self, index):
             child = factorise_i(child, (index, i))
             new_node = Product(Product(p_const, p_1), child)
             new_flop = count_flop(new_node)
-            if new_flop<flop:
+            if new_flop < flop:
                 optimal_i = i
                 flop = new_flop
             child = expand_all_product(child)
     if optimal_i:
         child = factorise_i(child, (index, optimal_i))
     return Product(Product(p_const, p_1), child)
+
 
 def factorise(expressions):
     mapper = MemoizerArg(_factorise)

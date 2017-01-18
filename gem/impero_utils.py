@@ -16,7 +16,7 @@ from singledispatch import singledispatch
 
 from gem.node import traversal, collect_refcount
 from gem.utils import OrderedSet
-from gem import gem, impero as imp, optimise, scheduling, dev
+from gem import gem, impero as imp, optimise, scheduling
 
 
 # ImperoC is named tuple for C code generation.
@@ -39,8 +39,8 @@ def preprocess_gem(expressions):
     expressions = optimise.replace_delta(expressions)
     expressions = optimise.remove_componenttensors(expressions)
     expressions = optimise.replace_division(expressions)
+    expressions = optimise.factorise(expressions)
     # expressions = optimise.reassociate_product(expressions)
-    # expressions = dev.factorise(expressions)
     return expressions
 
 
