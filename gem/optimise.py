@@ -649,15 +649,18 @@ def _factorise_i(node, self, index):
             sums[0].append(new_node)
     sum_i = []
     # create tuple of free indices with the current index removed
-    new_index = list(fi)
-    new_index.remove(i)
-    new_index = tuple(new_index)
+    # new_index = list(fi)
+    # new_index.remove(i)
+    # new_index = tuple(new_index)
     for f in factors:
         # factor * subexpression
         # recursively factorise newly creately subexpression (a sumproduct)
+        print(f)
+        print(sums[f])
+        print(reduce(Sum, sums[f], Zero()).children)
         sum_i.append(Product(
             f,
-            _factorise(reduce(Sum, sums[f], Zero()), _factorise, new_index)))
+            _factorise(reduce(Sum, sums[f], Zero()), _factorise)))
     return reduce(Sum, sum_i + sums[0], Zero())
 
 
@@ -671,8 +674,16 @@ def factorise_i(node, index):
     mapper = MemoizerArg(_factorise_i)
     return mapper(node, index)
 
+@singledispatch
+def _factorise(node, self):
+    raise AssertionError("cannot handle type %s" % type(node))
 
-def _factorise(node, self, index):
+_factorise.register(Node)(reuse_if_untouched)
+
+@_factorise.register(Sum)
+@_factorise.register(Product)
+def _factorise_common(node, self):
+    index = node.free_indices
     flop = count_flop(node)
     optimal_i = None
     node = expand_all_product(node)
@@ -713,5 +724,5 @@ def _factorise(node, self, index):
 
 
 def factorise(expressions):
-    mapper = MemoizerArg(_factorise)
-    return [mapper(expr, expr.free_indices) for expr in expressions]
+    mapper = Memoizer(_factorise)
+    return list(map(mapper, expressions))
