@@ -15,7 +15,7 @@ from singledispatch import singledispatch
 from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
 from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
                      Product, Sum, Comparison, Conditional, Index, Constant,
-                     VariableIndex, Indexed, FlexiblyIndexed, Scalar,
+                     VariableIndex, Indexed, FlexiblyIndexed,
                      IndexSum, ComponentTensor, ListTensor, Delta,
                      partial_indexed, one, Division, MathFunction)
 
@@ -490,9 +490,11 @@ def count_flop(node):
 def _count_flop_single(node):
     return count_flop(node.children[0])
 
+
 @count_flop.register(MathFunction)
 def _count_flop_func(node):
     return count_flop(node.children[0])*2
+
 
 @count_flop.register(Sum)
 @count_flop.register(Product)
@@ -504,6 +506,7 @@ def _count_flop_common(node):
     for child in node.children:
         flop += count_flop(child)
     return flop
+
 
 @count_flop.register(Constant)
 @count_flop.register(Terminal)
@@ -528,6 +531,7 @@ def _expand_all_product(node, self):
 
 _expand_all_product.register(Node)(reuse_if_untouched)
 
+
 @_expand_all_product.register(Product)
 def _expand_all_product_common(node, self):
     a, b = map(self, node.children)
@@ -537,6 +541,7 @@ def _expand_all_product_common(node, self):
         return Sum(self(Product(a.children[0], b)), self(Product(a.children[1], b)))
     else:
         return node
+
 
 def collect_terms(node, node_type):
     from collections import deque
@@ -674,11 +679,14 @@ def _factorise_i(node, self):
             self.factorise(reduce(Sum, sums[f], Zero()))))
     return reduce(Sum, sum_i + sums[0], Zero())
 
+
 @singledispatch
 def _factorise(node, self):
     raise AssertionError("cannot handle type %s" % type(node))
 
+
 _factorise.register(Node)(reuse_if_untouched)
+
 
 @_factorise.register(Sum)
 @_factorise.register(Product)
@@ -705,11 +713,10 @@ def _factorise_common(node, self):
         p1_list = list(p[1])
         # extract common factors
         if factor_const or factor_1:
-            for p in sumproduct:
-                for x in factor_const:
-                    p0_list.remove(x)
-                for x in factor_1:
-                    p1_list.remove(x)
+            for x in factor_const:
+                p0_list.remove(x)
+            for x in factor_1:
+                p1_list.remove(x)
         child_sum.append(reduce(
             Product, p0_list + p1_list + [x for i in index for x in p[i]], one))
     p_const = reduce(Product, factor_const, one)

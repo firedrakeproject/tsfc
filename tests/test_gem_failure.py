@@ -4,7 +4,6 @@ from ufl import (triangle, tetrahedron, FiniteElement,
 from tsfc import compile_form
 from FIAT.hdiv_trace import TraceError
 import pytest
-import sys
 
 
 @pytest.mark.parametrize('cell', [triangle, tetrahedron])
@@ -28,6 +27,7 @@ def test_gradient_error(cell, degree):
     element triggers `gem.Failure` to raise the TraceError
     exception.
     """
+    import sys
     sys.setrecursionlimit(15000)
     trace_element = FiniteElement("HDiv Trace", cell, degree)
     lambdar = TrialFunction(trace_element)

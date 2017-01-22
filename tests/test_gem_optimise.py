@@ -3,7 +3,7 @@ from __future__ import absolute_import, print_function, division
 import pytest
 
 from gem.gem import Index, Indexed, Product, Variable, Division, Literal, Sum
-from gem.optimise import replace_division, reassociate_product, factorise
+from gem.optimise import replace_division, reassociate_product
 
 
 def test_replace_div():

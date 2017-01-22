@@ -112,6 +112,7 @@ class Failure(Terminal):
     def _repr_latex_(self):
         return r'${0}$'.format(self.latex())
 
+
 class Constant(Terminal):
     """Abstract base class for constant types.
 
