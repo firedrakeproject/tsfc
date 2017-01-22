@@ -1,5 +1,6 @@
 from __future__ import absolute_import, print_function, division
 import ufl
+import sys
 from tsfc import compile_form
 import pytest
 
@@ -59,6 +60,7 @@ def form(V, itype, request):
 
 
 def test_idempotency(form):
+    sys.setrecursionlimit(5000)
     k1 = compile_form(form)[0]
     k2 = compile_form(form)[0]
 

@@ -105,6 +105,12 @@ class Failure(Terminal):
         self.shape = shape
         self.exception = exception
 
+    def latex(self):
+        shape = self.shape
+        return r'{0}^{{{1}}}'.format('F', r'\times '.join(map(str, shape)))
+
+    def _repr_latex_(self):
+        return r'${0}$'.format(self.latex())
 
 class Constant(Terminal):
     """Abstract base class for constant types.
@@ -278,8 +284,8 @@ class Product(Scalar):
             return a
 
         # disable for now -- TJ
-        # if isinstance(a, Constant) and isinstance(b, Constant):
-        #     return Literal(a.value * b.value)
+        if isinstance(a, Constant) and isinstance(b, Constant):
+            return Literal(a.value * b.value)
 
         self = super(Product, cls).__new__(cls)
         self.children = a, b
@@ -481,7 +487,7 @@ class Index(IndexBase):
 
     def latex(self):
         if self.name:
-            return self.name
+            return str(self.name)
         else:
             return r'i_{{{0}}}'.format(self.count)
 
