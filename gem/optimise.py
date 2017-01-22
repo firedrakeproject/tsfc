@@ -687,17 +687,17 @@ def _factorise_common(node, self):
     index = tuple(sorted(list(node.free_indices), key=lambda x: x.count))
     flop = count_flop(node)
     optimal_i = None
-    node = self.expand_all_product(node)
+    node_expand = self.expand_all_product(node)
     self.flatten_sum.index = index
     self.flatten_sum.context = index
-    sumproduct = self.flatten_sum(node)
+    sumproduct = self.flatten_sum(node_expand)
     # find common factors that are constants or dependent on quadrature index
     self.find_common_factor.index = (index, 0)
     self.find_common_factor.context = (index, 0)
-    factor_const = self.find_common_factor(node)
+    factor_const = self.find_common_factor(node_expand)
     self.find_common_factor.index = (index, 1)
     self.find_common_factor.context = (index, 1)
-    factor_1 = self.find_common_factor(node)
+    factor_1 = self.find_common_factor(node_expand)
     # node = factor_const * factor_1 * Sum(child_sum)
     child_sum = []
     for p in sumproduct:
@@ -732,7 +732,9 @@ def _factorise_common(node, self):
         self.factorise_i.index = (index, optimal_i)
         self.factorise_i.context = i
         child = self.factorise_i(child)
-    return Product(Product(p_const, p_1), child)
+        return Product(Product(p_const, p_1), child)
+    else:
+        return node
 
 
 def factorise(node):

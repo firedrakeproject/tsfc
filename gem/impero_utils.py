@@ -39,8 +39,8 @@ def preprocess_gem(expressions):
     expressions = optimise.replace_delta(expressions)
     expressions = optimise.remove_componenttensors(expressions)
     expressions = optimise.replace_division(expressions)
-    expressions = optimise.factorise_list(expressions)
-    # expressions = optimise.reassociate_product(expressions)
+    # expressions = optimise.factorise_list(expressions)
+    # expressions = optimise.reassocia0000te_product(expressions)
     return expressions
 
 
