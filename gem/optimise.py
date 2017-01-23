@@ -110,7 +110,9 @@ def _reassociate_product_prod(node, self):
     # collect all factors of product, sort by rank
     # should use more sophisticated method later on for optimal result
     sort_func = lambda node: len(node.free_indices)
-    factors = sorted(collect_terms(node, Product), key=sort_func)
+    self.collect_terms.node_type = Product
+    self.collect_terms.context = Product
+    factors = sorted(self.collect_terms(node), key=sort_func)
     # need to optimise away iterator <==> list
     new_factors = list(map(self, factors))  # recursion
     return reduce(Product, new_factors)
@@ -118,6 +120,8 @@ def _reassociate_product_prod(node, self):
 
 def reassociate_product(expressions):
     mapper = Memoizer(_reassociate_product)
+    mapper2 = Memoizer(_collect_terms)
+    mapper.collect_terms = mapper2
     return list(map(mapper, expressions))
 
 
@@ -482,50 +486,50 @@ def aggressive_unroll(expression):
 # ---------------------------------------
 # Count flop of expression, "as it is", no reordering etc
 @singledispatch
-def count_flop(node):
+def _count_flop(node, self):
     raise AssertionError("cannot handle type %s" % type(node))
 
 
-@count_flop.register(IndexSum)
-def _count_flop_single(node):
-    return count_flop(node.children[0])
+@_count_flop.register(IndexSum)
+def _count_flop_single(node, self):
+    return self(node.children[0])
 
 
-@count_flop.register(MathFunction)
-def _count_flop_func(node):
-    return count_flop(node.children[0])*2
+@_count_flop.register(MathFunction)
+def _count_flop_func(node, self):
+    return self(node.children[0])*2
 
 
-@count_flop.register(Sum)
-@count_flop.register(Product)
-@count_flop.register(Division)
-@count_flop.register(FlexiblyIndexed)
-def _count_flop_common(node):
+@_count_flop.register(Sum)
+@_count_flop.register(Product)
+@_count_flop.register(Division)
+@_count_flop.register(FlexiblyIndexed)
+def _count_flop_common(node, self):
     flop = numpy.product([i.extent for i in node.free_indices])
     # Hoisting the factors
     for child in node.children:
-        flop += count_flop(child)
+        flop += self(child)
     return flop
 
 
-@count_flop.register(Constant)
-@count_flop.register(Terminal)
-@count_flop.register(Indexed)
-def _count_flop_const(node):
+@_count_flop.register(Constant)
+@_count_flop.register(Terminal)
+@_count_flop.register(Indexed)
+def _count_flop_const(node, self):
     return 0
 
 
-# def count_flop(expression):
-#     mapper = Memoizer(_count_flop)
-#     return mapper(expression)
+def count_flop(node):
+    mapper = Memoizer(_count_flop)
+    return mapper(node)
 
-
-# ---------------------------------------
-# Expand all products recursively
-# e.g (a+(b+c)d)e = ae + bde + cde
 
 @singledispatch
 def _expand_all_product(node, self):
+    # ---------------------------------------
+    # Expand all products recursively
+    # e.g (a+(b+c)d)e = ae + bde + cde
+
     raise AssertionError("cannot handle type %s" % type(node))
 
 
@@ -543,7 +547,15 @@ def _expand_all_product_common(node, self):
         return node
 
 
-def collect_terms(node, node_type):
+def _collect_terms(node, self):
+    """Recursively collect all children into a list from :param:`node`
+    and its children of class :param:`node_type`.
+
+    :param node: root of expression
+    :param node_type: class of node (e.g. Sum or Product)
+    :return: list of all terms
+    """
+    node_type = self.node_type
     from collections import deque
     terms = []  # collected terms
     queue = deque([node])  # queue of children nodes to process
@@ -553,20 +565,7 @@ def collect_terms(node, node_type):
             queue.extendleft(reversed(child.children))
         else:
             terms.append(child)
-    return terms
-
-
-# def collect_terms(node, node_type):
-#     """Recursively collect all children into a list from :param:`node`
-#     and its children of class :param:`node_type`.
-#
-#     :param node: root of expression
-#     :param node_type: class of node (e.g. Sum or Product)
-#     :return: list of all terms
-#     """
-#
-#     mapper = MemoizerArg(_collect_terms)
-#     return mapper(node, node_type)
+    return tuple(terms)
 
 
 def _flatten_sum(node, self):
@@ -583,13 +582,17 @@ def _flatten_sum(node, self):
     :return: dictionary to list of factors
     """
     index = self.index
-    sums = collect_terms(node, Sum)
+    self.collect_terms.node_type = Sum
+    self.collect_terms.context = Sum
+    sums = self.collect_terms(node)
     result = []
+    self.collect_terms.node_type = Product
+    self.collect_terms.context = Product
     for sum in sums:
         d = OrderedDict()
         for i in [0, 1] + list(index):
             d[i] = list()
-        for factor in collect_terms(sum, Product):
+        for factor in self.collect_terms(sum):
             fi = factor.free_indices
             if fi == ():
                 d[0].append(factor)
@@ -693,7 +696,7 @@ _factorise.register(Node)(reuse_if_untouched)
 def _factorise_common(node, self):
     # sort indices to ensure deterministic result
     index = tuple(sorted(list(node.free_indices), key=lambda x: x.count))
-    flop = count_flop(node)
+    flop = self.count_flop(node)
     optimal_i = None
     node_expand = self.expand_all_product(node)
     self.flatten_sum.index = index
@@ -730,7 +733,7 @@ def _factorise_common(node, self):
             self.factorise_i.context = i
             child = self.factorise_i(child)
             new_node = Product(Product(p_const, p_1), child)
-            new_flop = count_flop(new_node)
+            new_flop = self.count_flop(new_node)
             if new_flop < flop:
                 optimal_i = i
                 flop = new_flop
@@ -750,6 +753,8 @@ def factorise(node):
     m3 = Memoizer(_expand_all_product)
     m4 = Memoizer(_flatten_sum)
     m5 = Memoizer(_find_common_factor)
+    m6 = Memoizer(_collect_terms)
+    m7 = Memoizer(_count_flop)
     m1.factorise_i = m2
     m2.factorise = m1
     m1.expand_all_product = m3
@@ -757,6 +762,8 @@ def factorise(node):
     m2.flatten_sum = m4
     m5.flatten_sum = m4
     m1.find_common_factor = m5
+    m4.collect_terms = m6
+    m1.count_flop = m7
     return m1(node)
 
 
