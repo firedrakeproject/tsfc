@@ -317,6 +317,19 @@ def contraction(expression):
 
 
 def traverse_product(expression, stop_at=None):
+    """Traverses a product tree and collects factors, also descending into
+    tensor contractions (IndexSum).  The nominators of divisions are
+    also broken up, but not the denominators.
+
+    :arg expression: a GEM expression
+    :arg stop_at: Optional predicate on GEM expressions.  If specified
+                  and returns true for some subexpression, that
+                  subexpression is not broken into further factors
+                  even if it is a product-like expression.
+    :returns: (sum_indices, terms)
+              - sum_indices: list of indices to sum over
+              - terms: list of product terms
+    """
     sum_indices = []
     terms = []
 
@@ -345,6 +358,15 @@ def traverse_product(expression, stop_at=None):
 
 
 def traverse_sum(expression, stop_at=None):
+    """Traverses a summation tree and collects summands.
+
+    :arg expression: a GEM expression
+    :arg stop_at: Optional predicate on GEM expressions.  If specified
+                  and returns true for some subexpression, that
+                  subexpression is not broken into further summands
+                  even if it is an addition.
+    :returns: list of summand expressions
+    """
     stack = [expression]
     result = []
     while stack:
@@ -358,11 +380,33 @@ def traverse_sum(expression, stop_at=None):
     return result
 
 
+# Refactorisation classes
+
 ATOMIC = intern('atomic')
+"""Label: the expression need not be broken up into smaller parts"""
+
 COMPOUND = intern('compound')
+"""Label: the expression must be broken up into smaller parts"""
+
 OTHER = intern('other')
+"""Label: the expression is irrelevant with regards to refactorisation"""
+
 
 Monomial = namedtuple('Monomial', ['sum_indices', 'atomics', 'rest'])
+"""Monomial type, used in the return type of
+:py:func:`collect_monomials`.
+
+- sum_indices: indices to sum over
+- atomics: tuple of expressions classified as ATOMIC
+- rest: a single expression classified as OTHER
+
+A :py:class:`Monomial` is a structured description of the expression:
+
+.. code-block:: python
+
+    IndexSum(reduce(Product, atomics, rest), sum_indices)
+
+"""
 
 
 class FactorisationError(Exception):
@@ -371,7 +415,24 @@ class FactorisationError(Exception):
 
 
 def collect_monomials(expression, classifier):
+    """Refactorises an expression into a sum-of-products form, using
+    distributivity rules (i.e. a*(b + c) -> a*b + a*c).  Expansion
+    proceeds until all "compound" expressions are broken up.
+
+    :arg expression: a GEM expression to refactorise
+    :arg classifier: a function that can classify any GEM expression
+                     as ``ATOMIC``, ``COMPOUND``, or ``OTHER``.  This
+                     classification drives the factorisation.
+
+    :returns: list of monomials; each monomial is a summand and a
+              structured description of a product
+
+    :raises FactorisationError: Failed to break up some "compound"
+                                expressions with expansion.
+    """
+    # Phase 1: Collect and categorise product terms
     def stop_at(expr):
+        # Break up compounds only
         return classifier(expr) != COMPOUND
     common_indices, terms = traverse_product(expression, stop_at=stop_at)
 
@@ -389,27 +450,51 @@ def collect_monomials(expression, classifier):
         else:
             raise ValueError("Classifier returned illegal value.")
 
+    # Phase 2: Attempt to break up compound terms into summands
     sums = []
     for expr in compounds:
         summands = traverse_sum(expr, stop_at=stop_at)
         if len(summands) <= 1:
+            # Compound term is not an addition, avoid infinite
+            # recursion and fail gracefully raising an exception.
             raise FactorisationError(expr)
+        # Recurse into each summand, concatenate their results
         sums.append(chain.from_iterable(collect_monomials(summand, classifier)
                                         for summand in summands))
 
+    # Phase 3: Expansion
+    #
+    # Each element of ``sums`` is list (representing a sum) of
+    # monomials corresponding to one compound product term.  Expansion
+    # produces a series (representing a sum) of products of monomials.
     unfactored = OrderedDict()
     for partials in product(*sums):
+        # ``partials`` is a tuple of :py:class:`Monomial`s.  Here we
+        # construct their "product" with the common atomic and other
+        # factors.
+
+        # Copy common ingredients
         all_indices = list(common_indices)
         atomics = list(common_atomics)
         others = list(common_others)
+
+        # Decompose monomial named tuples
         for monomial in partials:
             all_indices.extend(monomial.sum_indices)
             atomics.extend(monomial.atomics)
             others.append(monomial.rest)
+
+        # All free indices that appear in atomic terms
         atomic_indices = set().union(*[atomic.free_indices
                                        for atomic in atomics])
+
+        # Sum indices that appear in atomic terms
+        # (will go to the result :py:class:`Monomial`)
         sum_indices = tuple(index for index in all_indices
                             if index in atomic_indices)
+
+        # Sum indices that do not appear in atomic terms
+        # (can factorise them over atomic terms immediately)
         rest_indices = tuple(index for index in all_indices
                              if index not in atomic_indices)
 
@@ -421,6 +506,9 @@ def collect_monomials(expression, classifier):
         key = (frozenset(sum_indices), frozenset(atomics))
         unfactored.setdefault(key, []).append(monomial)
 
+    # Phase 4: Re-factorise.
+    #
+    # Merge ``rest`` for identical ``sum_indices`` and ``atomics``.
     result = []
     for monomials in itervalues(unfactored):
         sum_indices = monomials[0].sum_indices
