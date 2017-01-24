@@ -615,11 +615,11 @@ def _find_common_factor(node, self, index):
     """
     find common factors of :param `node`
     :param node: root of expression, usually sum of products
-    :param index: tuple (free indices, current index)
+    :param index: tuple (linear indices, current index)
     :return: list of common factors categorized by current index
     """
-    fi, i = index  # free index and current index
-    sumproduct = self.flatten_sum(node, fi)
+    linear_i, i = index  # free index and current index
+    sumproduct = self.flatten_sum(node, linear_i)
     return tuple(sorted(list(reduce(lambda a, b: a & b,
                                     [Counter(f[i]) for f in sumproduct]))))
 
@@ -631,8 +631,8 @@ def _factorise_i(node, self, index):
     :param self: Memoizer object
     :return: factorised new node
     """
-    fi, i = index  # free index, current index
-    sumproduct = self.flatten_sum(node, fi)
+    linear_i, i = index  # linear index, current index
+    sumproduct = self.flatten_sum(node, linear_i)
     # collect all factors with correct index
     factors = OrderedDict()
     for p in sumproduct:
@@ -650,7 +650,7 @@ def _factorise_i(node, self, index):
         p_const = reduce(Product, p[0], one)  # constants
         p_i = reduce(Product, p[1], one)  # quadrature index
         # argument index
-        p_jk = reduce(Product, [p[j][0] for j in fi if j != i and p[j]], one)
+        p_jk = reduce(Product, [p[j][0] for j in linear_i if j != i and p[j]], one)
         new_node = reduce(Product, [p_const, p_i, p_jk], one)
         if p[i]:
             # add to corresponding factor list if product contains
@@ -661,38 +661,38 @@ def _factorise_i(node, self, index):
             sums[0].append(new_node)
     sum_i = []
     # create tuple of free indices with the current index removed
-    # new_index = list(fi)
-    # new_index.remove(i)
-    # new_index = tuple(new_index)
+    new_index = list(linear_i)
+    new_index.remove(i)
+    new_index = tuple(new_index)
     for f in factors:
         # factor * subexpression
         # recursively factorise newly creately subexpression (a sumproduct)
         sum_i.append(Product(
             f,
-            self.factorise(reduce(Sum, sums[f], Zero()))))
+            self.factorise(reduce(Sum, sums[f], Zero()), new_index)))
     return reduce(Sum, sum_i + sums[0], Zero())
 
 
 @singledispatch
-def _factorise(node, self):
+def _factorise(node, self, linear_i):
     raise AssertionError("cannot handle type %s" % type(node))
 
 
-_factorise.register(Node)(reuse_if_untouched)
+_factorise.register(Node)(reuse_if_untouched_arg)
 
 
 @_factorise.register(Sum)
 @_factorise.register(Product)
-def _factorise_common(node, self):
-    # sort indices to ensure deterministic result
-    index = tuple(sorted(list(node.free_indices), key=lambda x: x.count))
+def _factorise_common(node, self, linear_i):
+    # sort free indices to ensure deterministic result
+    free_i = tuple(sorted(list(node.free_indices), key=lambda x: x.count))
     flop = self.count_flop(node)
     optimal_i = None
     node_expand = self.expand_all_product(node)
-    sumproduct = self.flatten_sum(node_expand, index)
+    sumproduct = self.flatten_sum(node_expand, linear_i)
     # find common factors that are constants or dependent on quadrature index
-    factor_const = self.find_common_factor(node_expand, (index, 0))
-    factor_1 = self.find_common_factor(node_expand, (index, 1))
+    factor_const = self.find_common_factor(node_expand, (linear_i, 0))
+    factor_1 = self.find_common_factor(node_expand, (linear_i, 1))
     # node = factor_const * factor_1 * Sum(child_sum)
     child_sum = []
     for p in sumproduct:
@@ -705,15 +705,15 @@ def _factorise_common(node, self):
             for x in factor_1:
                 p1_list.remove(x)
         child_sum.append(reduce(
-            Product, p0_list + p1_list + [x for i in index for x in p[i]], one))
+            Product, p0_list + p1_list + [x for i in linear_i for x in p[i]], one))
     p_const = reduce(Product, factor_const, one)
     p_1 = reduce(Product, factor_1, one)
     # new child node
     child = reduce(Sum, child_sum, Zero())
-    if index:
+    if linear_i:
         # try factorisation on each argument dimension
-        for i in index:
-            child = self.factorise_i(child, (index, i))
+        for i in linear_i:
+            child = self.factorise_i(child, (linear_i, i))
             new_node = Product(Product(p_const, p_1), child)
             new_flop = self.count_flop(new_node)
             if new_flop < flop:
@@ -721,14 +721,14 @@ def _factorise_common(node, self):
                 flop = new_flop
             child = self.expand_all_product(child)
     if optimal_i:
-        child = self.factorise_i(child, (index, optimal_i))
+        child = self.factorise_i(child, (linear_i, optimal_i))
         return Product(Product(p_const, p_1), child)
     else:
         return node
 
 
 def factorise(node):
-    m1 = Memoizer(_factorise)
+    m1 = MemoizerArg(_factorise)
     m2 = MemoizerArg(_factorise_i)
     m3 = Memoizer(_expand_all_product)
     m4 = MemoizerArg(_flatten_sum)
@@ -744,7 +744,7 @@ def factorise(node):
     m1.find_common_factor = m5
     m4.collect_terms = m6
     m1.count_flop = m7
-    return m1(node)
+    return m1(node, node.free_indices)
 
 
 def factorise_list(expressions):
