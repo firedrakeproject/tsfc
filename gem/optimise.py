@@ -5,7 +5,7 @@ from __future__ import absolute_import, print_function, division
 from six import itervalues
 from six.moves import filter, intern, map, zip
 
-from collections import OrderedDict, deque, namedtuple
+from collections import OrderedDict, namedtuple
 from functools import reduce
 from itertools import chain, permutations, product
 
@@ -298,22 +298,8 @@ def contraction(expression):
     # Eliminate annoying ComponentTensors
     expression, = remove_componenttensors([expression])
 
-    # Flatten a product tree
-    sum_indices = []
-    factors = []
-
-    queue = deque([expression])
-    while queue:
-        expr = queue.popleft()
-        if isinstance(expr, IndexSum):
-            queue.append(expr.children[0])
-            sum_indices.extend(expr.multiindex)
-        elif isinstance(expr, Product):
-            queue.extend(expr.children)
-        else:
-            factors.append(expr)
-
-    return sum_factorise(*delta_elimination(sum_indices, factors))
+    # Flatten product tree, eliminate deltas, sum factorise
+    return sum_factorise(*delta_elimination(*traverse_product(expression)))
 
 
 def traverse_product(expression, stop_at=None):
