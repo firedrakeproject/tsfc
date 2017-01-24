@@ -155,6 +155,12 @@ class Identity(Constant):
     def array(self):
         return numpy.eye(self.dim)
 
+    def latex(self):
+        return r'\mathbf{I}'
+
+    def _repr_latex_(self):
+        return r'${0}$'.format(self.latex())
+
 
 class Literal(Constant):
     """Tensor-valued constant"""

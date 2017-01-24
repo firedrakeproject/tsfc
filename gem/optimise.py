@@ -497,13 +497,12 @@ def _count_flop_single(node, self):
 
 @_count_flop.register(MathFunction)
 def _count_flop_func(node, self):
-    return self(node.children[0])*2
+    return self(node.children[0]) + 1
 
 
 @_count_flop.register(Sum)
 @_count_flop.register(Product)
 @_count_flop.register(Division)
-@_count_flop.register(FlexiblyIndexed)
 def _count_flop_common(node, self):
     flop = numpy.product([i.extent for i in node.free_indices])
     # Hoisting the factors
@@ -515,6 +514,7 @@ def _count_flop_common(node, self):
 @_count_flop.register(Constant)
 @_count_flop.register(Terminal)
 @_count_flop.register(Indexed)
+@_count_flop.register(FlexiblyIndexed)
 def _count_flop_const(node, self):
     return 0
 
@@ -547,7 +547,7 @@ def _expand_all_product_common(node, self):
         return node
 
 
-def _collect_terms(node, self):
+def _collect_terms(node, self, node_type):
     """Recursively collect all children into a list from :param:`node`
     and its children of class :param:`node_type`.
 
@@ -555,7 +555,6 @@ def _collect_terms(node, self):
     :param node_type: class of node (e.g. Sum or Product)
     :return: list of all terms
     """
-    node_type = self.node_type
     from collections import deque
     terms = []  # collected terms
     queue = deque([node])  # queue of children nodes to process
@@ -568,7 +567,7 @@ def _collect_terms(node, self):
     return tuple(terms)
 
 
-def _flatten_sum(node, self):
+def _flatten_sum(node, self, index):
     """
     factorise :param:`node` into sum of products, group factors of each product
     based on its dependency on index:
@@ -581,18 +580,13 @@ def _flatten_sum(node, self):
     :param index: tuple of argument (linear) indices
     :return: dictionary to list of factors
     """
-    index = self.index
-    self.collect_terms.node_type = Sum
-    self.collect_terms.context = Sum
-    sums = self.collect_terms(node)
+    sums = self.collect_terms(node, Sum)
     result = []
-    self.collect_terms.node_type = Product
-    self.collect_terms.context = Product
     for sum in sums:
         d = OrderedDict()
         for i in [0, 1] + list(index):
             d[i] = list()
-        for factor in self.collect_terms(sum):
+        for factor in self.collect_terms(sum, Product):
             fi = factor.free_indices
             if fi == ():
                 d[0].append(factor)
@@ -617,32 +611,28 @@ def _flatten_sum(node, self):
 #     return mapper(node, index)
 
 
-def _find_common_factor(node, self):
+def _find_common_factor(node, self, index):
     """
     find common factors of :param `node`
     :param node: root of expression, usually sum of products
     :param index: tuple (free indices, current index)
     :return: list of common factors categorized by current index
     """
-    fi, i = self.index  # free index and current index
-    self.flatten_sum.index = fi
-    self.flatten_sum.context = fi
-    sumproduct = self.flatten_sum(node)
+    fi, i = index  # free index and current index
+    sumproduct = self.flatten_sum(node, fi)
     return tuple(sorted(list(reduce(lambda a, b: a & b,
                                     [Counter(f[i]) for f in sumproduct]))))
 
 
-def _factorise_i(node, self):
+def _factorise_i(node, self, index):
     """
     factorise :param `node` using factors with current index as common factor
     :param node: root of expression
     :param self: Memoizer object
     :return: factorised new node
     """
-    fi, i = self.index  # free index, current index
-    self.flatten_sum.index = fi
-    self.flatten_sum.context = fi
-    sumproduct = self.flatten_sum(node)
+    fi, i = index  # free index, current index
+    sumproduct = self.flatten_sum(node, fi)
     # collect all factors with correct index
     factors = OrderedDict()
     for p in sumproduct:
@@ -699,16 +689,10 @@ def _factorise_common(node, self):
     flop = self.count_flop(node)
     optimal_i = None
     node_expand = self.expand_all_product(node)
-    self.flatten_sum.index = index
-    self.flatten_sum.context = index
-    sumproduct = self.flatten_sum(node_expand)
+    sumproduct = self.flatten_sum(node_expand, index)
     # find common factors that are constants or dependent on quadrature index
-    self.find_common_factor.index = (index, 0)
-    self.find_common_factor.context = (index, 0)
-    factor_const = self.find_common_factor(node_expand)
-    self.find_common_factor.index = (index, 1)
-    self.find_common_factor.context = (index, 1)
-    factor_1 = self.find_common_factor(node_expand)
+    factor_const = self.find_common_factor(node_expand, (index, 0))
+    factor_1 = self.find_common_factor(node_expand, (index, 1))
     # node = factor_const * factor_1 * Sum(child_sum)
     child_sum = []
     for p in sumproduct:
@@ -729,9 +713,7 @@ def _factorise_common(node, self):
     if index:
         # try factorisation on each argument dimension
         for i in index:
-            self.factorise_i.index = (index, i)
-            self.factorise_i.context = i
-            child = self.factorise_i(child)
+            child = self.factorise_i(child, (index, i))
             new_node = Product(Product(p_const, p_1), child)
             new_flop = self.count_flop(new_node)
             if new_flop < flop:
@@ -739,9 +721,7 @@ def _factorise_common(node, self):
                 flop = new_flop
             child = self.expand_all_product(child)
     if optimal_i:
-        self.factorise_i.index = (index, optimal_i)
-        self.factorise_i.context = i
-        child = self.factorise_i(child)
+        child = self.factorise_i(child, (index, optimal_i))
         return Product(Product(p_const, p_1), child)
     else:
         return node
@@ -749,11 +729,11 @@ def _factorise_common(node, self):
 
 def factorise(node):
     m1 = Memoizer(_factorise)
-    m2 = Memoizer(_factorise_i)
+    m2 = MemoizerArg(_factorise_i)
     m3 = Memoizer(_expand_all_product)
-    m4 = Memoizer(_flatten_sum)
-    m5 = Memoizer(_find_common_factor)
-    m6 = Memoizer(_collect_terms)
+    m4 = MemoizerArg(_flatten_sum)
+    m5 = MemoizerArg(_find_common_factor)
+    m6 = MemoizerArg(_collect_terms)
     m7 = Memoizer(_count_flop)
     m1.factorise_i = m2
     m2.factorise = m1

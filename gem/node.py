@@ -166,15 +166,13 @@ class Memoizer(object):
     def __init__(self, function):
         self.cache = {}
         self.function = function
-        self.context = None
 
     def __call__(self, node):
-        cache_key = (node, self.context)
         try:
-            return self.cache[cache_key]
+            return self.cache[node]
         except KeyError:
             result = self.function(node, self)
-            self.cache[cache_key] = result
+            self.cache[node] = result
             return result
 
 
