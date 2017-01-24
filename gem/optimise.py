@@ -7,7 +7,7 @@ from six.moves import filter, intern, map, zip
 
 from collections import OrderedDict, namedtuple
 from functools import reduce
-from itertools import chain, permutations, product
+from itertools import chain, combinations, permutations, product
 
 import numpy
 from singledispatch import singledispatch
@@ -230,6 +230,36 @@ def delta_elimination(sum_indices, factors):
     return sum_indices, [e for e in factors if e != one]
 
 
+def _associate(factors):
+    """Apply associativity rules to construct an operation-minimal product tree.
+
+    For best performance give factors that have different set of free indices.
+    """
+    if len(factors) > 32:
+        # O(N^3) algorithm
+        raise NotImplementedError("Not expected such a complicated expression!")
+
+    def count(pair):
+        """Operation count to multiply a pair of GEM expressions"""
+        a, b = pair
+        extents = [i.extent for i in set().union(a.free_indices, b.free_indices)]
+        return numpy.prod(extents, dtype=int)
+
+    factors = list(factors)  # copy for in-place modifications
+    flops = 0
+    while len(factors) > 1:
+        # Greedy algorithm: choose a pair of factors that are the
+        # cheapest to multiply.
+        a, b = min(combinations(factors, 2), key=count)
+        flops += count((a, b))
+        # Remove chosen factors, append their product
+        factors.remove(a)
+        factors.remove(b)
+        factors.append(Product(a, b))
+    product, = factors
+    return product, flops
+
+
 def sum_factorise(sum_indices, factors):
     """Optimise a tensor product through sum factorisation.
 
@@ -237,6 +267,10 @@ def sum_factorise(sum_indices, factors):
     :arg factors: product factors
     :returns: optimised GEM expression
     """
+    if len(factors) == 0 and len(sum_indices) == 0:
+        # Empty product
+        return one
+
     if len(sum_indices) > 5:
         raise NotImplementedError("Too many indices for sum factorisation!")
 
@@ -260,14 +294,10 @@ def sum_factorise(sum_indices, factors):
             contract = [t for t in terms if sum_index in t.free_indices]
             deferred = [t for t in terms if sum_index not in t.free_indices]
 
-            # A further optimisation opportunity is to consider
-            # various ways of building the product tree.
-            product = reduce(Product, contract)
+            # Optimise associativity
+            product, flops_ = _associate(contract)
             term = IndexSum(product, (sum_index,))
-            # For the operation count estimation we assume that no
-            # operations were saved with the particular product tree
-            # that we built above.
-            flops += len(contract) * numpy.prod([i.extent for i in product.free_indices], dtype=int)
+            flops += flops_ + numpy.prod([i.extent for i in product.free_indices], dtype=int)
 
             # Replace the contracted terms with the result of the
             # contraction.
@@ -275,8 +305,8 @@ def sum_factorise(sum_indices, factors):
 
         # If some contraction indices were independent, then we may
         # still have several terms at this point.
-        expr = reduce(Product, terms, one)
-        flops += (len(terms) - 1) * numpy.prod([i.extent for i in expr.free_indices], dtype=int)
+        expr, flops_ = _associate(terms)
+        flops += flops_
 
         if flops < best_flops:
             expression = expr
