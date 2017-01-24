@@ -372,7 +372,7 @@ class FactorisationError(Exception):
 
 def collect_monomials(expression, classifier):
     def stop_at(expr):
-        return classifier(expr) == OTHER
+        return classifier(expr) != COMPOUND
     common_indices, terms = traverse_product(expression, stop_at=stop_at)
 
     common_atomics = []
