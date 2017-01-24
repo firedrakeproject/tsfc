@@ -368,7 +368,6 @@ def tsfc_to_loopy(ir, output_names="A", kernel_name="tsfc_kernel"):
         name=kernel_name)
 
     if 1:  # Add an option to turn this off later if we want.
-        print("hithere")
         A0writes = [ins for ins in knl.instructions
                     if ins.assignee.aggregate.name == "A0"]
         assert len(A0writes) == 1
