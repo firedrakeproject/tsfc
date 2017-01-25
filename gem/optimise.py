@@ -110,10 +110,26 @@ _reassociate_product.register(Node)(reuse_if_untouched)
 def _reassociate_product_prod(node, self):
     # collect all factors of product, sort by rank
     # should use more sophisticated method later on for optimal result
-    sort_func = lambda node: len(node.free_indices)
-    self.collect_terms.node_type = Product
-    self.collect_terms.context = Product
-    factors = sorted(self.collect_terms(node), key=sort_func)
+    def comp_func(node1, node2):
+        if len(node1.free_indices) < len(node2.free_indices):
+            return -1;
+        elif len(node1.free_indices) > len(node2.free_indices):
+            return 1;
+        else:
+            h1 = hash(node1.free_indices)
+            h2 = hash(node2.free_indices)
+            if h1 < h2:
+                return -1;
+            elif h1 > h2:
+                return 1;
+            else:
+                hh1 = hash(node1)
+                hh2 = hash(node2)
+                if hh2 < hh1:
+                    return 1;
+                else:
+                    return -1;
+    factors = sorted(self.collect_terms(node, Product), cmp=comp_func)
     # need to optimise away iterator <==> list
     new_factors = list(map(self, factors))  # recursion
     return reduce(Product, new_factors)
@@ -121,7 +137,7 @@ def _reassociate_product_prod(node, self):
 
 def reassociate_product(expressions):
     mapper = Memoizer(_reassociate_product)
-    mapper2 = Memoizer(_collect_terms)
+    mapper2 = MemoizerArg(_collect_terms)
     mapper.collect_terms = mapper2
     return list(map(mapper, expressions))
 
@@ -497,9 +513,6 @@ def _count_flop_single(node, self):
 
 
 @_count_flop.register(MathFunction)
-@_count_flop.register(Power)
-@_count_flop.register(Conditional)
-@_count_flop.register(Comparison)
 @_count_flop.register(LogicalNot)
 @_count_flop.register(LogicalAnd)
 @_count_flop.register(LogicalOr)
@@ -507,6 +520,9 @@ def _count_flop_func(node, self):
     return self(node.children[0]) + 1
 
 
+@_count_flop.register(Conditional)  # this is not quite right
+@_count_flop.register(Power)
+@_count_flop.register(Comparison)
 @_count_flop.register(Sum)
 @_count_flop.register(Product)
 @_count_flop.register(Division)
@@ -556,6 +572,11 @@ def _expand_all_product_common(node, self, index):
                    self(Product(a.children[1], b), index))
     else:
         return node
+
+
+def expand_all_product(node, index):
+    mapper = MemoizerArg(_expand_all_product)
+    return mapper(node, index)
 
 
 def _collect_terms(node, self, node_type):
@@ -631,8 +652,15 @@ def _find_common_factor(node, self, index):
     """
     linear_i, i = index  # free index and current index
     sumproduct = self.flatten_sum(node, linear_i)
-    return tuple(sorted(list(reduce(lambda a, b: a & b,
-                                    [Counter(f[i]) for f in sumproduct]))))
+    # result = list(sumproduct[0][i])
+    # for f in sumproduct[1:]:
+    #     for r in result:
+    #         if r not in f[i]:
+    #             result.remove(r)
+    # return tuple(result)
+
+    return tuple(list(reduce(lambda a, b: a & b,
+                            [Counter(f[i]) for f in sumproduct])))
 
 
 def _factorise_i(node, self, index):
@@ -696,7 +724,7 @@ _factorise.register(Node)(reuse_if_untouched_arg)
 @_factorise.register(Product)
 def _factorise_common(node, self, linear_i):
     # sort free indices to ensure deterministic result
-    free_i = tuple(sorted(list(node.free_indices), key=lambda x: x.count))
+    # free_i = tuple(sorted(list(node.free_indices), key=lambda x: x.count))
     flop = self.count_flop(node)
     optimal_i = None
     node_expand = self.expand_all_product(node, linear_i)
@@ -721,7 +749,7 @@ def _factorise_common(node, self, linear_i):
     p_1 = reduce(Product, factor_1, one)
     # new child node
     child = reduce(Sum, child_sum, Zero())
-    if len(linear_i) > 1:
+    if linear_i:
         # try factorisation on each argument dimension
         for i in linear_i:
             child = self.factorise_i(child, (linear_i, i))
@@ -739,6 +767,7 @@ def _factorise_common(node, self, linear_i):
 
 
 def factorise(node):
+    # node = reassociate_product([node])[0]
     m1 = MemoizerArg(_factorise)
     m2 = MemoizerArg(_factorise_i)
     m3 = MemoizerArg(_expand_all_product)
@@ -746,6 +775,7 @@ def factorise(node):
     m5 = MemoizerArg(_find_common_factor)
     m6 = MemoizerArg(_collect_terms)
     m7 = Memoizer(_count_flop)
+    m8 = Memoizer(_reassociate_product)
     m1.factorise_i = m2
     m2.factorise = m1
     m1.expand_all_product = m3
@@ -755,7 +785,10 @@ def factorise(node):
     m1.find_common_factor = m5
     m4.collect_terms = m6
     m1.count_flop = m7
-    return m1(node, node.free_indices)
+    m1.reassociate_product = m8
+    # linear_i = tuple(sorted(list(node.free_indices), key=lambda x: x.count))
+    linear_i = node.free_indices
+    return m1(node, linear_i)
 
 
 def factorise_list(expressions):

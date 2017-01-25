@@ -42,7 +42,6 @@ def preprocess_gem(expressions):
     # import sys
     # sys.setrecursionlimit(20000)
     expressions = optimise.factorise_list(expressions)
-    # expressions = optimise.reassociate_product(expressions)
     return expressions
 
 
