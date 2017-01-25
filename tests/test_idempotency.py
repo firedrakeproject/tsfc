@@ -59,8 +59,6 @@ def form(V, itype, request):
 
 
 def test_idempotency(form):
-    import sys
-    sys.setrecursionlimit(5000)
     k1 = compile_form(form)[0]
     k2 = compile_form(form)[0]
 

@@ -13,11 +13,12 @@ import numpy
 from singledispatch import singledispatch
 
 from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
-from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
+from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero, Power,
                      Product, Sum, Comparison, Conditional, Index, Constant,
                      VariableIndex, Indexed, FlexiblyIndexed,
                      IndexSum, ComponentTensor, ListTensor, Delta,
-                     partial_indexed, one, Division, MathFunction)
+                     partial_indexed, one, Division, MathFunction, LogicalAnd,
+                     LogicalNot, LogicalOr)
 
 
 @singledispatch
@@ -496,6 +497,12 @@ def _count_flop_single(node, self):
 
 
 @_count_flop.register(MathFunction)
+@_count_flop.register(Power)
+@_count_flop.register(Conditional)
+@_count_flop.register(Comparison)
+@_count_flop.register(LogicalNot)
+@_count_flop.register(LogicalAnd)
+@_count_flop.register(LogicalOr)
 def _count_flop_func(node, self):
     return self(node.children[0]) + 1
 
@@ -525,24 +532,28 @@ def count_flop(node):
 
 
 @singledispatch
-def _expand_all_product(node, self):
+def _expand_all_product(node, self, index):
     # ---------------------------------------
-    # Expand all products recursively
+    # Expand all products recursively if free index of node include index
+    # from :param:`index`
     # e.g (a+(b+c)d)e = ae + bde + cde
 
     raise AssertionError("cannot handle type %s" % type(node))
 
 
-_expand_all_product.register(Node)(reuse_if_untouched)
+_expand_all_product.register(Node)(reuse_if_untouched_arg)
 
 
 @_expand_all_product.register(Product)
-def _expand_all_product_common(node, self):
-    a, b = map(self, node.children)
-    if isinstance(b, Sum):
-        return Sum(self(Product(a, b.children[0])), self(Product(a, b.children[1])))
-    elif isinstance(a, Sum):
-        return Sum(self(Product(a.children[0], b)), self(Product(a.children[1], b)))
+def _expand_all_product_common(node, self, index):
+    a = self(node.children[0], index)
+    b = self(node.children[1], index)
+    if isinstance(b, Sum) and any([i in b.free_indices for i in index]):
+        return Sum(self(Product(a, b.children[0]), index),
+                   self(Product(a, b.children[1]), index))
+    elif isinstance(a, Sum) and any([i in a.free_indices for i in index]):
+        return Sum(self(Product(a.children[0], b), index),
+                   self(Product(a.children[1], b), index))
     else:
         return node
 
@@ -688,7 +699,7 @@ def _factorise_common(node, self, linear_i):
     free_i = tuple(sorted(list(node.free_indices), key=lambda x: x.count))
     flop = self.count_flop(node)
     optimal_i = None
-    node_expand = self.expand_all_product(node)
+    node_expand = self.expand_all_product(node, linear_i)
     sumproduct = self.flatten_sum(node_expand, linear_i)
     # find common factors that are constants or dependent on quadrature index
     factor_const = self.find_common_factor(node_expand, (linear_i, 0))
@@ -710,7 +721,7 @@ def _factorise_common(node, self, linear_i):
     p_1 = reduce(Product, factor_1, one)
     # new child node
     child = reduce(Sum, child_sum, Zero())
-    if linear_i:
+    if len(linear_i) > 1:
         # try factorisation on each argument dimension
         for i in linear_i:
             child = self.factorise_i(child, (linear_i, i))
@@ -719,7 +730,7 @@ def _factorise_common(node, self, linear_i):
             if new_flop < flop:
                 optimal_i = i
                 flop = new_flop
-            child = self.expand_all_product(child)
+            child = self.expand_all_product(child, linear_i)
     if optimal_i:
         child = self.factorise_i(child, (linear_i, optimal_i))
         return Product(Product(p_const, p_1), child)
@@ -730,7 +741,7 @@ def _factorise_common(node, self, linear_i):
 def factorise(node):
     m1 = MemoizerArg(_factorise)
     m2 = MemoizerArg(_factorise_i)
-    m3 = Memoizer(_expand_all_product)
+    m3 = MemoizerArg(_expand_all_product)
     m4 = MemoizerArg(_flatten_sum)
     m5 = MemoizerArg(_find_common_factor)
     m6 = MemoizerArg(_collect_terms)

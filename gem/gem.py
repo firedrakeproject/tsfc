@@ -335,7 +335,6 @@ class Division(Scalar):
         return r'\displaystyle\frac{{{0}}}{{{1}}}'.format(a.latex(), b.latex())
 
     def _repr_latex_(self):
-        a, b = self.children
         return r'${0}$'.format(self.latex())
 
 
@@ -357,6 +356,13 @@ class Power(Scalar):
         self = super(Power, cls).__new__(cls)
         self.children = base, exponent
         return self
+
+    def latex(self):
+        base, exponent = self.children
+        return r'{{{0}}}^{{{1}}}'.format(base.latex(), exponent.latex())
+
+    def _repr_latex_(self):
+        return r'${0}$'.format(self.latex())
 
 
 class MathFunction(Scalar):
