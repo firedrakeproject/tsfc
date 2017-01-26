@@ -637,10 +637,9 @@ def _flatten_sum(node, self, index):
     return tuple(result)
 
 
-# def flatten_sum(node, index):
-
-#     mapper = MemoizerArg(_flatten_sum)
-#     return mapper(node, index)
+def flatten_sum(node, index):
+    mapper = MemoizerArg(_flatten_sum)
+    return mapper(node, index)
 
 
 def _find_common_factor(node, self, index):
@@ -652,15 +651,13 @@ def _find_common_factor(node, self, index):
     """
     linear_i, i = index  # free index and current index
     sumproduct = self.flatten_sum(node, linear_i)
-    # result = list(sumproduct[0][i])
-    # for f in sumproduct[1:]:
-    #     for r in result:
-    #         if r not in f[i]:
-    #             result.remove(r)
-    # return tuple(result)
-
-    return tuple(list(reduce(lambda a, b: a & b,
-                            [Counter(f[i]) for f in sumproduct])))
+    result = list(sumproduct[0][i])
+    # Need to be stable, so cannot use Counter()
+    for f in sumproduct[1:]:
+        for r in result:
+            if r not in f[i]:
+                result.remove(r)
+    return tuple(result)
 
 
 def _factorise_i(node, self, index):
@@ -700,9 +697,7 @@ def _factorise_i(node, self, index):
             sums[0].append(new_node)
     sum_i = []
     # create tuple of free indices with the current index removed
-    new_index = list(linear_i)
-    new_index.remove(i)
-    new_index = tuple(new_index)
+    new_index = tuple([j for j in linear_i if j != i])
     for f in factors:
         # factor * subexpression
         # recursively factorise newly creately subexpression (a sumproduct)
@@ -726,12 +721,16 @@ def _factorise_common(node, self, linear_i):
     # sort free indices to ensure deterministic result
     # free_i = tuple(sorted(list(node.free_indices), key=lambda x: x.count))
     flop = self.count_flop(node)
-    optimal_i = None
+    optimal_child = None
     node_expand = self.expand_all_product(node, linear_i)
     sumproduct = self.flatten_sum(node_expand, linear_i)
     # find common factors that are constants or dependent on quadrature index
-    factor_const = self.find_common_factor(node_expand, (linear_i, 0))
-    factor_1 = self.find_common_factor(node_expand, (linear_i, 1))
+    if len(sumproduct) > 1:
+        factor_const = self.find_common_factor(node_expand, (linear_i, 0))
+        factor_1 = self.find_common_factor(node_expand, (linear_i, 1))
+    else:
+        factor_const = ()
+        factor_1 = ()
     # node = factor_const * factor_1 * Sum(child_sum)
     child_sum = []
     for p in sumproduct:
@@ -752,22 +751,19 @@ def _factorise_common(node, self, linear_i):
     if linear_i:
         # try factorisation on each argument dimension
         for i in linear_i:
-            child = self.factorise_i(child, (linear_i, i))
-            new_node = Product(Product(p_const, p_1), child)
+            new_child = self.factorise_i(child, (linear_i, i))
+            new_node = Product(Product(p_const, p_1), new_child)
             new_flop = self.count_flop(new_node)
             if new_flop < flop:
-                optimal_i = i
+                optimal_child = new_child
                 flop = new_flop
-            child = self.expand_all_product(child, linear_i)
-    if optimal_i:
-        child = self.factorise_i(child, (linear_i, optimal_i))
-        return Product(Product(p_const, p_1), child)
+    if optimal_child:
+        return Product(Product(p_const, p_1), optimal_child)
     else:
         return node
 
 
 def factorise(node):
-    # node = reassociate_product([node])[0]
     m1 = MemoizerArg(_factorise)
     m2 = MemoizerArg(_factorise_i)
     m3 = MemoizerArg(_expand_all_product)
@@ -786,8 +782,8 @@ def factorise(node):
     m4.collect_terms = m6
     m1.count_flop = m7
     m1.reassociate_product = m8
-    # linear_i = tuple(sorted(list(node.free_indices), key=lambda x: x.count))
-    linear_i = node.free_indices
+    # need to sort the free indices to ensure idempotent code generation
+    linear_i = tuple(sorted(node.free_indices, key = lambda x: x.count))
     return m1(node, linear_i)
 
 

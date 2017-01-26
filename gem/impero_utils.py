@@ -39,8 +39,6 @@ def preprocess_gem(expressions):
     expressions = optimise.replace_delta(expressions)
     expressions = optimise.remove_componenttensors(expressions)
     expressions = optimise.replace_division(expressions)
-    # import sys
-    # sys.setrecursionlimit(20000)
     expressions = optimise.factorise_list(expressions)
     return expressions
 
