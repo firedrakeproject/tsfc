@@ -651,14 +651,15 @@ def _find_common_factor(node, self, index):
     """
     linear_i, i = index  # free index and current index
     sumproduct = self.flatten_sum(node, linear_i)
-    result = list(sumproduct[0][i])
     # Need to be stable, so cannot use Counter()
+    result = OrderedDict(zip(sumproduct[0][i], [None]*len(sumproduct[0][i])))
     for f in sumproduct[1:]:
-        for r in result:
+        for r in result.keys():
             if r not in f[i]:
-                result.remove(r)
-    return tuple(result)
-
+                result.pop(r)
+        if len(result) == 0:
+            return tuple()
+    return tuple(result.keys())
 
 def _factorise_i(node, self, index):
     """
@@ -728,9 +729,11 @@ def _factorise_common(node, self, linear_i):
     if len(sumproduct) > 1:
         factor_const = self.find_common_factor(node_expand, (linear_i, 0))
         factor_1 = self.find_common_factor(node_expand, (linear_i, 1))
-    else:
+    elif linear_i:
         factor_const = ()
         factor_1 = ()
+    else:
+        return node
     # node = factor_const * factor_1 * Sum(child_sum)
     child_sum = []
     for p in sumproduct:
@@ -760,7 +763,7 @@ def _factorise_common(node, self, linear_i):
     if optimal_child:
         return Product(Product(p_const, p_1), optimal_child)
     else:
-        return node
+        return Product(Product(p_const, p_1), child)
 
 
 def factorise(node):
