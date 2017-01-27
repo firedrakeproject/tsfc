@@ -365,8 +365,8 @@ def traverse_product(expression, stop_at=None):
             if dividend == one:
                 terms.append(expr)
             else:
-                terms.append(Division(one, divisor))
-                terms.append(dividend)
+                stack.append(Division(one, divisor))
+                stack.append(dividend)
         else:
             terms.append(expr)
 
