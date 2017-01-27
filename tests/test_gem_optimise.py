@@ -69,7 +69,7 @@ def test_factorise_1():
     Ei = Indexed(E, (i,))
     S = Sum(Product(Bj, Ci), Product(Bj, Di))
     expr = IndexSum(S, (i,))
-    result = factorise(expr)
+    result = factorise(expr, expr.free_indices)
     assert count_flop(result) == 110
 
 

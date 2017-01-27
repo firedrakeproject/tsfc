@@ -726,7 +726,7 @@ class IndexSum(Scalar):
 
     def latex(self):
         index = ','.join([x.latex() for x in self.multiindex])
-        return r'\sum\limits_{{{0}}}{1}'.format(index, self.children[0].latex())
+        return r'\sum\limits_{{{0}}}\left \{{{1} \right \}}'.format(index, self.children[0].latex())
 
     def _repr_latex_(self):
         return r'${0}$'.format(self.latex())

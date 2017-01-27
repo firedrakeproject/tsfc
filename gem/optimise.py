@@ -766,7 +766,7 @@ def _factorise_common(node, self, linear_i):
         return Product(Product(p_const, p_1), child)
 
 
-def factorise(node):
+def factorise(node, argument_indices):
     m1 = MemoizerArg(_factorise)
     m2 = MemoizerArg(_factorise_i)
     m3 = MemoizerArg(_expand_all_product)
@@ -786,9 +786,9 @@ def factorise(node):
     m1.count_flop = m7
     m1.reassociate_product = m8
     # need to sort the free indices to ensure idempotent code generation
-    linear_i = tuple(sorted(node.free_indices, key = lambda x: x.count))
+    linear_i = tuple(sorted(argument_indices, key = lambda x: x.count))
     return m1(node, linear_i)
 
 
-def factorise_list(expressions):
-    return list(map(factorise, expressions))
+def factorise_list(expressions, argument_indices):
+    return [factorise(x, argument_indices) for x in expressions]
