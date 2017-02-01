@@ -361,12 +361,19 @@ class LogicalOr(Scalar):
 class Conditional(Node):
     __slots__ = ('children', 'shape')
 
-    def __init__(self, condition, then, else_):
+    def __new__(cls, condition, then, else_):
         assert not condition.shape
         assert then.shape == else_.shape
 
+        # If both branches are the same, just return one of them.  In
+        # particular, this will help constant-fold zeros.
+        if then == else_:
+            return then
+
+        self = super(Conditional, cls).__new__(cls)
         self.children = condition, then, else_
         self.shape = then.shape
+        return self
 
 
 class IndexBase(with_metaclass(ABCMeta)):
