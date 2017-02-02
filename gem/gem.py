@@ -378,7 +378,8 @@ class MathFunction(Scalar):
 
     def latex(self):
         if self.name == 'abs':
-            return r'\lvert {0} \rvert'.format(self.children[0].latex())
+            # return r'\lvert {0} \rvert'.format(self.children[0].latex())
+            return r'\lvert \mathbf{{J}} \rvert'  # assume it is Jacobian
 
     def _repr_latex_(self):
         return r'${0}$'.format(self.latex())

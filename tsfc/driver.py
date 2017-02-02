@@ -167,7 +167,7 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     ir = list(reduce(gem.Sum, e, gem.Zero()) for e in zip(*irs))
 
     # Need optimised roots for COFFEE
-    ir = impero_utils.preprocess_gem(ir, argument_indices)
+    ir = impero_utils.preprocess_gem(ir, quadrature_indices, argument_indices)
 
     # Look for cell orientations in the IR
     if builder.needs_cell_orientations(ir):
