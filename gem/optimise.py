@@ -797,9 +797,48 @@ def factorise_list(expressions, argument_indices):
 
 def contract(tensors, indices, free_indices):
     """
-
-    :param tensors:
-    :param indices: (j, k)
-    :param free_indices: contract over i
+    :param tensors: (A, B, C, ...)
+    :param indices: (j, k, ...)
+    :param free_indices: contract over (i, ...)
     :return:
     """
+    index_map = {}
+    letter = ord('a')
+    for i in indices + free_indices:
+        index_map[i] = chr(letter)
+        letter += 1
+    subscripts = []
+    arrays = []
+    for t in tensors:
+        if any(isinstance(i, int) for i in t.multiindex):
+            subarray = [str(i) if isinstance(i, int) else ':' for i in t.multiindex]
+            subarray = '[' + ','.join(subarray) +']'  # e.g. [:,:,0]
+            # this bit is a bit ugly
+            arrays.append(eval('t.children[0].array' + subarray))
+        else:
+            arrays.append(t.children[0].array)
+        # ['ij', 'jk', ...]
+        subscripts.append(''.join([index_map[i] for i in t.multiindex
+                                   if not isinstance(i, int)]))
+    # this is used as the parameter for contraction with einsum
+    subscripts = ','.join(subscripts) + ' -> ' +\
+                 ''.join(''.join(index_map[i] for i in indices))
+    return numpy.einsum(subscripts, *arrays)
+
+def pre_evaluate(node, quadriture_indices, argument_indices):
+    quad_index, = quadriture_indices
+    new_node = expand_all_product(node, quadriture_indices + argument_indices)
+    sumproduct = flatten_sum(new_node, argument_indices)
+    sums = []
+    for mono in sumproduct:
+        tensors = list(mono[1])
+        rest = []
+        for arg_index in argument_indices:
+            term = mono[arg_index][0]
+            if quad_index in term.multiindex:
+                tensors.append(term)
+            else:
+                rest.append(term)
+        array = contract(tensors, quad_index, argument_indices)
+        literal = Literal(array)
+        sums.append()
