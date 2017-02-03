@@ -639,6 +639,7 @@ def _flatten_sum(node, self, index):
 
 def flatten_sum(node, index):
     mapper = MemoizerArg(_flatten_sum)
+    mapper.collect_terms = MemoizerArg(_collect_terms)
     return mapper(node, index)
 
 
@@ -792,3 +793,13 @@ def factorise(node, argument_indices):
 
 def factorise_list(expressions, argument_indices):
     return [factorise(x, argument_indices) for x in expressions]
+
+
+def contract(tensors, indices, free_indices):
+    """
+
+    :param tensors:
+    :param indices: (j, k)
+    :param free_indices: contract over i
+    :return:
+    """
