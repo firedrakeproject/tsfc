@@ -455,7 +455,7 @@ class VariableIndex(IndexBase):
         return str(self.expression)
 
     def __repr__(self):
-        return repr(self.expression)
+        return "VariableIndex(%r)" % (self.expression,)
 
     def __reduce__(self):
         return VariableIndex, (self.expression,)
