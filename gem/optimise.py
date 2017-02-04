@@ -619,6 +619,7 @@ def _flatten_sum(node, self, index):
         for i in [0, 1] + list(index):
             d[i] = list()
         for factor in self.collect_terms(sum, Product):
+            # should this be multiindex instead
             fi = factor.free_indices
             if fi == ():
                 d[0].append(factor)
@@ -828,17 +829,20 @@ def contract(tensors, indices, free_indices):
 def pre_evaluate(node, quadriture_indices, argument_indices):
     quad_index, = quadriture_indices
     new_node = expand_all_product(node, quadriture_indices + argument_indices)
-    sumproduct = flatten_sum(new_node, argument_indices)
+    sumproduct = flatten_sum(new_node.children[0], argument_indices)
     sums = []
     for mono in sumproduct:
         tensors = list(mono[1])
-        rest = []
+        rest = list(mono[0])
         for arg_index in argument_indices:
             term = mono[arg_index][0]
             if quad_index in term.multiindex:
                 tensors.append(term)
             else:
                 rest.append(term)
-        array = contract(tensors, quad_index, argument_indices)
+        array = contract(tensors, argument_indices, (quad_index,))
         literal = Literal(array)
-        sums.append()
+        rest.append(Indexed(literal, argument_indices))
+        sums.append(reduce(Product, rest, one))
+    # return reduce(Sum, sums, Zero)
+    return reduce(Sum, sums)
