@@ -59,7 +59,7 @@ class NodeMeta(type):
 class Node(with_metaclass(NodeMeta, NodeBase)):
     """Abstract GEM node class."""
 
-    __slots__ = ('free_indices')
+    __slots__ = ('free_indices',)
 
     def is_equal(self, other):
         """Common subexpression eliminating equality predicate.
@@ -419,10 +419,18 @@ class Index(IndexBase):
         # Allow sorting of free indices in Python 3
         return id(self) < id(other)
 
+    def __getstate__(self):
+        return self.name, self.extent, self.count
+
+    def __setstate__(self, state):
+        self.name, self.extent, self.count = state
+
 
 class VariableIndex(IndexBase):
     """An index that is constant during a single execution of the
     kernel, but whose value is not known at compile time."""
+
+    __slots__ = ('expression',)
 
     def __init__(self, expression):
         assert isinstance(expression, Node)
@@ -442,6 +450,15 @@ class VariableIndex(IndexBase):
 
     def __hash__(self):
         return hash((VariableIndex, self.expression))
+
+    def __str__(self):
+        return str(self.expression)
+
+    def __repr__(self):
+        return "VariableIndex(%r)" % (self.expression,)
+
+    def __reduce__(self):
+        return VariableIndex, (self.expression,)
 
 
 class Indexed(Scalar):

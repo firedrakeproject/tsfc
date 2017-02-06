@@ -2,7 +2,7 @@
 expression DAG languages."""
 
 from __future__ import absolute_import, print_function, division
-from six.moves import map
+from six.moves import map, zip
 
 import collections
 
@@ -32,7 +32,7 @@ class Node(object):
     # To be (potentially) overridden by derived node classes.
     __back__ = ()
 
-    def __getinitargs__(self, children):
+    def _cons_args(self, children):
         """Constructs an argument list for the constructor with
         non-child data from 'self' and children from 'children'.
 
@@ -43,17 +43,21 @@ class Node(object):
 
         return tuple(front_args) + tuple(children) + tuple(back_args)
 
+    def __reduce__(self):
+        # Gold version:
+        return type(self), self._cons_args(self.children)
+
     def reconstruct(self, *args):
         """Reconstructs the node with new children from
         'args'. Non-child data are copied from 'self'.
 
         Returns a new object.
         """
-        return type(self)(*self.__getinitargs__(args))
+        return type(self)(*self._cons_args(args))
 
     def __repr__(self):
-        init_args = self.__getinitargs__(self.children)
-        return "%s(%s)" % (type(self).__name__, ", ".join(map(repr, init_args)))
+        cons_args = self._cons_args(self.children)
+        return "%s(%s)" % (type(self).__name__, ", ".join(map(repr, cons_args)))
 
     def __eq__(self, other):
         """Provides equality testing with quick positive and negative
@@ -85,9 +89,9 @@ class Node(object):
         """
         if type(self) != type(other):
             return False
-        self_initargs = self.__getinitargs__(self.children)
-        other_initargs = other.__getinitargs__(other.children)
-        return self_initargs == other_initargs
+        self_consargs = self._cons_args(self.children)
+        other_consargs = other._cons_args(other.children)
+        return self_consargs == other_consargs
 
     def get_hash(self):
         """Hash function.
@@ -95,7 +99,7 @@ class Node(object):
         This is the method to potentially override in derived classes,
         not :meth:`__hash__`.
         """
-        return hash((type(self),) + self.__getinitargs__(self.children))
+        return hash((type(self),) + self._cons_args(self.children))
 
 
 def traversal(expression_dags):
