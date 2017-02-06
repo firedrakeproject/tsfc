@@ -796,7 +796,7 @@ def factorise_list(expressions, argument_indices):
     return [factorise(x, argument_indices) for x in expressions]
 
 
-def contract(tensors, indices, free_indices):
+def contract(tensors, free_indices, indices):
     """
     :param tensors: (A, B, C, ...)
     :param indices: (j, k, ...)
@@ -826,9 +826,15 @@ def contract(tensors, indices, free_indices):
                  ''.join(''.join(index_map[i] for i in indices))
     return numpy.einsum(subscripts, *arrays)
 
-def pre_evaluate(node, quadriture_indices, argument_indices):
-    quad_index, = quadriture_indices
-    new_node = expand_all_product(node, quadriture_indices + argument_indices)
+
+@singledispatch
+def pre_evaluate(node, argument_indices):
+    raise AssertionError("cannot handle type %s" % type(node))
+
+@pre_evaluate.register(IndexSum)
+def pre_evaluate(node, argument_indices):
+    quadrature_indices = node.multiindex
+    new_node = expand_all_product(node, quadrature_indices + argument_indices)
     sumproduct = flatten_sum(new_node.children[0], argument_indices)
     sums = []
     for mono in sumproduct:
@@ -836,13 +842,22 @@ def pre_evaluate(node, quadriture_indices, argument_indices):
         rest = list(mono[0])
         for arg_index in argument_indices:
             term = mono[arg_index][0]
-            if quad_index in term.multiindex:
+            if [i for i in quadrature_indices if i in term.multiindex]:
+                # need to be pre-evaluated
                 tensors.append(term)
             else:
+                # do not contain quadrature indices
                 rest.append(term)
-        array = contract(tensors, argument_indices, (quad_index,))
+        array = contract(tensors, quadrature_indices, argument_indices)
         literal = Literal(array)
         rest.append(Indexed(literal, argument_indices))
         sums.append(reduce(Product, rest, one))
     # return reduce(Sum, sums, Zero)
     return reduce(Sum, sums)
+
+
+def optimise(node, quadrature_indices, argument_indices):
+    if not isinstance(node, IndexSum):
+        raise AssertionError("Not implemented yet")
+    expand = expand_all_product(node, quadrature_indices + argument_indices)
+    return expand
