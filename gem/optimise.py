@@ -859,5 +859,10 @@ def pre_evaluate(node, argument_indices):
 def optimise(node, quadrature_indices, argument_indices):
     if not isinstance(node, IndexSum):
         raise AssertionError("Not implemented yet")
-    expand = expand_all_product(node, quadrature_indices + argument_indices)
-    return expand
+    if len(quadrature_indices) != 1 or len(argument_indices) != 2:
+        raise AssertionError("Not implemented yet")
+    i, = quadrature_indices
+    j, k = argument_indices
+    expand_children = expand_all_product(node.children[0], (i,j,k))
+    monos = flatten_sum(expand_children, (j,k))
+    return monos
