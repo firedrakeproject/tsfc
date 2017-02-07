@@ -39,7 +39,7 @@ def preprocess_gem(expressions, quadrature_indices, argument_indices):
     expressions = optimise.replace_delta(expressions)
     expressions = optimise.remove_componenttensors(expressions)
     expressions = optimise.replace_division(expressions)
-    # expressions = optimise.factorise_list(expressions, argument_indices)
+    # expressions = optimise.optimise_list(expressions, quadrature_indices, argument_indices)
     return expressions
 
 

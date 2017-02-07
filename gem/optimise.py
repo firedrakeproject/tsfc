@@ -12,7 +12,9 @@ from itertools import permutations
 import numpy
 from singledispatch import singledispatch
 
-from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
+from gem.node import (Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg,
+                      traversal)
+
 from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero, Power,
                      Product, Sum, Comparison, Conditional, Index, Constant,
                      VariableIndex, Indexed, FlexiblyIndexed, Variable,
@@ -607,6 +609,7 @@ def flatten_sum(node, argument_indices):
     2) i (key = 1)
     3) (i)j (key = j)
     4) (i)k (key = k)
+    ...
     5) (i)jk (key = 2)
     :param node: root of expression
     :param index: tuple of argument (linear) indices
@@ -614,23 +617,34 @@ def flatten_sum(node, argument_indices):
     """
     monos = collect_terms(node, Sum)
     result = []
-    j, k = argument_indices
+    arg_ind_set = set(argument_indices)
     for mono in monos:
         d = dict()
         for i in [0, 1, 2] + list(argument_indices):
             d[i] = list()
         for factor in collect_terms(mono, Product):
             fi = factor.free_indices
-            if fi == ():
+            if not fi :
                 d[0].append(factor)
-            elif j in fi and k in fi:
-                d[2].append(factor)
-            elif j in fi:
-                d[j].append(factor)
-            elif k in fi:
-                d[k].append(factor)
             else:
-                d[1].append(factor)
+                ind_set = set(fi) & arg_ind_set
+                if len(ind_set) > 1:
+                    # Aijk
+                    d[2].append(factor)
+                elif len(ind_set) == 0:
+                    # Ai
+                    d[1].append(factor)
+                else:
+                    # Aij
+                    d[ind_set.pop()].append(factor)
+            # elif j in fi and k in fi:
+            #     d[2].append(factor)
+            # elif j in fi:
+            #     d[j].append(factor)
+            # elif k in fi:
+            #     d[k].append(factor)
+            # else:
+            #     d[1].append(factor)
         for i in d:
             d[i] = tuple(d[i])
         result.append(d)
@@ -834,49 +848,39 @@ def factorise(factor_lists):
     return factorise(new_list)
 
 
-def cse_i(monos, j):
+def cse_i(monos, j, k):
     """
     factorise :param `node` using factors with argument index j as common factor
     :param node: root of expression
-    :param j: one of the argument indices
+    :param j: the argument indices chosen to be factorised
+    :param j: the other argument index
     :return: factorised new node
     """
-    # collect all factors with index j
+    # collect all factors with index j, dict {j: other terms in the product}
     factors = OrderedDict()
+    new_list = []
     for mono in monos:
-        if mono[i]:
-            factors[p[i][0]] = 0
-    factors = list(factors.iterkeys())
-    # only 1 element per list due to linearity, thus p[i][0]
-    # sort to ensure deterministic result
-    sums = OrderedDict()
-    for f in factors:
-        sums[f] = []
-    sums[0] = []
-    for p in sumproduct:
-        # extract out common factor
-        p_const = reduce(Product, p[0], one)  # constants
-        p_i = reduce(Product, p[1], one)  # quadrature index
-        # argument index
-        p_jk = reduce(Product, [p[j][0] for j in linear_i if j != i and p[j]], one)
-        new_node = reduce(Product, [p_const, p_i, p_jk], one)
-        if p[i]:
-            # add to corresponding factor list if product contains
-            # factor of index i
-            sums[p[i][0]].append(new_node)
+        f, = mono[j]  # this is a tuple
+        if f:
+            terms = mono[0] + mono[1] + mono[k]
+            if f in factors:
+                factors[f].append(terms)
+            else:
+                factors[f] = [terms]
         else:
-            # add to list of the rest
-            sums[0].append(new_node)
-    sum_i = []
-    # create tuple of free indices with the current index removed
-    new_index = tuple([j for j in linear_i if j != i])
-    for f in factors:
-        # factor * subexpression
-        # recursively factorise newly creately subexpression (a sumproduct)
-        sum_i.append(Product(
-            f,
-            self.factorise(reduce(Sum, sums[f], Zero()), new_index)))
-    return reduce(Sum, sum_i + sums[0], Zero())
+            new_list.append(list(mono[0] + mono[1] + mono[k] + mono[2]))
+    # add factorised term into new_list
+    for f, terms_list in factors.iteritems():
+        if len(terms_list) == 1:
+            # no common factors, no need to form product
+            new_list.append(list((f,) + terms_list[0]))
+        else:
+            # need to form product f*(product(terms[0]) + product(terms[1]))
+            sums = []
+            for terms in terms_list:
+                sums.append(reduce(Product, terms, one))
+            new_list.append([f, reduce(Sum, sums, Zero())])
+    return factorise(new_list)
 
 
 def contract(tensors, free_indices, indices):
@@ -911,11 +915,11 @@ def contract(tensors, free_indices, indices):
 
 
 @singledispatch
-def pre_evaluate(node, argument_indices):
+def pre_evaluate_old(node, argument_indices):
     raise AssertionError("cannot handle type %s" % type(node))
 
-@pre_evaluate.register(IndexSum)
-def pre_evaluate(node, argument_indices):
+@pre_evaluate_old.register(IndexSum)
+def pre_evaluate_old(node, argument_indices):
     quadrature_indices = node.multiindex
     new_node = expand_all_product(node, quadrature_indices + argument_indices)
     sumproduct = flatten_sum(new_node.children[0], argument_indices)
@@ -939,25 +943,30 @@ def pre_evaluate(node, argument_indices):
     return reduce(Sum, sums)
 
 
-def optimise(node, quadrature_indices, argument_indices):
-    if not isinstance(node, IndexSum):
-        raise AssertionError("Not implemented yet")
-    if len(quadrature_indices) != 1 or len(argument_indices) != 2:
-        raise AssertionError("Not implemented yet")
-    i, = quadrature_indices
-    j, k = argument_indices
-    I = i.extent
-    J = j.extent
-    K = k.extent
-    expand_pe = expand_all_product(node.children[0], (i,j,k))
-    monos_pe = flatten_sum(expand_pe, (j,k))
+def can_pre_evaluate(node, quad_ind, arg_ind):
+    # test if |Jacobian| depend on quadrature points (non-affine)
+    quad_ind_set = set(quad_ind)
+    for J_dev in traversal([node]):
+        if isinstance(J_dev, MathFunction):
+            if J_dev.name == 'abs':
+                if quad_ind_set & set(J_dev.free_indices):
+                    return False
+    return True
+
+
+def pre_evaluate(node, quad_ind, arg_ind):
+    arg_ind_flat = tuple([i for id in arg_ind for i in id])
+    quad_ind_set = set(quad_ind)
+    extents = dict().fromkeys(quad_ind + arg_ind_flat)
+    expand_pe = expand_all_product(node.children[0], quad_ind + arg_ind_flat)
+    monos_pe = flatten_sum(expand_pe, arg_ind_flat)
     # identify number of distinct pre-evaluate tensors
     pe_results = dict()
     for mono in monos_pe:
         tensors = list(mono[1])  # to be pre-evaluated
         rest = list(mono[0])  # does not contain i
-        for t in mono[j] + mono[k] + mono[2]:
-            if i in t.free_indices:
+        for t in [term for j in arg_ind_flat + (2,) for term in mono[j]]:
+            if set(t.free_indices) & quad_ind_set:
                 tensors.append(t)
             else:
                 rest.append(t)
@@ -969,17 +978,49 @@ def optimise(node, quadrature_indices, argument_indices):
         elif tensors in pe_results:
             mono['pe_result'] = pe_results[tensors]
         else:
-            # temporary tensor as place holder
-            mono['pe_result'] = pe_results[tensors] = (Indexed(Variable('PE'+str(len(pe_results)), (J,K)), (j,k)),)
-    # construct list of factor lists after pre-evaluation
+            # can put in a temporary tensor here
+            # mono['pe_result'] = pe_results[tensors] = (Indexed(Variable('PE'+str(len(pe_results)), (J,K)), (j,k)),)
+            array = contract(tensors, quad_ind, arg_ind_flat)
+            pe_tensor = Indexed(Literal(array, 'PE'+str(len(pe_results))), arg_ind_flat)
+            mono['pe_result'] = pe_results[tensors] = (pe_tensor, )  # this is a tuple
+        # construct list of factor lists after pre-evaluation
     factor_lists = []
     for mono in monos_pe:
         factor_lists.append(list(mono['rest'] + mono['pe_result']))
 
     node_pe = factorise(factor_lists)
     theta_pe = count_flop(node_pe)  # flop count for pre-evaluation method
+    return (node_pe, theta_pe)
+
+
+def optimise(node, quad_ind, arg_ind):
+    if not isinstance(node, IndexSum):
+        raise AssertionError("Not implemented yet")
+
+    if can_pre_evaluate(node, quad_ind, arg_ind):
+        node_pe, theta_pe = pre_evaluate(node, quad_ind, arg_ind)
+
+    return (node_pe, theta_pe)
 
     expand_cse = expand_all_product(node.children[0], (j,k))  # do not expand quadrature terms
     monos_cse = flatten_sum(expand_cse, (j,k))
+    children_cse = cse_i(monos_cse, j, k)
+    node_cse = IndexSum(children_cse, (i,))
+    theta_cse = count_flop(node_cse)
 
-    return monos_cse
+    # need to check memory requirement here too
+    if theta_cse < theta_pe:
+        return node_cse
+    else:
+        return node_pe
+
+    # now we need to really pre-evaluate the tensors
+    # for tensors in pe_results:
+    #     array = contract(tensors, (i,), (j, k))
+    #     pe_results[tensors] = Indexed(Literal(array, '')
+    #
+    # return pe_results
+
+
+def optimise_list(expressions, quadrature_indices, argument_indices):
+    return [optimise(node, quadrature_indices, argument_indices) for node in expressions]
