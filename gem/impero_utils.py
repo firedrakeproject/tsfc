@@ -194,15 +194,15 @@ def place_declarations(tree, temporaries, get_indices):
     :arg get_indices: callable mapping from GEM nodes to an ordering
                       of free indices
     """
-    temporaries_set = set(temporaries)
-    assert len(temporaries_set) == len(temporaries)
+    numbering = {t: n for n, t in enumerate(temporaries)}
+    assert len(numbering) == len(temporaries)
 
     # Collect the total number of temporary references
     total_refcount = collections.Counter()
     for node in traversal((tree,)):
         if isinstance(node, imp.Terminal):
-            total_refcount.update(temp_refcount(temporaries_set, node))
-    assert temporaries_set == set(total_refcount)
+            total_refcount.update(temp_refcount(numbering, node))
+    assert set(total_refcount) == set(temporaries)
 
     # Result
     declare = {}
@@ -223,7 +223,7 @@ def place_declarations(tree, temporaries, get_indices):
 
     @recurse.register(imp.Terminal)
     def recurse_terminal(expr, loop_indices):
-        return temp_refcount(temporaries_set, expr)
+        return temp_refcount(numbering, expr)
 
     @recurse.register(imp.For)
     def recurse_for(expr, loop_indices):
@@ -241,7 +241,7 @@ def place_declarations(tree, temporaries, get_indices):
             refcount.update(recurse(statement, loop_indices))
 
         # Visit :class:`collections.Counter` in deterministic order
-        for e in sorted(refcount.keys(), key=temporaries.index):
+        for e in sorted(refcount.keys(), key=lambda t: numbering[t]):
             if refcount[e] == total_refcount[e]:
                 # If all references are within this block, then this
                 # block is the right place to declare the temporary.
