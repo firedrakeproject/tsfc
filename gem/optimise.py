@@ -834,6 +834,51 @@ def factorise(factor_lists):
     return factorise(new_list)
 
 
+def cse_i(monos, j):
+    """
+    factorise :param `node` using factors with argument index j as common factor
+    :param node: root of expression
+    :param j: one of the argument indices
+    :return: factorised new node
+    """
+    # collect all factors with index j
+    factors = OrderedDict()
+    for mono in monos:
+        if mono[i]:
+            factors[p[i][0]] = 0
+    factors = list(factors.iterkeys())
+    # only 1 element per list due to linearity, thus p[i][0]
+    # sort to ensure deterministic result
+    sums = OrderedDict()
+    for f in factors:
+        sums[f] = []
+    sums[0] = []
+    for p in sumproduct:
+        # extract out common factor
+        p_const = reduce(Product, p[0], one)  # constants
+        p_i = reduce(Product, p[1], one)  # quadrature index
+        # argument index
+        p_jk = reduce(Product, [p[j][0] for j in linear_i if j != i and p[j]], one)
+        new_node = reduce(Product, [p_const, p_i, p_jk], one)
+        if p[i]:
+            # add to corresponding factor list if product contains
+            # factor of index i
+            sums[p[i][0]].append(new_node)
+        else:
+            # add to list of the rest
+            sums[0].append(new_node)
+    sum_i = []
+    # create tuple of free indices with the current index removed
+    new_index = tuple([j for j in linear_i if j != i])
+    for f in factors:
+        # factor * subexpression
+        # recursively factorise newly creately subexpression (a sumproduct)
+        sum_i.append(Product(
+            f,
+            self.factorise(reduce(Sum, sums[f], Zero()), new_index)))
+    return reduce(Sum, sum_i + sums[0], Zero())
+
+
 def contract(tensors, free_indices, indices):
     """
     :param tensors: (A, B, C, ...)
@@ -904,11 +949,11 @@ def optimise(node, quadrature_indices, argument_indices):
     I = i.extent
     J = j.extent
     K = k.extent
-    expand_children = expand_all_product(node.children[0], (i,j,k))
-    monos = flatten_sum(expand_children, (j,k))
+    expand_pe = expand_all_product(node.children[0], (i,j,k))
+    monos_pe = flatten_sum(expand_pe, (j,k))
     # identify number of distinct pre-evaluate tensors
     pe_results = dict()
-    for mono in monos:
+    for mono in monos_pe:
         tensors = list(mono[1])  # to be pre-evaluated
         rest = list(mono[0])  # does not contain i
         for t in mono[j] + mono[k] + mono[2]:
@@ -928,12 +973,13 @@ def optimise(node, quadrature_indices, argument_indices):
             mono['pe_result'] = pe_results[tensors] = (Indexed(Variable('PE'+str(len(pe_results)), (J,K)), (j,k)),)
     # construct list of factor lists after pre-evaluation
     factor_lists = []
-    for mono in monos:
+    for mono in monos_pe:
         factor_lists.append(list(mono['rest'] + mono['pe_result']))
 
     node_pe = factorise(factor_lists)
     theta_pe = count_flop(node_pe)  # flop count for pre-evaluation method
 
-    
+    expand_cse = expand_all_product(node.children[0], (j,k))  # do not expand quadrature terms
+    monos_cse = flatten_sum(expand_cse, (j,k))
 
-    return (node_pe, theta_pe)
+    return monos_cse
