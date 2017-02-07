@@ -15,7 +15,7 @@ from singledispatch import singledispatch
 from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
 from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero, Power,
                      Product, Sum, Comparison, Conditional, Index, Constant,
-                     VariableIndex, Indexed, FlexiblyIndexed,
+                     VariableIndex, Indexed, FlexiblyIndexed, Variable,
                      IndexSum, ComponentTensor, ListTensor, Delta,
                      partial_indexed, one, Division, MathFunction, LogicalAnd,
                      LogicalNot, LogicalOr)
@@ -579,7 +579,7 @@ def expand_all_product(node, index):
     return mapper(node, index)
 
 
-def _collect_terms(node, self, node_type):
+def collect_terms(node, node_type):
     """Recursively collect all children into a list from :param:`node`
     and its children of class :param:`node_type`.
 
@@ -599,7 +599,7 @@ def _collect_terms(node, self, node_type):
     return tuple(terms)
 
 
-def _flatten_sum(node, self, index):
+def flatten_sum(node, argument_indices):
     """
     factorise :param:`node` into sum of products, group factors of each product
     based on its dependency on index:
@@ -607,41 +607,34 @@ def _flatten_sum(node, self, index):
     2) i (key = 1)
     3) (i)j (key = j)
     4) (i)k (key = k)
-    ...
+    5) (i)jk (key = 2)
     :param node: root of expression
     :param index: tuple of argument (linear) indices
     :return: dictionary to list of factors
     """
-    sums = self.collect_terms(node, Sum)
+    monos = collect_terms(node, Sum)
     result = []
-    for sum in sums:
-        d = OrderedDict()
-        for i in [0, 1] + list(index):
+    j, k = argument_indices
+    for mono in monos:
+        d = dict()
+        for i in [0, 1, 2] + list(argument_indices):
             d[i] = list()
-        for factor in self.collect_terms(sum, Product):
-            # should this be multiindex instead
+        for factor in collect_terms(mono, Product):
             fi = factor.free_indices
             if fi == ():
                 d[0].append(factor)
+            elif j in fi and k in fi:
+                d[2].append(factor)
+            elif j in fi:
+                d[j].append(factor)
+            elif k in fi:
+                d[k].append(factor)
             else:
-                flag = True
-                for i in index:
-                    if i in fi:
-                        flag = False
-                        d[i].append(factor)
-                        break
-                if flag:
-                    d[1].append(factor)
-        for i in [0, 1] + list(index):
+                d[1].append(factor)
+        for i in d:
             d[i] = tuple(d[i])
         result.append(d)
     return tuple(result)
-
-
-def flatten_sum(node, index):
-    mapper = MemoizerArg(_flatten_sum)
-    mapper.collect_terms = MemoizerArg(_collect_terms)
-    return mapper(node, index)
 
 
 def _find_common_factor(node, self, index):
@@ -768,7 +761,7 @@ def _factorise_common(node, self, linear_i):
         return Product(Product(p_const, p_1), child)
 
 
-def factorise(node, argument_indices):
+def _factorise_old(node, argument_indices):
     m1 = MemoizerArg(_factorise)
     m2 = MemoizerArg(_factorise_i)
     m3 = MemoizerArg(_expand_all_product)
@@ -794,6 +787,51 @@ def factorise(node, argument_indices):
 
 def factorise_list(expressions, argument_indices):
     return [factorise(x, argument_indices) for x in expressions]
+
+
+def factorise(factor_lists):
+    """
+    recursively pick the most common factor
+    maybe can Memoize this one
+    :param factors: list of list of factors, representing sum of products
+    :return: factorised gem node
+    """
+    # count number of common factors
+    counter = OrderedDict.fromkeys(factor_lists[0], 1)
+    for fl in factor_lists[1:]:
+        for factor in fl:
+            if factor in counter:
+                counter[factor] += 1
+            else:
+                counter[factor] = 1
+    # most common factor
+    mcf_value = max(counter.values())
+    if mcf_value == 1:
+        # no common factors
+        sums = []
+        for fl in factor_lists:
+            sums.append(reduce(Product,fl, one))
+        return reduce(Sum, sums, Zero())
+    for k, v in counter.iteritems():
+        if v == mcf_value:
+            mcf = k
+            break
+    # probably need to choose between equally common factor with more sophisticated method
+    if mcf_value == len(factor_lists):
+        for fl in factor_lists:
+            fl.remove(mcf)
+        return Product(mcf, factorise(factor_lists))
+        # common factor to every product
+    rest = []  # remaining factors after mcf extracted
+    new_list = []
+    for fl in factor_lists:
+        if mcf in fl:
+            fl.remove(mcf)
+            rest.append(reduce(Product, fl, one))
+        else:
+            new_list.append(fl)
+    new_list.append([mcf, reduce(Sum, rest, Zero())])
+    return factorise(new_list)
 
 
 def contract(tensors, free_indices, indices):
@@ -863,6 +901,39 @@ def optimise(node, quadrature_indices, argument_indices):
         raise AssertionError("Not implemented yet")
     i, = quadrature_indices
     j, k = argument_indices
+    I = i.extent
+    J = j.extent
+    K = k.extent
     expand_children = expand_all_product(node.children[0], (i,j,k))
     monos = flatten_sum(expand_children, (j,k))
-    return monos
+    # identify number of distinct pre-evaluate tensors
+    pe_results = dict()
+    for mono in monos:
+        tensors = list(mono[1])  # to be pre-evaluated
+        rest = list(mono[0])  # does not contain i
+        for t in mono[j] + mono[k] + mono[2]:
+            if i in t.free_indices:
+                tensors.append(t)
+            else:
+                rest.append(t)
+        mono['pe_tensors'] = tensors = tuple(sorted(tensors))
+        mono['rest'] = tuple(rest)  # not pre-evaluated
+        # there could be duplicated pre-evaluated tensors
+        if not tensors:
+            mono['pe_result'] = tuple()
+        elif tensors in pe_results:
+            mono['pe_result'] = pe_results[tensors]
+        else:
+            # temporary tensor as place holder
+            mono['pe_result'] = pe_results[tensors] = (Indexed(Variable('PE'+str(len(pe_results)), (J,K)), (j,k)),)
+    # construct list of factor lists after pre-evaluation
+    factor_lists = []
+    for mono in monos:
+        factor_lists.append(list(mono['rest'] + mono['pe_result']))
+
+    node_pe = factorise(factor_lists)
+    theta_pe = count_flop(node_pe)  # flop count for pre-evaluation method
+
+    
+
+    return (node_pe, theta_pe)
