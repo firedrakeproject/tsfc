@@ -834,18 +834,19 @@ def factorise(factor_lists):
     if mcf_value == len(factor_lists):
         for fl in factor_lists:
             fl.remove(mcf)
-        return Product(mcf, factorise(factor_lists))
+        return Product(mcf, factorise(factor_lists))  # recursion
         # common factor to every product
     rest = []  # remaining factors after mcf extracted
     new_list = []
+    new_sub_list = []  # new_list = mcf * [new_sub_list] + rest
     for fl in factor_lists:
         if mcf in fl:
             fl.remove(mcf)
-            rest.append(reduce(Product, fl, one))
+            new_sub_list.append(fl)
         else:
             new_list.append(fl)
-    new_list.append([mcf, reduce(Sum, rest, Zero())])
-    return factorise(new_list)
+    new_list.append([mcf, factorise(new_sub_list)])  # recursion
+    return factorise(new_list)  # recursion
 
 
 def cse_i(monos, j, k):
@@ -993,17 +994,61 @@ def pre_evaluate(node, quad_ind, arg_ind):
     return (node_pe, theta_pe)
 
 
+def find_optimal_factors(monos, arg_ind):
+    arg_ind_flat = tuple([i for id in arg_ind for i in id])
+    gem_int = OrderedDict()  # Gem node -> int
+    int_gem = OrderedDict()  # int -> Gem node
+    counter = 0
+    for mono in monos:
+        for j in arg_ind_flat:
+            # really this should just have 1 element
+            for n in mono[j]:
+                if n not in gem_int:
+                    gem_int[n] = counter
+                    int_gem[counter] = n
+                    counter += 1
+    # add connections (list of tuples)
+    edges_sets_list = []
+    # num_edges = dict.fromkeys(int_gem.keys(), 0)
+    for mono in monos:
+        # this double loop should be optimised further
+        edges_sets_list.append(tuple(
+            [gem_int[n] for j in arg_ind_flat for n in mono[j]]))
+
+    # set up the ILP
+    import pulp as ilp
+    prob = ilp.LpProblem('factorise', ilp.LpMinimize)
+    nodes = ilp.LpVariable.dicts('node', int_gem.keys(), 0, 1, ilp.LpBinary)
+
+    # objective function
+    prob += ilp.lpSum(nodes[i] for i in int_gem)
+
+    # constraints (need to account for >2 argument indices)
+    for edges_set in edges_sets_list:
+        prob += ilp.lpSum(nodes[i] for i in edges_set) >= 1
+
+    prob.solve()
+    if prob.status != 1:
+        raise AssertionError("Something bad happened during ILP")
+
+    nodes_to_pull = tuple([n for n, node_number in gem_int.iteritems()
+                           if nodes[node_number].value() == 1])
+    return nodes_to_pull
+
+
 def optimise(node, quad_ind, arg_ind):
     if not isinstance(node, IndexSum):
         raise AssertionError("Not implemented yet")
 
-    if can_pre_evaluate(node, quad_ind, arg_ind):
-        node_pe, theta_pe = pre_evaluate(node, quad_ind, arg_ind)
-
     return (node_pe, theta_pe)
+    arg_ind_flat = tuple([i for id in arg_ind for i in id])
+    # do not expand quadrature terms all the way
+    expand_cse = expand_all_product(node.children[0], arg_ind_flat)
+    monos_cse = flatten_sum(expand_cse, arg_ind_flat)
+    # need a firt pass of monos to combine terms which have same nodes for all arg_ind
+    optimal_factors = find_optimal_factors(monos_cse, arg_ind)
+    return optimal_factors
 
-    expand_cse = expand_all_product(node.children[0], (j,k))  # do not expand quadrature terms
-    monos_cse = flatten_sum(expand_cse, (j,k))
     children_cse = cse_i(monos_cse, j, k)
     node_cse = IndexSum(children_cse, (i,))
     theta_cse = count_flop(node_cse)
@@ -1014,6 +1059,11 @@ def optimise(node, quad_ind, arg_ind):
     else:
         return node_pe
 
+
+    if can_pre_evaluate(node, quad_ind, arg_ind):
+        node_pe, theta_pe = pre_evaluate(node, quad_ind, arg_ind)
+
+    return (node_pe, theta_pe)
     # now we need to really pre-evaluate the tensors
     # for tensors in pe_results:
     #     array = contract(tensors, (i,), (j, k))
