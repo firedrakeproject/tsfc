@@ -803,13 +803,26 @@ def factorise_list(expressions, argument_indices):
     return [factorise(x, argument_indices) for x in expressions]
 
 
+def sumproduct_2_node(factor_lists):
+    """
+    generate gem node from list of factors
+    :param factor_lists: list of factors representing sums of products
+    :return: gem node
+    """
+    sums = []
+    for fl in factor_lists:
+        sums.append(reduce(Product, fl, one))
+    return reduce(Sum, sums, Zero())
+
 def factorise(factor_lists):
     """
     recursively pick the most common factor
     maybe can Memoize this one
     :param factors: list of list of factors, representing sum of products
-    :return: factorised gem node
+    :return: optimised list of list of factors
     """
+    if len(factor_lists) == 1:
+        return factor_lists
     # count number of common factors
     counter = OrderedDict.fromkeys(factor_lists[0], 1)
     for fl in factor_lists[1:]:
@@ -822,30 +835,21 @@ def factorise(factor_lists):
     mcf_value = max(counter.values())
     if mcf_value == 1:
         # no common factors
-        sums = []
-        for fl in factor_lists:
-            sums.append(reduce(Product,fl, one))
-        return reduce(Sum, sums, Zero())
+        return factor_lists
     for k, v in counter.iteritems():
         if v == mcf_value:
             mcf = k
             break
     # probably need to choose between equally common factor with more sophisticated method
-    if mcf_value == len(factor_lists):
-        for fl in factor_lists:
-            fl.remove(mcf)
-        return Product(mcf, factorise(factor_lists))  # recursion
-        # common factor to every product
-    rest = []  # remaining factors after mcf extracted
     new_list = []
-    new_sub_list = []  # new_list = mcf * [new_sub_list] + rest
+    rest = []  # new_list = mcf * [rest] + rest
     for fl in factor_lists:
         if mcf in fl:
             fl.remove(mcf)
-            new_sub_list.append(fl)
+            rest.append(fl)
         else:
             new_list.append(fl)
-    new_list.append([mcf, factorise(new_sub_list)])  # recursion
+    new_list.append([mcf, sumproduct_2_node(factorise(rest))])  # recursion
     return factorise(new_list)  # recursion
 
 
@@ -945,6 +949,8 @@ def pre_evaluate_old(node, argument_indices):
 
 
 def can_pre_evaluate(node, quad_ind, arg_ind):
+    if not isinstance(node, IndexSum):
+        return False
     # test if |Jacobian| depend on quadrature points (non-affine)
     quad_ind_set = set(quad_ind)
     for J_dev in traversal([node]):
@@ -989,7 +995,7 @@ def pre_evaluate(node, quad_ind, arg_ind):
     for mono in monos_pe:
         factor_lists.append(list(mono['rest'] + mono['pe_result']))
 
-    node_pe = factorise(factor_lists)
+    node_pe = sumproduct_2_node(factorise(factor_lists))
     theta_pe = count_flop(node_pe)  # flop count for pre-evaluation method
     return (node_pe, theta_pe)
 
@@ -1037,33 +1043,56 @@ def find_optimal_factors(monos, arg_ind):
 
 
 def optimise(node, quad_ind, arg_ind):
-    if not isinstance(node, IndexSum):
-        raise AssertionError("Not implemented yet")
-
-    return (node_pe, theta_pe)
+    print(count_flop(node))
     arg_ind_flat = tuple([i for id in arg_ind for i in id])
     # do not expand quadrature terms all the way
-    expand_cse = expand_all_product(node.children[0], arg_ind_flat)
+    if isinstance(node, IndexSum):
+        expand_cse = expand_all_product(node.children[0], arg_ind_flat)
+    else:
+        expand_cse = expand_all_product(node, arg_ind_flat)
     monos_cse = flatten_sum(expand_cse, arg_ind_flat)
     # need a firt pass of monos to combine terms which have same nodes for all arg_ind
+    # this should be in a loop if >2 arg_ind
     optimal_factors = find_optimal_factors(monos_cse, arg_ind)
-    return optimal_factors
+    # pull out the optimal factors and form factor_list
+    factor_lists = list()
+    factor_dict = OrderedDict().fromkeys(optimal_factors)
+    for of in factor_dict:
+        factor_dict[of] = list()
+    for mono in monos_cse:
+        all_factors = [f for fl in mono.values() for f in fl]
+        for of in optimal_factors:
+            if of in all_factors:
+                all_factors.remove(of)
+                factor_dict[of].append(all_factors)
+                break
+        else:
+            factor_lists.append(all_factors)
+    for of, factors in factor_dict.iteritems():
+        # factors = list of lists representing sum of products
+        if len(factors) == 1:
+            # just one product
+            factor_lists.append([of] + factors[0])
+        else:
+            factor_lists.append([of, sumproduct_2_node(factors)])
 
-    children_cse = cse_i(monos_cse, j, k)
-    node_cse = IndexSum(children_cse, (i,))
-    theta_cse = count_flop(node_cse)
-
-    # need to check memory requirement here too
-    if theta_cse < theta_pe:
-        return node_cse
+    factorised = sumproduct_2_node(factorise(factor_lists))
+    if isinstance(node, IndexSum):
+        node_cse = IndexSum(factorised, quad_ind)
     else:
-        return node_pe
+        node_cse = factorised
+
+    theta_cse = count_flop(node_cse)
+    print(theta_cse)
 
 
     if can_pre_evaluate(node, quad_ind, arg_ind):
         node_pe, theta_pe = pre_evaluate(node, quad_ind, arg_ind)
+        print(theta_pe)
+        if theta_cse > theta_pe:
+            return node_pe
 
-    return (node_pe, theta_pe)
+    return node_cse
     # now we need to really pre-evaluate the tensors
     # for tensors in pe_results:
     #     array = contract(tensors, (i,), (j, k))
