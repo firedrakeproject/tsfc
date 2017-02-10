@@ -5,7 +5,7 @@ from __future__ import absolute_import, print_function, division
 from six import itervalues
 from six.moves import map, zip
 
-from collections import OrderedDict, deque, Counter
+from collections import OrderedDict, deque
 from functools import reduce
 from itertools import permutations
 
@@ -17,7 +17,7 @@ from gem.node import (Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouc
 
 from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero, Power,
                      Product, Sum, Comparison, Conditional, Index, Constant,
-                     VariableIndex, Indexed, FlexiblyIndexed, Variable,
+                     VariableIndex, Indexed, FlexiblyIndexed,
                      IndexSum, ComponentTensor, ListTensor, Delta,
                      partial_indexed, one, Division, MathFunction, LogicalAnd,
                      LogicalNot, LogicalOr)
@@ -112,26 +112,8 @@ _reassociate_product.register(Node)(reuse_if_untouched)
 def _reassociate_product_prod(node, self):
     # collect all factors of product, sort by rank
     # should use more sophisticated method later on for optimal result
-    def comp_func(node1, node2):
-        if len(node1.free_indices) < len(node2.free_indices):
-            return -1;
-        elif len(node1.free_indices) > len(node2.free_indices):
-            return 1;
-        else:
-            h1 = hash(node1.free_indices)
-            h2 = hash(node2.free_indices)
-            if h1 < h2:
-                return -1;
-            elif h1 > h2:
-                return 1;
-            else:
-                hh1 = hash(node1)
-                hh2 = hash(node2)
-                if hh2 < hh1:
-                    return 1;
-                else:
-                    return -1;
-    factors = sorted(self.collect_terms(node, Product), cmp=comp_func)
+    comp_func = lambda x: len(x.free_indices)
+    factors = sorted(collect_terms(node, Product), key=comp_func)
     # need to optimise away iterator <==> list
     new_factors = list(map(self, factors))  # recursion
     return reduce(Product, new_factors)
@@ -139,8 +121,6 @@ def _reassociate_product_prod(node, self):
 
 def reassociate_product(expressions):
     mapper = Memoizer(_reassociate_product)
-    mapper2 = MemoizerArg(_collect_terms)
-    mapper.collect_terms = mapper2
     return list(map(mapper, expressions))
 
 
@@ -624,7 +604,7 @@ def flatten_sum(node, argument_indices):
             d[i] = list()
         for factor in collect_terms(mono, Product):
             fi = factor.free_indices
-            if not fi :
+            if not fi:
                 d[0].append(factor)
             else:
                 ind_set = set(fi) & arg_ind_set
@@ -651,158 +631,6 @@ def flatten_sum(node, argument_indices):
     return tuple(result)
 
 
-def _find_common_factor(node, self, index):
-    """
-    find common factors of :param `node`
-    :param node: root of expression, usually sum of products
-    :param index: tuple (linear indices, current index)
-    :return: list of common factors categorized by current index
-    """
-    linear_i, i = index  # free index and current index
-    sumproduct = self.flatten_sum(node, linear_i)
-    # Need to be stable, so cannot use Counter()
-    result = OrderedDict(zip(sumproduct[0][i], [None]*len(sumproduct[0][i])))
-    for f in sumproduct[1:]:
-        for r in result.keys():
-            if r not in f[i]:
-                result.pop(r)
-        if len(result) == 0:
-            return tuple()
-    return tuple(result.keys())
-
-def _factorise_i(node, self, index):
-    """
-    factorise :param `node` using factors with current index as common factor
-    :param node: root of expression
-    :param self: Memoizer object
-    :return: factorised new node
-    """
-    linear_i, i = index  # linear index, current index
-    sumproduct = self.flatten_sum(node, linear_i)
-    # collect all factors with correct index
-    factors = OrderedDict()
-    for p in sumproduct:
-        if p[i]:
-            factors[p[i][0]] = 0
-    factors = list(factors.iterkeys())
-    # only 1 element per list due to linearity, thus p[i][0]
-    # sort to ensure deterministic result
-    sums = OrderedDict()
-    for f in factors:
-        sums[f] = []
-    sums[0] = []
-    for p in sumproduct:
-        # extract out common factor
-        p_const = reduce(Product, p[0], one)  # constants
-        p_i = reduce(Product, p[1], one)  # quadrature index
-        # argument index
-        p_jk = reduce(Product, [p[j][0] for j in linear_i if j != i and p[j]], one)
-        new_node = reduce(Product, [p_const, p_i, p_jk], one)
-        if p[i]:
-            # add to corresponding factor list if product contains
-            # factor of index i
-            sums[p[i][0]].append(new_node)
-        else:
-            # add to list of the rest
-            sums[0].append(new_node)
-    sum_i = []
-    # create tuple of free indices with the current index removed
-    new_index = tuple([j for j in linear_i if j != i])
-    for f in factors:
-        # factor * subexpression
-        # recursively factorise newly creately subexpression (a sumproduct)
-        sum_i.append(Product(
-            f,
-            self.factorise(reduce(Sum, sums[f], Zero()), new_index)))
-    return reduce(Sum, sum_i + sums[0], Zero())
-
-
-@singledispatch
-def _factorise(node, self, linear_i):
-    raise AssertionError("cannot handle type %s" % type(node))
-
-
-_factorise.register(Node)(reuse_if_untouched_arg)
-
-
-@_factorise.register(Sum)
-@_factorise.register(Product)
-def _factorise_common(node, self, linear_i):
-    # sort free indices to ensure deterministic result
-    # free_i = tuple(sorted(list(node.free_indices), key=lambda x: x.count))
-    flop = self.count_flop(node)
-    optimal_child = None
-    node_expand = self.expand_all_product(node, linear_i)
-    sumproduct = self.flatten_sum(node_expand, linear_i)
-    # find common factors that are constants or dependent on quadrature index
-    if len(sumproduct) > 1:
-        factor_const = self.find_common_factor(node_expand, (linear_i, 0))
-        factor_1 = self.find_common_factor(node_expand, (linear_i, 1))
-    elif linear_i:
-        factor_const = ()
-        factor_1 = ()
-    else:
-        return node
-    # node = factor_const * factor_1 * Sum(child_sum)
-    child_sum = []
-    for p in sumproduct:
-        p0_list = list(p[0])
-        p1_list = list(p[1])
-        # extract common factors
-        if factor_const or factor_1:
-            for x in factor_const:
-                p0_list.remove(x)
-            for x in factor_1:
-                p1_list.remove(x)
-        child_sum.append(reduce(
-            Product, p0_list + p1_list + [x for i in linear_i for x in p[i]], one))
-    p_const = reduce(Product, factor_const, one)
-    p_1 = reduce(Product, factor_1, one)
-    # new child node
-    child = reduce(Sum, child_sum, Zero())
-    if linear_i:
-        # try factorisation on each argument dimension
-        for i in linear_i:
-            new_child = self.factorise_i(child, (linear_i, i))
-            new_node = Product(Product(p_const, p_1), new_child)
-            new_flop = self.count_flop(new_node)
-            if new_flop < flop:
-                optimal_child = new_child
-                flop = new_flop
-    if optimal_child:
-        return Product(Product(p_const, p_1), optimal_child)
-    else:
-        return Product(Product(p_const, p_1), child)
-
-
-def _factorise_old(node, argument_indices):
-    m1 = MemoizerArg(_factorise)
-    m2 = MemoizerArg(_factorise_i)
-    m3 = MemoizerArg(_expand_all_product)
-    m4 = MemoizerArg(_flatten_sum)
-    m5 = MemoizerArg(_find_common_factor)
-    m6 = MemoizerArg(_collect_terms)
-    m7 = Memoizer(_count_flop)
-    m8 = Memoizer(_reassociate_product)
-    m1.factorise_i = m2
-    m2.factorise = m1
-    m1.expand_all_product = m3
-    m1.flatten_sum = m4
-    m2.flatten_sum = m4
-    m5.flatten_sum = m4
-    m1.find_common_factor = m5
-    m4.collect_terms = m6
-    m1.count_flop = m7
-    m1.reassociate_product = m8
-    # need to sort the free indices to ensure idempotent code generation
-    linear_i = tuple(sorted(argument_indices, key = lambda x: x.count))
-    return m1(node, linear_i)
-
-
-def factorise_list(expressions, argument_indices):
-    return [factorise(x, argument_indices) for x in expressions]
-
-
 def sumproduct_2_node(factor_lists):
     """
     generate gem node from list of factors
@@ -814,6 +642,7 @@ def sumproduct_2_node(factor_lists):
         sums.append(reduce(Product, fl, one))
     return reduce(Sum, sums, Zero())
 
+
 def factorise(factor_lists):
     """
     recursively pick the most common factor
@@ -821,7 +650,7 @@ def factorise(factor_lists):
     :param factors: list of list of factors, representing sum of products
     :return: optimised list of list of factors
     """
-    if len(factor_lists) == 1:
+    if len(factor_lists) <= 1:
         return factor_lists
     # count number of common factors
     counter = OrderedDict.fromkeys(factor_lists[0], 1)
@@ -853,46 +682,23 @@ def factorise(factor_lists):
     return factorise(new_list)  # recursion
 
 
-def cse_i(monos, j, k):
-    """
-    factorise :param `node` using factors with argument index j as common factor
-    :param node: root of expression
-    :param j: the argument indices chosen to be factorised
-    :param j: the other argument index
-    :return: factorised new node
-    """
-    # collect all factors with index j, dict {j: other terms in the product}
-    factors = OrderedDict()
-    new_list = []
-    for mono in monos:
-        f, = mono[j]  # this is a tuple
-        if f:
-            terms = mono[0] + mono[1] + mono[k]
-            if f in factors:
-                factors[f].append(terms)
-            else:
-                factors[f] = [terms]
+def get_array(tensor, subarray=None):
+    if isinstance(tensor.children[0], Identity):
+        dim = tensor.children[0].dim
+        if subarray:
+            return eval('numpy.identity({0})'.format(dim) + subarray)
         else:
-            new_list.append(list(mono[0] + mono[1] + mono[k] + mono[2]))
-    # add factorised term into new_list
-    for f, terms_list in factors.iteritems():
-        if len(terms_list) == 1:
-            # no common factors, no need to form product
-            new_list.append(list((f,) + terms_list[0]))
-        else:
-            # need to form product f*(product(terms[0]) + product(terms[1]))
-            sums = []
-            for terms in terms_list:
-                sums.append(reduce(Product, terms, one))
-            new_list.append([f, reduce(Sum, sums, Zero())])
-    return factorise(new_list)
-
+            return numpy.identity(dim)
+    if subarray:
+        return eval('tensor.children[0].array' + subarray)
+    else:
+        return tensor.children[0].array
 
 def contract(tensors, free_indices, indices):
     """
     :param tensors: (A, B, C, ...)
-    :param indices: (j, k, ...)
     :param free_indices: contract over (i, ...)
+    :param indices: (j, k, ...)
     :return:
     """
     index_map = {}
@@ -905,11 +711,11 @@ def contract(tensors, free_indices, indices):
     for t in tensors:
         if any(isinstance(i, int) for i in t.multiindex):
             subarray = [str(i) if isinstance(i, int) else ':' for i in t.multiindex]
-            subarray = '[' + ','.join(subarray) +']'  # e.g. [:,:,0]
+            subarray = '[' + ','.join(subarray) + ']'  # e.g. [:,:,0]
             # this bit is a bit ugly
-            arrays.append(eval('t.children[0].array' + subarray))
+            arrays.append(get_array(t, subarray))
         else:
-            arrays.append(t.children[0].array)
+            arrays.append(get_array(t))
         # ['ij', 'jk', ...]
         subscripts.append(''.join([index_map[i] for i in t.multiindex
                                    if not isinstance(i, int)]))
@@ -919,52 +725,37 @@ def contract(tensors, free_indices, indices):
     return numpy.einsum(subscripts, *arrays)
 
 
-@singledispatch
-def pre_evaluate_old(node, argument_indices):
-    raise AssertionError("cannot handle type %s" % type(node))
-
-@pre_evaluate_old.register(IndexSum)
-def pre_evaluate_old(node, argument_indices):
-    quadrature_indices = node.multiindex
-    new_node = expand_all_product(node, quadrature_indices + argument_indices)
-    sumproduct = flatten_sum(new_node.children[0], argument_indices)
-    sums = []
-    for mono in sumproduct:
-        tensors = list(mono[1])
-        rest = list(mono[0])
-        for arg_index in argument_indices:
-            term = mono[arg_index][0]
-            if [i for i in quadrature_indices if i in term.multiindex]:
-                # need to be pre-evaluated
-                tensors.append(term)
-            else:
-                # do not contain quadrature indices
-                rest.append(term)
-        array = contract(tensors, quadrature_indices, argument_indices)
-        literal = Literal(array)
-        rest.append(Indexed(literal, argument_indices))
-        sums.append(reduce(Product, rest, one))
-    # return reduce(Sum, sums, Zero)
-    return reduce(Sum, sums)
-
-
 def can_pre_evaluate(node, quad_ind, arg_ind):
+
+    if not quad_ind:
+        # point evaluation, not integral
+        return False
+
     if not isinstance(node, IndexSum):
         return False
-    # test if |Jacobian| depend on quadrature points (non-affine)
+
     quad_ind_set = set(quad_ind)
-    for J_dev in traversal([node]):
-        if isinstance(J_dev, MathFunction):
-            if J_dev.name == 'abs':
-                if quad_ind_set & set(J_dev.free_indices):
+    for n in traversal([node]):
+        if isinstance(n, Indexed):
+            if quad_ind_set & set(n.free_indices):
+                if not isinstance(n.children[0], Constant):
+                    return False
+                if any([isinstance(i, VariableIndex) for i in n.multiindex]):
+                    return False
+        if isinstance(n, IndexSum) and n != node:
+            # cannot handle unexpanded IndexSum, need to correct in the future
+            return False
+        if isinstance(n, MathFunction):
+            # test if |Jacobian| depend on quadrature points (non-affine)
+            if n.name == 'abs':
+                if quad_ind_set & set(n.free_indices):
                     return False
     return True
 
 
-def pre_evaluate(node, quad_ind, arg_ind):
-    arg_ind_flat = tuple([i for id in arg_ind for i in id])
+def pre_evaluate(node, quad_ind, arg_ind_flat):
     quad_ind_set = set(quad_ind)
-    extents = dict().fromkeys(quad_ind + arg_ind_flat)
+    # extents = dict().fromkeys(quad_ind + arg_ind_flat)
     expand_pe = expand_all_product(node.children[0], quad_ind + arg_ind_flat)
     monos_pe = flatten_sum(expand_pe, arg_ind_flat)
     # identify number of distinct pre-evaluate tensors
@@ -987,8 +778,11 @@ def pre_evaluate(node, quad_ind, arg_ind):
         else:
             # can put in a temporary tensor here
             # mono['pe_result'] = pe_results[tensors] = (Indexed(Variable('PE'+str(len(pe_results)), (J,K)), (j,k)),)
-            array = contract(tensors, quad_ind, arg_ind_flat)
-            pe_tensor = Indexed(Literal(array, 'PE'+str(len(pe_results))), arg_ind_flat)
+            # sometimes not all argument indices are present in the contraction
+            all_ind = set([fi for t1 in tensors for fi in t1.free_indices])
+            result_ind = tuple([i for i in arg_ind_flat if i in all_ind])
+            array = contract(tensors, quad_ind, result_ind)
+            pe_tensor = Indexed(Literal(array, 'PE'+str(len(pe_results))), result_ind)
             mono['pe_result'] = pe_results[tensors] = (pe_tensor, )  # this is a tuple
         # construct list of factor lists after pre-evaluation
     factor_lists = []
@@ -1000,8 +794,8 @@ def pre_evaluate(node, quad_ind, arg_ind):
     return (node_pe, theta_pe)
 
 
-def find_optimal_factors(monos, arg_ind):
-    arg_ind_flat = tuple([i for id in arg_ind for i in id])
+def find_optimal_factors(monos, arg_ind_flat):
+    # arg_ind_flat = tuple([i for id in arg_ind for i in id])
     gem_int = OrderedDict()  # Gem node -> int
     int_gem = OrderedDict()  # int -> Gem node
     counter = 0
@@ -1042,18 +836,23 @@ def find_optimal_factors(monos, arg_ind):
     return nodes_to_pull
 
 
-def optimise(node, quad_ind, arg_ind):
-    print(count_flop(node))
-    arg_ind_flat = tuple([i for id in arg_ind for i in id])
+def cse(node, quad_ind, arg_ind_flat):
+    """
+    common subexpression elimination
+    :param node:
+    :param quad_ind:
+    :param arg_ind:
+    :return:
+    """
     # do not expand quadrature terms all the way
-    if isinstance(node, IndexSum):
-        expand_cse = expand_all_product(node.children[0], arg_ind_flat)
-    else:
-        expand_cse = expand_all_product(node, arg_ind_flat)
+    expand_cse = expand_all_product(node, arg_ind_flat)
     monos_cse = flatten_sum(expand_cse, arg_ind_flat)
     # need a firt pass of monos to combine terms which have same nodes for all arg_ind
     # this should be in a loop if >2 arg_ind
-    optimal_factors = find_optimal_factors(monos_cse, arg_ind)
+    if len(arg_ind_flat) > 1:
+        optimal_factors = find_optimal_factors(monos_cse, arg_ind_flat)
+    else:
+        optimal_factors = list()
     # pull out the optimal factors and form factor_list
     factor_lists = list()
     factor_dict = OrderedDict().fromkeys(optimal_factors)
@@ -1074,25 +873,40 @@ def optimise(node, quad_ind, arg_ind):
             # just one product
             factor_lists.append([of] + factors[0])
         else:
-            factor_lists.append([of, sumproduct_2_node(factors)])
+            if len(arg_ind_flat) > 2:
+                # more argument indices to process
+                if len(set(of.free_indices) & set(arg_ind_flat)) != 1:
+                    raise AssertionError("this should not happen")
+                ind = (set(of.free_indices) & set(arg_ind_flat)).pop()
+                new_arg_ind_flat = tuple([i for i in arg_ind_flat if i != ind])
+                if len(arg_ind_flat) - len(new_arg_ind_flat) != 1:
+                    raise AssertionError("this should not happen")
+                factor_lists.append([of, cse(sumproduct_2_node(factors),
+                                             quad_ind, new_arg_ind_flat)])
+            else:
+                # remember to factorise factor list here
+                factor_lists.append([of, sumproduct_2_node(factorise(factors))])
+    return sumproduct_2_node(factorise(factor_lists))
 
-    factorised = sumproduct_2_node(factorise(factor_lists))
+
+def optimise(node, quad_ind, arg_ind):
+    # there are Zero() sometimes
+    if isinstance(node, Constant):
+        return node
+    arg_ind_flat = tuple([i for id in arg_ind for i in id])
+    # do not expand quadrature terms all the way
     if isinstance(node, IndexSum):
-        node_cse = IndexSum(factorised, quad_ind)
+        node_cse = IndexSum(cse(node.children[0], quad_ind, arg_ind_flat), node.multiindex)
     else:
-        node_cse = factorised
+        node_cse = cse(node, quad_ind, arg_ind_flat)
 
     theta_cse = count_flop(node_cse)
-    print(theta_cse)
-
-
     if can_pre_evaluate(node, quad_ind, arg_ind):
-        node_pe, theta_pe = pre_evaluate(node, quad_ind, arg_ind)
-        print(theta_pe)
+        node_pe, theta_pe = pre_evaluate(node, quad_ind, arg_ind_flat)
         if theta_cse > theta_pe:
             return node_pe
-
     return node_cse
+
     # now we need to really pre-evaluate the tensors
     # for tensors in pe_results:
     #     array = contract(tensors, (i,), (j, k))
@@ -1103,3 +917,10 @@ def optimise(node, quad_ind, arg_ind):
 
 def optimise_list(expressions, quadrature_indices, argument_indices):
     return [optimise(node, quadrature_indices, argument_indices) for node in expressions]
+
+
+def propogate_failure(expressions):
+    for n in traversal(expressions):
+        if isinstance(n, Failure):
+            return True
+    return False

@@ -137,6 +137,12 @@ class Zero(Constant):
         assert not self.shape
         return 0.0
 
+    def latex(self):
+        return r'\mathbf{{0}}'
+
+    def _repr_latex_(self):
+        return r'${0}$'.format(self.latex())
+
 
 class Identity(Constant):
     """Identity matrix"""
@@ -182,7 +188,7 @@ class Literal(Constant):
 
     def latex(self):
         shape = self.shape
-        if self.name:
+        if self.name and len(self.name) < 4:
             return r'{{{0}}}'.format(self.name)
         elif shape == ():
             return str(self.array)
@@ -380,6 +386,8 @@ class MathFunction(Scalar):
         if self.name == 'abs':
             # return r'\lvert {0} \rvert'.format(self.children[0].latex())
             return r'\lvert \mathbf{{J}} \rvert'  # assume it is Jacobian
+        elif self.name == 'sqrt':
+            return r'\sqrt{{\mathbf{{A}}}}'  # just put A for now
 
     def _repr_latex_(self):
         return r'${0}$'.format(self.latex())
@@ -543,6 +551,12 @@ class VariableIndex(IndexBase):
     def __hash__(self):
         return hash((VariableIndex, self.expression))
 
+    def latex(self):
+        return self.expression.latex()
+
+    def _repr_latex_(self):
+        return r'${0}$'.format(self.latex())
+
 
 class Indexed(Scalar):
     __slots__ = ('children', 'multiindex')
@@ -584,7 +598,8 @@ class Indexed(Scalar):
         if not self.multiindex:
             return self.children[0].latex()
         else:
-            index = ','.join([x.latex() if isinstance(x, Index) else str(x) for x in self.multiindex])
+            # isinstance(x, IndexBase) allows int somehow
+            index = ','.join([x.latex() if isinstance(x, (Index, VariableIndex)) else str(x) for x in self.multiindex])
             return r'{0}_{{{1}}}'.format(self.children[0].latex(), index)
 
     def _repr_latex_(self):

@@ -3,7 +3,7 @@ from __future__ import absolute_import, print_function, division
 import pytest
 
 from gem.gem import Index, Indexed, Product, Variable, Division, Literal, Sum, IndexSum
-from gem.optimise import replace_division, reassociate_product, factorise, count_flop
+from gem.optimise import replace_division, reassociate_product, optimise, count_flop
 
 
 def test_replace_div():
@@ -55,21 +55,21 @@ def test_reassociate_product():
     assert result.children[0].children[1] == Cij
 
 
-def test_factorise_1():
+def test_optimise():
     I = J = 10
     i = Index('i', I)
     j = Index('j', J)
     B = Variable('b', (J,))
     C = Variable('c', (I,))
     D = Variable('d', (I,))
-    E = Variable('e', (I,))
+    # E = Variable('e', (I,))
     Bj = Indexed(B, (j,))
     Ci = Indexed(C, (i,))
     Di = Indexed(D, (i,))
-    Ei = Indexed(E, (i,))
+    # Ei = Indexed(E, (i,))
     S = Sum(Product(Bj, Ci), Product(Bj, Di))
     expr = IndexSum(S, (i,))
-    result = factorise(expr, expr.free_indices)
+    result = optimise(expr, (i, ), ((j, ), ))
     assert count_flop(result) == 110
 
 

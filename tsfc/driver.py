@@ -305,7 +305,7 @@ def compile_expression_at_points(expression, points, coordinates, parameters=Non
     return_var = gem.Variable('A', return_shape)
     return_arg = ast.Decl(SCALAR_TYPE, ast.Symbol('A', rank=return_shape))
     return_expr = gem.Indexed(return_var, return_indices)
-    ir, = impero_utils.preprocess_gem([ir], ())
+    ir, = impero_utils.preprocess_gem([ir], (), ())
     impero_c = impero_utils.compile_gem([return_expr], [ir], return_indices)
     point_index, = point_set.indices
     body = generate_coffee(impero_c, {point_index: 'p'}, parameters["precision"])

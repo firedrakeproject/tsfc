@@ -36,10 +36,13 @@ class NoopError(Exception):
 
 def preprocess_gem(expressions, quadrature_indices, argument_indices):
     """Lower GEM nodes that cannot be translated to C directly."""
+    if optimise.propogate_failure(expressions):
+        return expressions
     expressions = optimise.replace_delta(expressions)
     expressions = optimise.remove_componenttensors(expressions)
     expressions = optimise.replace_division(expressions)
-    # expressions = optimise.optimise_list(expressions, quadrature_indices, argument_indices)
+    # sometimes quadrature_indices come in as list, sometimes as tuple
+    expressions = optimise.optimise_list(expressions, tuple(quadrature_indices), argument_indices)
     return expressions
 
 
