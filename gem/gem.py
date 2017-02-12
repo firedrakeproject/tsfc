@@ -191,9 +191,9 @@ class Literal(Constant):
         if self.name and len(self.name) < 4:
             return r'{{{0}}}'.format(self.name)
         elif shape == ():
-            return str(self.array)
+            return str(round(self.array, 4))
         elif shape == (1,):
-            return str(self.array[0])
+            return str(round(self.array[0], 4))
         elif len(shape) == 1:
             return r'V^{{{0}}}'.format(shape[0])
         elif len(shape) == 2:
@@ -234,7 +234,11 @@ class Variable(Terminal):
         self.shape = shape
 
     def latex(self):
-        return r'{{{0}}}'.format(self.name)
+        # only showing first 3 charactors
+        name = self.name
+        if name == 'coords':
+            name = r'\mathbf{{x}}'
+        return r'{{{0}}}'.format(name)
 
     def _repr_latex_(self):
         return r'${0}$'.format(self.latex())

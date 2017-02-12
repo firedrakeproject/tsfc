@@ -193,6 +193,8 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     temp = builder.construct_kernel(kernel_name, body)
     temp._ir = ir
     temp._return_variables = return_variables
+    temp._quadrature_indices = quadrature_indices
+    temp._argument_indices = argument_indices
     return temp
 
 

@@ -22,7 +22,6 @@ from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero, Power,
                      partial_indexed, one, Division, MathFunction, LogicalAnd,
                      LogicalNot, LogicalOr)
 
-
 @singledispatch
 def literal_rounding(node, self):
     """Perform FFC rounding of FIAT tabulation matrices on the literals of
@@ -599,7 +598,7 @@ def flatten_sum(node, argument_indices):
     result = []
     arg_ind_set = set(argument_indices)
     for mono in monos:
-        d = dict()
+        d = OrderedDict()
         for i in [0, 1, 2] + list(argument_indices):
             d[i] = list()
         for factor in collect_terms(mono, Product):
@@ -653,14 +652,19 @@ def factorise(factor_lists):
     if len(factor_lists) <= 1:
         return factor_lists
     # count number of common factors
-    counter = OrderedDict.fromkeys(factor_lists[0], 1)
-    for fl in factor_lists[1:]:
-        for factor in fl:
-            if factor in counter:
-                counter[factor] += 1
-            else:
-                counter[factor] = 1
+    counter = OrderedDict()
+    for fl in factor_lists:
+        fl_set = set(fl)
+        if len(fl_set) > 1:
+            # at least two terms in product
+            for factor in fl_set:
+                if factor in counter:
+                    counter[factor] += 1
+                else:
+                    counter[factor] = 1
     # most common factor
+    if not counter:
+        return factor_lists
     mcf_value = max(counter.values())
     if mcf_value == 1:
         # no common factors
@@ -673,7 +677,8 @@ def factorise(factor_lists):
     new_list = []
     rest = []  # new_list = mcf * [rest] + rest
     for fl in factor_lists:
-        if mcf in fl:
+        if mcf in fl and len(fl) > 1:
+            # at least two terms in the product
             fl.remove(mcf)
             rest.append(fl)
         else:
@@ -722,7 +727,7 @@ def contract(tensors, free_indices, indices):
     # this is used as the parameter for contraction with einsum
     subscripts = ','.join(subscripts) + ' -> ' +\
                  ''.join(''.join(index_map[i] for i in indices))
-    return numpy.einsum(subscripts, *arrays)
+    return numpy.einsum(subscripts, *arrays, dtype=numpy.float64)
 
 
 def can_pre_evaluate(node, quad_ind, arg_ind):
@@ -746,10 +751,10 @@ def can_pre_evaluate(node, quad_ind, arg_ind):
             # cannot handle unexpanded IndexSum, need to correct in the future
             return False
         if isinstance(n, MathFunction):
-            # test if |Jacobian| depend on quadrature points (non-affine)
-            if n.name == 'abs':
-                if quad_ind_set & set(n.free_indices):
-                    return False
+            # e.g. test if |Jacobian| depend on quadrature points (non-affine)
+            # if n.name == 'abs':
+            if quad_ind_set & set(n.free_indices):
+                return False
     return True
 
 
@@ -768,7 +773,7 @@ def pre_evaluate(node, quad_ind, arg_ind_flat):
                 tensors.append(t)
             else:
                 rest.append(t)
-        mono['pe_tensors'] = tensors = tuple(sorted(tensors))
+        mono['pe_tensors'] = tensors = tuple(tensors)
         mono['rest'] = tuple(rest)  # not pre-evaluated
         # there could be duplicated pre-evaluated tensors
         if not tensors:
@@ -859,7 +864,7 @@ def cse(node, quad_ind, arg_ind_flat):
     for of in factor_dict:
         factor_dict[of] = list()
     for mono in monos_cse:
-        all_factors = [f for fl in mono.values() for f in fl]
+        all_factors = [f for g in (0,1,2) + arg_ind_flat for f in mono[g]]
         for of in optimal_factors:
             if of in all_factors:
                 all_factors.remove(of)
@@ -874,6 +879,7 @@ def cse(node, quad_ind, arg_ind_flat):
             factor_lists.append([of] + factors[0])
         else:
             if len(arg_ind_flat) > 2:
+                "Here"
                 # more argument indices to process
                 if len(set(of.free_indices) & set(arg_ind_flat)) != 1:
                     raise AssertionError("this should not happen")

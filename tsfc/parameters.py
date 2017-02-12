@@ -20,7 +20,8 @@ PARAMETERS = {
     "unroll_indexsum": 3,
 
     # Precision of float printing (number of digits)
-    "precision": numpy.finfo(NUMPY_TYPE).precision,
+    "precision": 30,
+    # "precision": numpy.finfo(NUMPY_TYPE).precision,
 }
 
 
