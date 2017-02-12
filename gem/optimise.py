@@ -654,7 +654,7 @@ def factorise(factor_lists):
     # count number of common factors
     counter = OrderedDict()
     for fl in factor_lists:
-        fl_set = set(fl)
+        fl_set = OrderedDict.fromkeys(fl)
         if len(fl_set) > 1:
             # at least two terms in product
             for factor in fl_set:
@@ -731,7 +731,6 @@ def contract(tensors, free_indices, indices):
 
 
 def can_pre_evaluate(node, quad_ind, arg_ind):
-
     if not quad_ind:
         # point evaluation, not integral
         return False
@@ -800,7 +799,6 @@ def pre_evaluate(node, quad_ind, arg_ind_flat):
 
 
 def find_optimal_factors(monos, arg_ind_flat):
-    # arg_ind_flat = tuple([i for id in arg_ind for i in id])
     gem_int = OrderedDict()  # Gem node -> int
     int_gem = OrderedDict()  # int -> Gem node
     counter = 0
@@ -812,6 +810,8 @@ def find_optimal_factors(monos, arg_ind_flat):
                     gem_int[n] = counter
                     int_gem[counter] = n
                     counter += 1
+    if counter == 0:
+        return tuple()
     # add connections (list of tuples)
     edges_sets_list = []
     # num_edges = dict.fromkeys(int_gem.keys(), 0)
@@ -879,7 +879,6 @@ def cse(node, quad_ind, arg_ind_flat):
             factor_lists.append([of] + factors[0])
         else:
             if len(arg_ind_flat) > 2:
-                "Here"
                 # more argument indices to process
                 if len(set(of.free_indices) & set(arg_ind_flat)) != 1:
                     raise AssertionError("this should not happen")
@@ -922,6 +921,8 @@ def optimise(node, quad_ind, arg_ind):
 
 
 def optimise_list(expressions, quadrature_indices, argument_indices):
+    if propogate_failure(expressions):
+        return expressions
     return [optimise(node, quadrature_indices, argument_indices) for node in expressions]
 
 
