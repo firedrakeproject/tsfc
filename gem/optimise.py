@@ -727,7 +727,7 @@ def contract(tensors, free_indices, indices):
     # this is used as the parameter for contraction with einsum
     subscripts = ','.join(subscripts) + ' -> ' +\
                  ''.join(''.join(index_map[i] for i in indices))
-    return numpy.einsum(subscripts, *arrays, dtype=numpy.float64)
+    return numpy.einsum(subscripts, *arrays)
 
 
 def can_pre_evaluate(node, quad_ind, arg_ind):
@@ -749,6 +749,10 @@ def can_pre_evaluate(node, quad_ind, arg_ind):
         if isinstance(n, IndexSum) and n != node:
             # cannot handle unexpanded IndexSum, need to correct in the future
             return False
+        if isinstance(n, Power):
+            if quad_ind_set & set(n.free_indices):
+                # cannot do power yet, but arguably some power should be expanded
+                return False
         if isinstance(n, MathFunction):
             # e.g. test if |Jacobian| depend on quadrature points (non-affine)
             # if n.name == 'abs':
