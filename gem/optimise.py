@@ -22,6 +22,7 @@ from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero, Power,
                      partial_indexed, one, Division, MathFunction, LogicalAnd,
                      LogicalNot, LogicalOr)
 
+
 @singledispatch
 def literal_rounding(node, self):
     """Perform FFC rounding of FIAT tabulation matrices on the literals of
@@ -642,7 +643,7 @@ def sumproduct_2_node(factor_lists):
     return reduce(Sum, sums, Zero())
 
 
-def factorise(factor_lists):
+def factorise(factor_lists, arg_ind_flat):
     """
     recursively pick the most common factor
     maybe can Memoize this one
@@ -662,18 +663,26 @@ def factorise(factor_lists):
                     counter[factor] += 1
                 else:
                     counter[factor] = 1
-    # most common factor
+
     if not counter:
         return factor_lists
-    mcf_value = max(counter.values())
-    if mcf_value == 1:
+    # find which factor to factorise out first
+    mcf_value = [0, 1]  # (num arg indices, count)
+    mcf = None
+    arg_ind_set = set(arg_ind_flat)
+    for factor, count in counter.iteritems():
+        if count > 1:
+            num_arg_ind = len(set(factor.free_indices) & arg_ind_set)
+            if (num_arg_ind > mcf_value[0]) or (num_arg_ind == mcf_value[0] and count > mcf_value[1]):
+                # prioritize factors with more argument indices
+                mcf = factor
+                mcf_value[0] = num_arg_ind
+                mcf_value[1] = count
+
+    if not mcf:
         # no common factors
         return factor_lists
-    for k, v in counter.iteritems():
-        if v == mcf_value:
-            mcf = k
-            break
-    # probably need to choose between equally common factor with more sophisticated method
+
     new_list = []
     rest = []  # new_list = mcf * [rest] + rest
     for fl in factor_lists:
@@ -683,8 +692,8 @@ def factorise(factor_lists):
             rest.append(fl)
         else:
             new_list.append(fl)
-    new_list.append([mcf, sumproduct_2_node(factorise(rest))])  # recursion
-    return factorise(new_list)  # recursion
+    new_list.append([mcf, sumproduct_2_node(factorise(rest, arg_ind_flat))])  # recursion
+    return factorise(new_list, arg_ind_flat)  # recursion
 
 
 def get_array(tensor, subarray=None):
@@ -698,6 +707,7 @@ def get_array(tensor, subarray=None):
         return eval('tensor.children[0].array' + subarray)
     else:
         return tensor.children[0].array
+
 
 def contract(tensors, free_indices, indices):
     """
@@ -797,7 +807,7 @@ def pre_evaluate(node, quad_ind, arg_ind_flat):
     for mono in monos_pe:
         factor_lists.append(list(mono['rest'] + mono['pe_result']))
 
-    node_pe = sumproduct_2_node(factorise(factor_lists))
+    node_pe = sumproduct_2_node(factorise(factor_lists, arg_ind_flat))
     theta_pe = count_flop(node_pe)  # flop count for pre-evaluation method
     return (node_pe, theta_pe)
 
@@ -868,7 +878,7 @@ def cse(node, quad_ind, arg_ind_flat):
     for of in factor_dict:
         factor_dict[of] = list()
     for mono in monos_cse:
-        all_factors = [f for g in (0,1,2) + arg_ind_flat for f in mono[g]]
+        all_factors = [f for g in (0, 1, 2) + arg_ind_flat for f in mono[g]]
         for of in optimal_factors:
             if of in all_factors:
                 all_factors.remove(of)
@@ -894,8 +904,8 @@ def cse(node, quad_ind, arg_ind_flat):
                                              quad_ind, new_arg_ind_flat)])
             else:
                 # remember to factorise factor list here
-                factor_lists.append([of, sumproduct_2_node(factorise(factors))])
-    return sumproduct_2_node(factorise(factor_lists))
+                factor_lists.append([of, sumproduct_2_node(factorise(factors, arg_ind_flat))])
+    return sumproduct_2_node(factorise(factor_lists, arg_ind_flat))
 
 
 def gen_lex_sequence(items):
@@ -930,7 +940,7 @@ _reorder.register(Node)(reuse_if_untouched_arg)
 def _reorder_indexsum(node, self, indices):
     new_indices = tuple(indices)
     for i in node.multiindex:
-        if not i in indices:
+        if i not in indices:
             new_indices = (i,) + new_indices  # insert quadrature indice in front
     new_children = [self(child, new_indices) for child in node.children]
     return node.reconstruct(*new_children)
@@ -955,7 +965,7 @@ def _reorder_product_sum(node, self, indices):
         root = one
     else:
         raise AssertionError("wrong class")
-    return reduce(_class, [reduce(_class, fl, root) for fl in factor_lists], root)
+    return reduce(_class, [reduce(_class, _fl, root) for _fl in factor_lists], root)
 
 
 def reorder(node, indices):
