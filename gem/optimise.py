@@ -433,10 +433,19 @@ class SumOfProducts(object):
 
     def to_expression(self):
         result = []
+        shared = reduce(Counter.__and__,
+                        [Counter(dict(key))
+                         for key in self.ordering])
         for key, ordering in iteritems(self.ordering):
             coeff = self.products[key]
+            ordering = list(ordering)
+            for term, count in iteritems(shared):
+                for i in range(count):
+                    ordering.remove(term)
             result.append(reduce(Product, ordering, Literal(coeff)))
-        return reduce(Sum, result, Zero())
+        result = reduce(Sum, result, Zero())
+        result = reduce(Product, shared, result)
+        return result
 
     @staticmethod
     def from_expression(expression):
