@@ -898,6 +898,71 @@ def cse(node, quad_ind, arg_ind_flat):
     return sumproduct_2_node(factorise(factor_lists))
 
 
+def gen_lex_sequence(items):
+    """
+    generate lexicographical order of permutations.
+    e.g. (i,j,k) -> [(i,), (i,j), (i,j,k), (j), (j,k), (k)]
+    :param items:
+    :return:
+    """
+    if not items:
+        return list()
+    result = gen_lex_sequence(items[1:])
+    return [(items[0],)] + [(items[0],) + x for x in result] + result
+
+
+@singledispatch
+def _reorder(node, self, indices):
+    """
+    Reorder Sum and Product to promote hoisting
+    :param node:
+    :param self:
+    :param indices:
+    :return:
+    """
+    raise AssertionError("cannot handle type %s" % type(node))
+
+
+_reorder.register(Node)(reuse_if_untouched_arg)
+
+
+@_reorder.register(IndexSum)
+def _reorder_indexsum(node, self, indices):
+    new_indices = tuple(indices)
+    for i in node.multiindex:
+        if not i in indices:
+            new_indices = (i,) + new_indices  # insert quadrature indice in front
+    new_children = [self(child, new_indices) for child in node.children]
+    return node.reconstruct(*new_children)
+
+
+@_reorder.register(Product)
+@_reorder.register(Sum)
+def _reorder_product_sum(node, self, indices):
+    _class = type(node)
+    all_factors = list(collect_terms(node, _class))
+    factor_lists = list()
+    for curr_indices in [()] + gen_lex_sequence(indices):
+        fl = list()
+        for f in all_factors:
+            if set(f.free_indices) == set(curr_indices):
+                fl.append(self(f, indices))
+        if fl:
+            factor_lists.append(fl)
+    if isinstance(node, Sum):
+        root = Zero()
+    elif isinstance(node, Product):
+        root = one
+    else:
+        raise AssertionError("wrong class")
+    return reduce(_class, [reduce(_class, fl, root) for fl in factor_lists], root)
+
+
+def reorder(node, indices):
+    mapper = MemoizerArg(_reorder)
+    return mapper(node, indices)
+
+
 def optimise(node, quad_ind, arg_ind):
     # there are Zero() sometimes
     if isinstance(node, Constant):
@@ -913,8 +978,8 @@ def optimise(node, quad_ind, arg_ind):
     if can_pre_evaluate(node, quad_ind, arg_ind):
         node_pe, theta_pe = pre_evaluate(node, quad_ind, arg_ind_flat)
         if theta_cse > theta_pe:
-            return node_pe
-    return node_cse
+            return reorder(node_pe, arg_ind_flat)
+    return reorder(node_cse, arg_ind_flat)
 
     # now we need to really pre-evaluate the tensors
     # for tensors in pe_results:
