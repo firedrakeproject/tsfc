@@ -1,4 +1,5 @@
 from __future__ import absolute_import, print_function, division
+from six import iteritems
 from six.moves import range
 
 import collections
@@ -180,14 +181,43 @@ def compile_integral(integral_data, form_data, prefix, parameters,
             return COMPOUND
     classifier = partial(classify, set(flat_argument_indices))
 
+    linear_indices = sorted(flat_argument_indices, key=lambda index: index.extent, reverse=True)
+
     ir = opt.remove_componenttensors(ir)
     ir_ = []
     for expr in ir:
         hehe = []
-        for monomial in gem.optimise.collect_monomials(expr, classifier):
-            sum_indices, args, rest = monomial
-            hehe.append(fast_sum_factorise(sum_indices, args + (rest,)))
-        ir_.append(reduce(gem.Sum, hehe, gem.Zero()))
+        monomials = gem.optimise.collect_monomials(expr, classifier)
+        sum_indicez = set()
+        for sum_indices, args, rest in monomials:
+            sum_indicez.add(sum_indices)
+            hehe.append((args, rest))
+        sum_indices, = sum_indicez
+
+        def cons(worklist, remaining_indices):
+            if not remaining_indices:
+                return reduce(gem.Sum, [rest for _, rest in worklist])
+
+            forward_indices = list(remaining_indices)
+            index = forward_indices.pop(0)
+            sublists = collections.OrderedDict()
+            for args, rest in worklist:
+                for arg in args:
+                    if index in arg.free_indices:
+                        break
+                else:
+                    assert False
+                other_args = [a for a in args if a is not arg]
+                sublists.setdefault(arg, []).append((other_args, rest))
+
+            return reduce(gem.Sum,
+                          [gem.Product(arg, cons(sublist, forward_indices))
+                           for arg, sublist in iteritems(sublists)])
+
+        ir_.append(gem.IndexSum(cons(hehe, linear_indices), tuple(sum_indices)))
+        # for monomial in monomials:
+        #     hehe.append(fast_sum_factorise(sum_indices, args + (rest,)))
+        # ir_.append(reduce(gem.Sum, hehe, gem.Zero()))
     ir = ir_
 
     # Need optimised roots for COFFEE
@@ -198,7 +228,7 @@ def compile_integral(integral_data, form_data, prefix, parameters,
         builder.require_cell_orientations()
 
     impero_c = impero_utils.compile_gem(return_variables, ir,
-                                        tuple(quadrature_indices) + flat_argument_indices,
+                                        quadrature_indices + list(reversed(linear_indices)),
                                         remove_zeros=True)
 
     # Generate COFFEE

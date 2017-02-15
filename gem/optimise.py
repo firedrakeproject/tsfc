@@ -2,10 +2,10 @@
 expressions."""
 
 from __future__ import absolute_import, print_function, division
-from six import itervalues
+from six import iteritems, itervalues
 from six.moves import intern, map, zip
 
-from collections import OrderedDict, namedtuple
+from collections import Counter, OrderedDict, defaultdict, namedtuple
 from functools import reduce
 from itertools import chain, combinations, permutations, product
 
@@ -260,6 +260,36 @@ def _associate(factors):
     return product, flops
 
 
+def _associate_plus(factors):
+    """Apply associativity rules to construct an operation-minimal product tree.
+
+    For best performance give factors that have different set of free indices.
+    """
+    if len(factors) > 32:
+        # O(N^3) algorithm
+        raise NotImplementedError("Not expected such a complicated expression!")
+
+    def count(pair):
+        """Operation count to multiply a pair of GEM expressions"""
+        a, b = pair
+        extents = [i.extent for i in set().union(a.free_indices, b.free_indices)]
+        return numpy.prod(extents, dtype=int)
+
+    factors = list(factors)  # copy for in-place modifications
+    flops = 0
+    while len(factors) > 1:
+        # Greedy algorithm: choose a pair of factors that are the
+        # cheapest to multiply.
+        a, b = min(combinations(factors, 2), key=count)
+        flops += count((a, b))
+        # Remove chosen factors, append their product
+        factors.remove(a)
+        factors.remove(b)
+        factors.append(Sum(a, b))
+    product, = factors
+    return product
+
+
 def sum_factorise(sum_indices, factors):
     """Optimise a tensor product through sum factorisation.
 
@@ -396,6 +426,66 @@ def traverse_sum(expression, stop_at=None):
     return result
 
 
+class SumOfProducts(object):
+    def __init__(self):
+        self.products = defaultdict(float)
+        self.ordering = OrderedDict()
+
+    def to_expression(self):
+        result = []
+        for key, ordering in iteritems(self.ordering):
+            coeff = self.products[key]
+            result.append(reduce(Product, ordering, Literal(coeff)))
+        return reduce(Sum, result, Zero())
+
+    @staticmethod
+    def from_expression(expression):
+        assert isinstance(expression, Node)
+        result = SumOfProducts()
+        for summand in traverse_sum(expression):
+            coeff = 1.0
+            ordering = []
+            sum_indices, terms = traverse_product(summand)
+            assert not sum_indices
+            for term in terms:
+                if isinstance(term, (Zero, Literal)):
+                    coeff *= term.value
+                elif isinstance(term, Node):
+                    ordering.append(term)
+                else:
+                    assert False
+            key = frozenset(iteritems(Counter(ordering)))
+            result.products[key] += coeff
+            result.ordering.setdefault(key, ordering)
+        return result
+
+    @staticmethod
+    def sum(*args):
+        result = SumOfProducts()
+        for arg in args:
+            assert isinstance(arg, SumOfProducts)
+            for prod, coeff in iteritems(arg.products):
+                result.products[prod] += coeff
+            for key, value in iteritems(arg.ordering):
+                result.ordering.setdefault(key, value)
+        return result
+
+    @staticmethod
+    def product(*args):
+        result = SumOfProducts()
+        for keys in product(*[arg.ordering for arg in args]):
+            coeff = 1.0
+            ordering = []
+            for key, arg in zip(keys, args):
+                coeff *= arg.products[key]
+                ordering.extend(arg.ordering[key])
+
+            key = frozenset(iteritems(Counter(ordering)))
+            result.products[key] += coeff
+            result.ordering.setdefault(key, ordering)
+        return result
+
+
 # Refactorisation classes
 
 ATOMIC = intern('atomic')
@@ -430,7 +520,7 @@ class FactorisationError(Exception):
     pass
 
 
-def collect_monomials(expression, classifier):
+def _collect_monomials(expression, self):
     """Refactorises an expression into a sum-of-products form, using
     distributivity rules (i.e. a*(b + c) -> a*b + a*c).  Expansion
     proceeds until all "compound" expressions are broken up.
@@ -449,14 +539,14 @@ def collect_monomials(expression, classifier):
     # Phase 1: Collect and categorise product terms
     def stop_at(expr):
         # Break up compounds only
-        return classifier(expr) != COMPOUND
+        return self.classifier(expr) != COMPOUND
     common_indices, terms = traverse_product(expression, stop_at=stop_at)
 
     common_atomics = []
     common_others = []
     compounds = []
     for term in terms:
-        cls = classifier(term)
+        cls = self.classifier(term)
         if cls == ATOMIC:
             common_atomics.append(term)
         elif cls == COMPOUND:
@@ -465,6 +555,7 @@ def collect_monomials(expression, classifier):
             common_others.append(term)
         else:
             raise ValueError("Classifier returned illegal value.")
+    common_others = [sum_factorise((), common_others)]
 
     # Phase 2: Attempt to break up compound terms into summands
     sums = []
@@ -475,8 +566,7 @@ def collect_monomials(expression, classifier):
             # recursion and fail gracefully raising an exception.
             raise FactorisationError(expr)
         # Recurse into each summand, concatenate their results
-        sums.append(chain.from_iterable(collect_monomials(summand, classifier)
-                                        for summand in summands))
+        sums.append(chain.from_iterable(map(self, summands)))
 
     # Phase 3: Expansion
     #
@@ -529,9 +619,16 @@ def collect_monomials(expression, classifier):
     for monomials in itervalues(unfactored):
         sum_indices = monomials[0].sum_indices
         atomics = monomials[0].atomics
-        rest = reduce(Sum, [m.rest for m in monomials])
+        rest = SumOfProducts.sum(*[SumOfProducts.from_expression(m.rest)
+                                   for m in monomials]).to_expression()
         result.append(Monomial(sum_indices, atomics, rest))
     return result
+
+
+def collect_monomials(expression, classifier):
+    mapper = Memoizer(_collect_monomials)
+    mapper.classifier = classifier
+    return mapper(expression)
 
 
 @singledispatch
