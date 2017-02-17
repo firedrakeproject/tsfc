@@ -834,13 +834,19 @@ def find_optimal_factors(monos, arg_ind_flat):
         edges_sets_list.append(tuple(
             [gem_int[n] for j in arg_ind_flat for n in mono[j]]))
 
+    # product of extents of argument indices of nodes
+    extent = dict().fromkeys(int_gem.keys())
+    for key in extent:
+        arg_ind = set(int_gem[key].free_indices) & set(arg_ind_flat)
+        extent[key] = numpy.product([i.extent for i in arg_ind])
     # set up the ILP
     import pulp as ilp
     prob = ilp.LpProblem('factorise', ilp.LpMinimize)
     nodes = ilp.LpVariable.dicts('node', int_gem.keys(), 0, 1, ilp.LpBinary)
 
     # objective function
-    prob += ilp.lpSum(nodes[i] for i in int_gem)
+    big = 10000  # some arbitrary big number
+    prob += ilp.lpSum(nodes[i]*(big - extent[i]) for i in int_gem)
 
     # constraints (need to account for >2 argument indices)
     for edges_set in edges_sets_list:
