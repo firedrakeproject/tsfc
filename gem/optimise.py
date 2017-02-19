@@ -676,7 +676,7 @@ def factorise(factor_lists, quad_ind, arg_ind_flat):
     mcf_value = [0, 1]  # (num arg indices, count)
     mcf = None
     arg_ind_set = set(arg_ind_flat)
-    for factor, count in counter.iteritems():
+    for factor, count in counter.items():
         if count > 1:
             num_arg_ind = len(set(factor.free_indices) & arg_ind_set)
             if (num_arg_ind > mcf_value[0]) or (num_arg_ind == mcf_value[0] and count > mcf_value[1]):
@@ -880,7 +880,7 @@ def find_optimal_factors(monos, arg_ind_flat):
     if prob.status != 1:
         raise AssertionError("Something bad happened during ILP")
 
-    nodes_to_pull = tuple([n for n, node_number in gem_int.iteritems()
+    nodes_to_pull = tuple([n for n, node_number in gem_int.items()
                            if nodes[node_number].value() == 1])
     return nodes_to_pull
 
@@ -916,7 +916,7 @@ def cse(node, quad_ind, arg_ind_flat):
                 break
         else:
             factor_lists.append(all_factors)
-    for of, factors in factor_dict.iteritems():
+    for of, factors in factor_dict.items():
         # factors = list of lists representing sum of products
         if len(factors) == 1:
             # just one product

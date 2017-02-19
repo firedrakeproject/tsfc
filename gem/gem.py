@@ -172,7 +172,8 @@ class Literal(Constant):
     """Tensor-valued constant"""
 
     __slots__ = ('name', 'array')
-    __front__ = ('name', 'array')
+    __front__ = ('array',)
+    __back__ = ('name',)
 
     def __new__(cls, array, name=None):
         array = asarray(array)
