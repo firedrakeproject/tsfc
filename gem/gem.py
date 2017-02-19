@@ -572,14 +572,14 @@ class VariableIndex(IndexBase):
 
     def __reduce__(self):
         return VariableIndex, (self.expression,)
-      
+
     def latex(self):
         return self.expression.latex()
 
     def _repr_latex_(self):
         return r'${0}$'.format(self.latex())
 
-      
+
 class Indexed(Scalar):
     __slots__ = ('children', 'multiindex')
     __back__ = ('multiindex',)
