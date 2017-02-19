@@ -176,6 +176,27 @@ class Memoizer(object):
             return result
 
 
+class Memoizer_cf(object):
+    """Memoizer for count_flop() function. Returns 0 if the node has already been counted once
+
+    :arg function: a function with parameters (value, rec), where
+                   ``rec`` is expected to be a function used for
+                   recursive calls.
+    :returns: a function with working recursion and caching
+    """
+    def __init__(self, function):
+        self.cache = {}
+        self.function = function
+
+    def __call__(self, node):
+        if node in self.cache:
+            return 0
+        else:
+            result = self.function(node, self)
+            self.cache[node] = result
+            return result
+
+
 class MemoizerArg(object):
     """Caching wrapper for functions with overridable recursive calls
     and an argument.  The lifetime of the cache is the lifetime of the

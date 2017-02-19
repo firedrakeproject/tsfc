@@ -13,7 +13,7 @@ import numpy
 from singledispatch import singledispatch
 
 from gem.node import (Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg,
-                      traversal)
+                      traversal, Memoizer_cf)
 
 from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero, Power,
                      Product, Sum, Comparison, Conditional, Index, Constant,
@@ -525,7 +525,7 @@ def _count_flop_const(node, self):
 
 
 def count_flop(node):
-    mapper = Memoizer(_count_flop)
+    mapper = Memoizer_cf(_count_flop)
     return mapper(node)
 
 
@@ -634,16 +634,22 @@ def flatten_sum(node, argument_indices):
 def sumproduct_2_node(factor_lists):
     """
     generate gem node from list of factors
+    use recursion so that each term is not too long
+    i.e. (a+b) + (c+d) instead of (((a+b)+c)+d
     :param factor_lists: list of factors representing sums of products
     :return: gem node
     """
-    sums = []
-    for fl in factor_lists:
-        sums.append(reduce(Product, fl, one))
-    return reduce(Sum, sums, Zero())
+    if len(factor_lists) < 3:
+        sums = []
+        for fl in factor_lists:
+            sums.append(reduce(Product, fl, one))
+        return reduce(Sum, sums, Zero())
+    else:
+        mid = int(len(factor_lists) / 2)
+        return Sum(sumproduct_2_node(factor_lists[:mid]), sumproduct_2_node(factor_lists[mid:]))
 
 
-def factorise(factor_lists, arg_ind_flat):
+def factorise(factor_lists, quad_ind, arg_ind_flat):
     """
     recursively pick the most common factor
     maybe can Memoize this one
@@ -685,15 +691,32 @@ def factorise(factor_lists, arg_ind_flat):
 
     new_list = []
     rest = []  # new_list = mcf * [rest] + rest
+    # keep original factor list
+    # this might not be economical as most of the times factorise should help,
+    # and the copying slows down the optimisation quite a bit
+    # before_rest = []
     for fl in factor_lists:
         if mcf in fl and len(fl) > 1:
             # at least two terms in the product
+            # before_rest.append(fl)
+            # new_fl = list(fl)
+            # new_fl.remove(mcf)
+            # rest.append(new_fl)
             fl.remove(mcf)
             rest.append(fl)
         else:
             new_list.append(fl)
-    new_list.append([mcf, sumproduct_2_node(factorise(rest, arg_ind_flat))])  # recursion
-    return factorise(new_list, arg_ind_flat)  # recursion
+
+    # before_node = reorder(sumproduct_2_node(before_rest), (quad_ind + arg_ind_flat))
+    # before_flop = count_flop(before_node)
+    # after_node = reorder(sumproduct_2_node(factorise(rest, quad_ind, arg_ind_flat)), (quad_ind + arg_ind_flat))
+    # after_flop = count_flop(Product(mcf, after_node))
+    # if after_flop > before_flop:
+    #     # only factorise if reduces flops
+    #     return factor_lists
+    # new_list.append([mcf, after_node])
+    new_list.append([mcf, sumproduct_2_node(factorise(rest, quad_ind, arg_ind_flat))])
+    return factorise(new_list, quad_ind, arg_ind_flat)  # recursion
 
 
 def get_array(tensor, subarray=None):
@@ -807,7 +830,8 @@ def pre_evaluate(node, quad_ind, arg_ind_flat):
     for mono in monos_pe:
         factor_lists.append(list(mono['rest'] + mono['pe_result']))
 
-    node_pe = sumproduct_2_node(factorise(factor_lists, arg_ind_flat))
+    node_pe = sumproduct_2_node(factorise(factor_lists, quad_ind, arg_ind_flat))
+    node_pe = reorder(node_pe, arg_ind_flat)
     theta_pe = count_flop(node_pe)  # flop count for pre-evaluation method
     return (node_pe, theta_pe)
 
@@ -845,7 +869,7 @@ def find_optimal_factors(monos, arg_ind_flat):
     nodes = ilp.LpVariable.dicts('node', int_gem.keys(), 0, 1, ilp.LpBinary)
 
     # objective function
-    big = 10000  # some arbitrary big number
+    big = 1000000  # some arbitrary big number
     prob += ilp.lpSum(nodes[i]*(big - extent[i]) for i in int_gem)
 
     # constraints (need to account for >2 argument indices)
@@ -910,8 +934,8 @@ def cse(node, quad_ind, arg_ind_flat):
                                              quad_ind, new_arg_ind_flat)])
             else:
                 # remember to factorise factor list here
-                factor_lists.append([of, sumproduct_2_node(factorise(factors, arg_ind_flat))])
-    return sumproduct_2_node(factorise(factor_lists, arg_ind_flat))
+                factor_lists.append([of, sumproduct_2_node(factorise(factors, quad_ind, arg_ind_flat))])
+    return sumproduct_2_node(factorise(factor_lists, quad_ind, arg_ind_flat))
 
 
 def gen_lex_sequence(items):
@@ -974,7 +998,9 @@ def _reorder_product_sum(node, self, indices):
     return reduce(_class, [reduce(_class, _fl, root) for _fl in factor_lists], root)
 
 
-def reorder(node, indices):
+def reorder(node, indices=None):
+    if not indices:
+        indices = node.free_indices
     mapper = MemoizerArg(_reorder)
     return mapper(node, indices)
 
@@ -989,13 +1015,13 @@ def optimise(node, quad_ind, arg_ind):
         node_cse = IndexSum(cse(node.children[0], quad_ind, arg_ind_flat), node.multiindex)
     else:
         node_cse = cse(node, quad_ind, arg_ind_flat)
-
+    node_cse = reorder(node_cse, arg_ind_flat)
     theta_cse = count_flop(node_cse)
     if can_pre_evaluate(node, quad_ind, arg_ind):
         node_pe, theta_pe = pre_evaluate(node, quad_ind, arg_ind_flat)
         if theta_cse > theta_pe:
-            return reorder(node_pe, arg_ind_flat)
-    return reorder(node_cse, arg_ind_flat)
+            return node_pe
+    return node_cse
 
     # now we need to really pre-evaluate the tensors
     # for tensors in pe_results:
