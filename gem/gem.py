@@ -34,7 +34,8 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
            'IndexSum', 'ListTensor', 'Delta', 'index_sum',
-           'partial_indexed', 'reshape', 'view']
+           'partial_indexed', 'reshape', 'view', 'Scalar', 'Terminal',
+           'FlexiblyIndexed']
 
 
 class NodeMeta(type):
@@ -149,10 +150,11 @@ class Identity(Constant):
 class Literal(Constant):
     """Tensor-valued constant"""
 
-    __slots__ = ('array',)
+    __slots__ = ('array', 'name')
     __front__ = ('array',)
+    __back__ = ('name',)
 
-    def __new__(cls, array):
+    def __new__(cls, array, name=None):
         array = asarray(array)
         if (array == 0).all():
             # All zeros, make symbolic zero
@@ -160,7 +162,8 @@ class Literal(Constant):
         else:
             return super(Literal, cls).__new__(cls)
 
-    def __init__(self, array):
+    def __init__(self, array, name=None):
+        self.name = name
         self.array = asarray(array, dtype=float)
 
     def is_equal(self, other):
@@ -212,6 +215,18 @@ class Sum(Scalar):
         self = super(Sum, cls).__new__(cls)
         self.children = a, b
         return self
+
+    def is_equal(self, other):
+        a, b = self.children
+        c, d = other.children
+        return (a == c and b == d) or (a == d and b == c)
+
+    def get_hash(self):
+        a, b = self.children
+        if hash(a) < hash(b):
+            return hash((Sum, a, b))
+        else:
+            return hash((Sum, b, a))
 
 
 class Product(Scalar):
