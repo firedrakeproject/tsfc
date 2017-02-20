@@ -244,7 +244,6 @@ class Product(Scalar):
         if b == one:
             return a
 
-        # disable for now -- TJ
         if isinstance(a, Constant) and isinstance(b, Constant):
             return Literal(a.value * b.value)
 
