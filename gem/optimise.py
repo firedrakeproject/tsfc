@@ -1031,7 +1031,7 @@ def optimise(node, quad_ind, arg_ind):
     # return pe_results
 
 
-def optimise_list(expressions, quadrature_indices, argument_indices):
+def optimise_expressions(expressions, quadrature_indices, argument_indices):
     if propogate_failure(expressions):
         return expressions
     return [optimise(node, quadrature_indices, argument_indices) for node in expressions]

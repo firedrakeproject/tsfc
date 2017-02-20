@@ -21,6 +21,7 @@ PARAMETERS = {
 
     # Precision of float printing (number of digits)
     "precision": numpy.finfo(NUMPY_TYPE).precision,
+    "optimisation": "O2"
 }
 
 
