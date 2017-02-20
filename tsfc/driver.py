@@ -190,12 +190,7 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     body = generate_coffee(impero_c, index_names, parameters["precision"], ir, flat_argument_indices)
 
     kernel_name = "%s_%s_integral_%s" % (prefix, integral_type, integral_data.subdomain_id)
-    temp = builder.construct_kernel(kernel_name, body)
-    temp._ir = ir
-    temp._return_variables = return_variables
-    temp._quadrature_indices = quadrature_indices
-    temp._argument_indices = argument_indices
-    return temp
+    return builder.construct_kernel(kernel_name, body)
 
 
 class CellVolumeKernelInterface(ProxyKernelInterface):
