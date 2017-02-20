@@ -38,15 +38,16 @@ def preprocess_gem(expressions):
     """Lower GEM nodes that cannot be translated to C directly."""
     expressions = optimise.replace_delta(expressions)
     expressions = optimise.remove_componenttensors(expressions)
-    expressions = optimise.replace_division(expressions)
     return expressions
 
 
 def optimise_gem(expressions, quadrature_indices, argument_indices):
     """Optimisation pass for gem expressions. Optimisation include:
+    - replace division with multiplication
     - loop invariant code motion
     - pre-evaluation
     """
+    expressions = optimise.replace_division(expressions)
     expressions = optimise.optimise_expressions(
         expressions, tuple(quadrature_indices), argument_indices)
     return expressions
