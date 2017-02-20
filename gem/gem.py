@@ -73,9 +73,6 @@ class Node(with_metaclass(NodeMeta, NodeBase)):
             self.children = other.children
         return result
 
-    # def _repr_latex_(self):
-    #     return r'${0}$'.format(self.latex())
-
 
 class Terminal(Node):
     """Abstract class for terminal GEM nodes."""
@@ -105,13 +102,6 @@ class Failure(Terminal):
         self.shape = shape
         self.exception = exception
 
-    def latex(self):
-        shape = self.shape
-        return r'{0}^{{{1}}}'.format('F', r'\times '.join(map(str, shape)))
-
-    def _repr_latex_(self):
-        return r'${0}$'.format(self.latex())
-
 
 class Constant(Terminal):
     """Abstract base class for constant types.
@@ -137,12 +127,6 @@ class Zero(Constant):
         assert not self.shape
         return 0.0
 
-    def latex(self):
-        return r'\mathbf{{0}}'
-
-    def _repr_latex_(self):
-        return r'${0}$'.format(self.latex())
-
 
 class Identity(Constant):
     """Identity matrix"""
@@ -161,17 +145,11 @@ class Identity(Constant):
     def array(self):
         return numpy.eye(self.dim)
 
-    def latex(self):
-        return r'\mathbf{I}'
-
-    def _repr_latex_(self):
-        return r'${0}$'.format(self.latex())
-
 
 class Literal(Constant):
     """Tensor-valued constant"""
 
-    __slots__ = ('name', 'array')
+    __slots__ = ('array', 'name')
     __front__ = ('array',)
     __back__ = ('name',)
 
@@ -186,24 +164,6 @@ class Literal(Constant):
     def __init__(self, array, name=None):
         self.name = name
         self.array = asarray(array, dtype=float)
-
-    def latex(self):
-        shape = self.shape
-        if self.name and len(self.name) < 4:
-            return r'{{{0}}}'.format(self.name)
-        elif shape == ():
-            return str(round(self.array, 4))
-        elif shape == (1,):
-            return str(round(self.array[0], 4))
-        elif len(shape) == 1:
-            return r'V^{{{0}}}'.format(shape[0])
-        elif len(shape) == 2:
-            return r'M^{{{0}}}'.format(r'\times '.join(map(str, shape)))
-        else:
-            return r'T^{{{0}}}'.format(r'\times '.join(map(str, shape)))
-
-    def _repr_latex_(self):
-        return r'${0}$'.format(self.latex())
 
     def is_equal(self, other):
         if type(self) != type(other):
@@ -234,16 +194,6 @@ class Variable(Terminal):
         self.name = name
         self.shape = shape
 
-    def latex(self):
-        # only showing first 3 charactors
-        name = self.name
-        if name == 'coords':
-            name = r'\mathbf{{x}}'
-        return r'{{{0}}}'.format(name)
-
-    def _repr_latex_(self):
-        return r'${0}$'.format(self.latex())
-
 
 class Sum(Scalar):
     __slots__ = ('children',)
@@ -264,13 +214,6 @@ class Sum(Scalar):
         self = super(Sum, cls).__new__(cls)
         self.children = a, b
         return self
-
-    def latex(self):
-        a, b = self.children
-        return r'({0} + {1})'.format(a.latex(), b.latex())
-
-    def _repr_latex_(self):
-        return r'${0}$'.format(self.latex())
 
     def is_equal(self, other):
         a, b = self.children
@@ -309,14 +252,6 @@ class Product(Scalar):
         self.children = a, b
         return self
 
-    def latex(self):
-        a, b = self.children
-        return r'{0} \times {1}'.format(a.latex(), b.latex())
-
-    def _repr_latex_(self):
-        a, b = self.children
-        return r'${0}$'.format(self.latex())
-
 
 class Division(Scalar):
     __slots__ = ('children',)
@@ -341,13 +276,6 @@ class Division(Scalar):
         self.children = a, b
         return self
 
-    def latex(self):
-        a, b = self.children
-        return r'\displaystyle\frac{{{0}}}{{{1}}}'.format(a.latex(), b.latex())
-
-    def _repr_latex_(self):
-        return r'${0}$'.format(self.latex())
-
 
 class Power(Scalar):
     __slots__ = ('children',)
@@ -368,13 +296,6 @@ class Power(Scalar):
         self.children = base, exponent
         return self
 
-    def latex(self):
-        base, exponent = self.children
-        return r'{{{0}}}^{{{1}}}'.format(base.latex(), exponent.latex())
-
-    def _repr_latex_(self):
-        return r'${0}$'.format(self.latex())
-
 
 class MathFunction(Scalar):
     __slots__ = ('name', 'children')
@@ -386,16 +307,6 @@ class MathFunction(Scalar):
 
         self.name = name
         self.children = argument,
-
-    def latex(self):
-        if self.name == 'abs':
-            # return r'\lvert {0} \rvert'.format(self.children[0].latex())
-            return r'\lvert \mathbf{{J}} \rvert'  # assume it is Jacobian
-        elif self.name == 'sqrt':
-            return r'\sqrt{{\mathbf{{A}}}}'  # just put A for now
-
-    def _repr_latex_(self):
-        return r'${0}$'.format(self.latex())
 
 
 class MinValue(Scalar):
@@ -519,15 +430,6 @@ class Index(IndexBase):
             return "Index(%r)" % self.count
         return "Index(%r)" % self.name
 
-    def latex(self):
-        if self.name:
-            return str(self.name)
-        else:
-            return r'i_{{{0}}}'.format(self.count)
-
-    def _repr_latex_(self):
-        return r'${0}$'.format(self.latex())
-
     def __lt__(self, other):
         # Allow sorting of free indices in Python 3
         return id(self) < id(other)
@@ -573,12 +475,6 @@ class VariableIndex(IndexBase):
     def __reduce__(self):
         return VariableIndex, (self.expression,)
 
-    def latex(self):
-        return self.expression.latex()
-
-    def _repr_latex_(self):
-        return r'${0}$'.format(self.latex())
-
 
 class Indexed(Scalar):
     __slots__ = ('children', 'multiindex')
@@ -615,17 +511,6 @@ class Indexed(Scalar):
         self.free_indices = unique(aggregate.free_indices + new_indices)
 
         return self
-
-    def latex(self):
-        if not self.multiindex:
-            return self.children[0].latex()
-        else:
-            # isinstance(x, IndexBase) allows int somehow
-            index = ','.join([x.latex() if isinstance(x, (Index, VariableIndex)) else str(x) for x in self.multiindex])
-            return r'{0}_{{{1}}}'.format(self.children[0].latex(), index)
-
-    def _repr_latex_(self):
-        return r'${0}$'.format(self.latex())
 
 
 class FlexiblyIndexed(Scalar):
@@ -679,29 +564,6 @@ class FlexiblyIndexed(Scalar):
         self.children = (variable,)
         self.dim2idxs = tuple(dim2idxs_)
         self.free_indices = unique(free_indices)
-
-    def latex(self):
-        indices = []
-        for (offset, dixs) in self.dim2idxs:
-            if offset == 0:
-                expr = ''
-            else:
-                expr = u'{0}'.format(offset)
-            for dix in dixs:
-                if dix[1] == 1:
-                    step = ''
-                else:
-                    step = dix[1]
-                if expr == '':
-                    expr += u'{0}{1}'.format(step, dix[0].latex())
-                else:
-                    expr += u'+{0}{1}'.format(step, dix[0].latex())
-            indices.append(expr)
-        index = ','.join(indices)
-        return r'{0}_{{{1}}}'.format(self.children[0].latex(), index)
-
-    def _repr_latex_(self):
-        return r'${0}$'.format(self.latex())
 
 
 class ComponentTensor(Node):
@@ -768,13 +630,6 @@ class IndexSum(Scalar):
         self.free_indices = unique(set(summand.free_indices) - set(multiindex))
 
         return self
-
-    def latex(self):
-        index = ','.join([x.latex() for x in self.multiindex])
-        return r'\sum\limits_{{{0}}}\left \{{{1} \right \}}'.format(index, self.children[0].latex())
-
-    def _repr_latex_(self):
-        return r'${0}$'.format(self.latex())
 
 
 class ListTensor(Node):
