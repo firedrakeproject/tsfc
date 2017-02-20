@@ -13,11 +13,11 @@ import numpy
 from singledispatch import singledispatch
 
 from gem.node import (Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg,
-                      traversal, Memoizer_cf)
+                      traversal)
 
 from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero, Power,
                      Product, Sum, Comparison, Conditional, Index, Constant,
-                     VariableIndex, Indexed, FlexiblyIndexed,
+                     VariableIndex, Indexed, FlexiblyIndexed, Variable,
                      IndexSum, ComponentTensor, ListTensor, Delta,
                      partial_indexed, one, Division, MathFunction, LogicalAnd,
                      LogicalNot, LogicalOr)
@@ -482,51 +482,44 @@ def aggressive_unroll(expression):
     return expression
 
 
-# ---------------------------------------
-# Count flop of expression, "as it is", no reordering etc
 @singledispatch
-def _count_flop(node, self):
+def count_flop_node(node):
+    """Count number of flops at a particular gem node, without recursing
+    into childrens"""
     raise AssertionError("cannot handle type %s" % type(node))
 
 
-@_count_flop.register(IndexSum)
-def _count_flop_single(node, self):
-    return self(node.children[0])
-
-
-@_count_flop.register(MathFunction)
-@_count_flop.register(LogicalNot)
-@_count_flop.register(LogicalAnd)
-@_count_flop.register(LogicalOr)
-def _count_flop_func(node, self):
-    return self(node.children[0]) + 1
-
-
-@_count_flop.register(Conditional)  # this is not quite right
-@_count_flop.register(Power)
-@_count_flop.register(Comparison)
-@_count_flop.register(Sum)
-@_count_flop.register(Product)
-@_count_flop.register(Division)
-def _count_flop_common(node, self):
-    flop = numpy.product([i.extent for i in node.free_indices])
-    # Hoisting the factors
-    for child in node.children:
-        flop += self(child)
-    return flop
-
-
-@_count_flop.register(Constant)
-@_count_flop.register(Terminal)
-@_count_flop.register(Indexed)
-@_count_flop.register(FlexiblyIndexed)
-def _count_flop_const(node, self):
+@count_flop_node.register(Constant)
+@count_flop_node.register(Terminal)
+@count_flop_node.register(Indexed)
+@count_flop_node.register(Variable)
+@count_flop_node.register(ListTensor)
+@count_flop_node.register(FlexiblyIndexed)
+@count_flop_node.register(IndexSum)
+def count_flop_node_zero(node):
     return 0
 
 
+@count_flop_node.register(Power)
+@count_flop_node.register(Comparison)
+@count_flop_node.register(Sum)
+@count_flop_node.register(Product)
+@count_flop_node.register(Division)
+@count_flop_node.register(MathFunction)
+@count_flop_node.register(LogicalNot)
+@count_flop_node.register(LogicalAnd)
+@count_flop_node.register(LogicalOr)
+@count_flop_node.register(Conditional)
+def count_flop_node_single(node):
+    return numpy.prod([idx.extent for idx in node.free_indices])
+
+
 def count_flop(node):
-    mapper = Memoizer_cf(_count_flop)
-    return mapper(node)
+    """Count total number of flops of a gem expression, assuming hoisting and
+    reuse"""
+    flops = sum(map(count_flop_node, traversal([node])))
+
+    return flops
 
 
 @singledispatch
