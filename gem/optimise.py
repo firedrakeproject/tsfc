@@ -12,12 +12,15 @@ from itertools import permutations
 import numpy
 from singledispatch import singledispatch
 
-from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
-from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
-                     Product, Sum, Comparison, Conditional, Index,
+from gem.node import (Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg,
+                      traversal, Memoizer_cf)
+
+from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero, Power,
+                     Product, Sum, Comparison, Conditional, Index, Constant,
                      VariableIndex, Indexed, FlexiblyIndexed,
                      IndexSum, ComponentTensor, ListTensor, Delta,
-                     partial_indexed, one)
+                     partial_indexed, one, Division, MathFunction, LogicalAnd,
+                     LogicalNot, LogicalOr)
 
 
 @singledispatch
@@ -55,6 +58,70 @@ def ffc_rounding(expression, epsilon):
     mapper = Memoizer(literal_rounding)
     mapper.epsilon = epsilon
     return mapper(expression)
+
+
+@singledispatch
+def _replace_div(node, self):
+    """Replace division with multiplication
+
+    :param node: root of expression
+    :param self: function for recursive calls
+    """
+    raise AssertionError("cannot handle type %s" % type(node))
+
+
+_replace_div.register(Node)(reuse_if_untouched)
+
+
+@_replace_div.register(Division)
+def _replace_div_division(node, self):
+    a, b = node.children
+    if isinstance(b, Literal):
+        return Product(self(a), Literal(1.0/b.array))
+    else:
+        return Product(self(a), Division(Literal(1.0), self(b)))
+
+
+def replace_division(expressions):
+    """Replace divisions with multiplications in expressions"""
+    mapper = Memoizer(_replace_div)
+    return list(map(mapper, expressions))
+
+
+@singledispatch
+def _reassociate_product(node, self):
+    """Rearrange sequence of chain of products in increasing order of node rank.
+     For example, the product ::
+
+        a*b[i]*c[i][j]*d
+
+    are reordered as ::
+
+        a*d*b[i]*c[i][j]
+
+    :param node: root of expression
+    :return: reassociated product node
+    """
+    raise AssertionError("cannot handle type %s" % type(node))
+
+
+_reassociate_product.register(Node)(reuse_if_untouched)
+
+
+@_reassociate_product.register(Product)
+def _reassociate_product_prod(node, self):
+    # collect all factors of product, sort by rank
+    # should use more sophisticated method later on for optimal result
+    comp_func = lambda x: len(x.free_indices)
+    factors = sorted(collect_terms(node, Product), key=comp_func)
+    # need to optimise away iterator <==> list
+    new_factors = list(map(self, factors))  # recursion
+    return reduce(Product, new_factors)
+
+
+def reassociate_product(expressions):
+    mapper = Memoizer(_reassociate_product)
+    return list(map(mapper, expressions))
 
 
 @singledispatch
@@ -413,3 +480,565 @@ def aggressive_unroll(expression):
     expression, = unroll_indexsum((expression,), max_extent=numpy.inf)
     expression, = remove_componenttensors((expression,))
     return expression
+
+
+# ---------------------------------------
+# Count flop of expression, "as it is", no reordering etc
+@singledispatch
+def _count_flop(node, self):
+    raise AssertionError("cannot handle type %s" % type(node))
+
+
+@_count_flop.register(IndexSum)
+def _count_flop_single(node, self):
+    return self(node.children[0])
+
+
+@_count_flop.register(MathFunction)
+@_count_flop.register(LogicalNot)
+@_count_flop.register(LogicalAnd)
+@_count_flop.register(LogicalOr)
+def _count_flop_func(node, self):
+    return self(node.children[0]) + 1
+
+
+@_count_flop.register(Conditional)  # this is not quite right
+@_count_flop.register(Power)
+@_count_flop.register(Comparison)
+@_count_flop.register(Sum)
+@_count_flop.register(Product)
+@_count_flop.register(Division)
+def _count_flop_common(node, self):
+    flop = numpy.product([i.extent for i in node.free_indices])
+    # Hoisting the factors
+    for child in node.children:
+        flop += self(child)
+    return flop
+
+
+@_count_flop.register(Constant)
+@_count_flop.register(Terminal)
+@_count_flop.register(Indexed)
+@_count_flop.register(FlexiblyIndexed)
+def _count_flop_const(node, self):
+    return 0
+
+
+def count_flop(node):
+    mapper = Memoizer_cf(_count_flop)
+    return mapper(node)
+
+
+@singledispatch
+def _expand_all_product(node, self, index):
+    # ---------------------------------------
+    # Expand all products recursively if free index of node include index
+    # from :param:`index`
+    # e.g (a+(b+c)d)e = ae + bde + cde
+
+    raise AssertionError("cannot handle type %s" % type(node))
+
+
+_expand_all_product.register(Node)(reuse_if_untouched_arg)
+
+
+@_expand_all_product.register(Product)
+def _expand_all_product_common(node, self, index):
+    a = self(node.children[0], index)
+    b = self(node.children[1], index)
+    if isinstance(b, Sum) and any([i in b.free_indices for i in index]):
+        return Sum(self(Product(a, b.children[0]), index),
+                   self(Product(a, b.children[1]), index))
+    elif isinstance(a, Sum) and any([i in a.free_indices for i in index]):
+        return Sum(self(Product(a.children[0], b), index),
+                   self(Product(a.children[1], b), index))
+    else:
+        return node
+
+
+def expand_all_product(node, index):
+    mapper = MemoizerArg(_expand_all_product)
+    return mapper(node, index)
+
+
+def collect_terms(node, node_type):
+    """Recursively collect all children into a list from :param:`node`
+    and its children of class :param:`node_type`.
+
+    :param node: root of expression
+    :param node_type: class of node (e.g. Sum or Product)
+    :return: list of all terms
+    """
+    from collections import deque
+    terms = []  # collected terms
+    queue = deque([node])  # queue of children nodes to process
+    while queue:
+        child = queue.popleft()
+        if isinstance(child, node_type):
+            queue.extendleft(reversed(child.children))
+        else:
+            terms.append(child)
+    return tuple(terms)
+
+
+def flatten_sum(node, argument_indices):
+    """
+    factorise :param:`node` into sum of products, group factors of each product
+    based on its dependency on index:
+    1) nothing (key = 0)
+    2) i (key = 1)
+    3) (i)j (key = j)
+    4) (i)k (key = k)
+    ...
+    5) (i)jk (key = 2)
+    :param node: root of expression
+    :param index: tuple of argument (linear) indices
+    :return: dictionary to list of factors
+    """
+    monos = collect_terms(node, Sum)
+    result = []
+    arg_ind_set = set(argument_indices)
+    for mono in monos:
+        d = OrderedDict()
+        for i in [0, 1, 2] + list(argument_indices):
+            d[i] = list()
+        for factor in collect_terms(mono, Product):
+            fi = factor.free_indices
+            if not fi:
+                d[0].append(factor)
+            else:
+                ind_set = set(fi) & arg_ind_set
+                if len(ind_set) > 1:
+                    # Aijk
+                    d[2].append(factor)
+                elif len(ind_set) == 0:
+                    # Ai
+                    d[1].append(factor)
+                else:
+                    # Aij
+                    d[ind_set.pop()].append(factor)
+            # elif j in fi and k in fi:
+            #     d[2].append(factor)
+            # elif j in fi:
+            #     d[j].append(factor)
+            # elif k in fi:
+            #     d[k].append(factor)
+            # else:
+            #     d[1].append(factor)
+        for i in d:
+            d[i] = tuple(d[i])
+        result.append(d)
+    return tuple(result)
+
+
+def sumproduct_2_node(factor_lists):
+    """
+    generate gem node from list of factors
+    use recursion so that each term is not too long
+    i.e. (a+b) + (c+d) instead of (((a+b)+c)+d
+    :param factor_lists: list of factors representing sums of products
+    :return: gem node
+    """
+    if len(factor_lists) < 3:
+        sums = []
+        for fl in factor_lists:
+            sums.append(reduce(Product, fl, one))
+        return reduce(Sum, sums, Zero())
+    else:
+        mid = int(len(factor_lists) / 2)
+        return Sum(sumproduct_2_node(factor_lists[:mid]), sumproduct_2_node(factor_lists[mid:]))
+
+
+def factorise(factor_lists, quad_ind, arg_ind_flat):
+    """
+    recursively pick the most common factor
+    maybe can Memoize this one
+    :param factors: list of list of factors, representing sum of products
+    :return: optimised list of list of factors
+    """
+    if len(factor_lists) <= 1:
+        return factor_lists
+    # count number of common factors
+    counter = OrderedDict()
+    for fl in factor_lists:
+        fl_set = OrderedDict.fromkeys(fl)
+        if len(fl_set) > 1:
+            # at least two terms in product
+            for factor in fl_set:
+                if factor in counter:
+                    counter[factor] += 1
+                else:
+                    counter[factor] = 1
+
+    if not counter:
+        return factor_lists
+    # find which factor to factorise out first
+    mcf_value = [0, 1]  # (num arg indices, count)
+    mcf = None
+    arg_ind_set = set(arg_ind_flat)
+    for factor, count in counter.items():
+        if count > 1:
+            num_arg_ind = len(set(factor.free_indices) & arg_ind_set)
+            if (num_arg_ind > mcf_value[0]) or (num_arg_ind == mcf_value[0] and count > mcf_value[1]):
+                # prioritize factors with more argument indices
+                mcf = factor
+                mcf_value[0] = num_arg_ind
+                mcf_value[1] = count
+
+    if not mcf:
+        # no common factors
+        return factor_lists
+
+    new_list = []
+    rest = []  # new_list = mcf * [rest] + rest
+    # keep original factor list
+    # this might not be economical as most of the times factorise should help,
+    # and the copying slows down the optimisation quite a bit
+    # before_rest = []
+    for fl in factor_lists:
+        if mcf in fl and len(fl) > 1:
+            # at least two terms in the product
+            # before_rest.append(fl)
+            # new_fl = list(fl)
+            # new_fl.remove(mcf)
+            # rest.append(new_fl)
+            fl.remove(mcf)
+            rest.append(fl)
+        else:
+            new_list.append(fl)
+
+    # before_node = reorder(sumproduct_2_node(before_rest), (quad_ind + arg_ind_flat))
+    # before_flop = count_flop(before_node)
+    # after_node = reorder(sumproduct_2_node(factorise(rest, quad_ind, arg_ind_flat)), (quad_ind + arg_ind_flat))
+    # after_flop = count_flop(Product(mcf, after_node))
+    # if after_flop > before_flop:
+    #     # only factorise if reduces flops
+    #     return factor_lists
+    # new_list.append([mcf, after_node])
+    new_list.append([mcf, sumproduct_2_node(factorise(rest, quad_ind, arg_ind_flat))])
+    return factorise(new_list, quad_ind, arg_ind_flat)  # recursion
+
+
+def get_array(tensor, subarray=None):
+    if isinstance(tensor.children[0], Identity):
+        dim = tensor.children[0].dim
+        if subarray:
+            return eval('numpy.identity({0})'.format(dim) + subarray)
+        else:
+            return numpy.identity(dim)
+    if subarray:
+        return eval('tensor.children[0].array' + subarray)
+    else:
+        return tensor.children[0].array
+
+
+def contract(tensors, free_indices, indices):
+    """
+    :param tensors: (A, B, C, ...)
+    :param free_indices: contract over (i, ...)
+    :param indices: (j, k, ...)
+    :return:
+    """
+    index_map = {}
+    letter = ord('a')
+    for i in indices + free_indices:
+        index_map[i] = chr(letter)
+        letter += 1
+    subscripts = []
+    arrays = []
+    for t in tensors:
+        if any(isinstance(i, int) for i in t.multiindex):
+            subarray = [str(i) if isinstance(i, int) else ':' for i in t.multiindex]
+            subarray = '[' + ','.join(subarray) + ']'  # e.g. [:,:,0]
+            # this bit is a bit ugly
+            arrays.append(get_array(t, subarray))
+        else:
+            arrays.append(get_array(t))
+        # ['ij', 'jk', ...]
+        subscripts.append(''.join([index_map[i] for i in t.multiindex
+                                   if not isinstance(i, int)]))
+    # this is used as the parameter for contraction with einsum
+    subscripts = ','.join(subscripts) + ' -> ' +\
+                 ''.join(''.join(index_map[i] for i in indices))
+    return numpy.einsum(subscripts, *arrays)
+
+
+def can_pre_evaluate(node, quad_ind, arg_ind):
+    if not quad_ind:
+        # point evaluation, not integral
+        return False
+
+    if not isinstance(node, IndexSum):
+        return False
+
+    quad_ind_set = set(quad_ind)
+    for n in traversal([node]):
+        if isinstance(n, Indexed):
+            if quad_ind_set & set(n.free_indices):
+                if not isinstance(n.children[0], Constant):
+                    return False
+                if any([isinstance(i, VariableIndex) for i in n.multiindex]):
+                    return False
+        if isinstance(n, IndexSum) and n != node:
+            # cannot handle unexpanded IndexSum, need to correct in the future
+            return False
+        if isinstance(n, Power):
+            if quad_ind_set & set(n.free_indices):
+                # cannot do power yet, but arguably some power should be expanded
+                return False
+        if isinstance(n, MathFunction):
+            # e.g. test if |Jacobian| depend on quadrature points (non-affine)
+            # if n.name == 'abs':
+            if quad_ind_set & set(n.free_indices):
+                return False
+    return True
+
+
+def pre_evaluate(node, quad_ind, arg_ind_flat):
+    quad_ind_set = set(quad_ind)
+    # extents = dict().fromkeys(quad_ind + arg_ind_flat)
+    expand_pe = expand_all_product(node.children[0], quad_ind + arg_ind_flat)
+    monos_pe = flatten_sum(expand_pe, arg_ind_flat)
+    # identify number of distinct pre-evaluate tensors
+    pe_results = dict()
+    for mono in monos_pe:
+        tensors = list(mono[1])  # to be pre-evaluated
+        rest = list(mono[0])  # does not contain i
+        for t in [term for j in arg_ind_flat + (2,) for term in mono[j]]:
+            if set(t.free_indices) & quad_ind_set:
+                tensors.append(t)
+            else:
+                rest.append(t)
+        mono['pe_tensors'] = tensors = tuple(tensors)
+        mono['rest'] = tuple(rest)  # not pre-evaluated
+        # there could be duplicated pre-evaluated tensors
+        if not tensors:
+            mono['pe_result'] = tuple()
+        elif tensors in pe_results:
+            mono['pe_result'] = pe_results[tensors]
+        else:
+            # can put in a temporary tensor here
+            # mono['pe_result'] = pe_results[tensors] = (Indexed(Variable('PE'+str(len(pe_results)), (J,K)), (j,k)),)
+            # sometimes not all argument indices are present in the contraction
+            all_ind = set([fi for t1 in tensors for fi in t1.free_indices])
+            result_ind = tuple([i for i in arg_ind_flat if i in all_ind])
+            array = contract(tensors, quad_ind, result_ind)
+            pe_tensor = Indexed(Literal(array, 'PE'+str(len(pe_results))), result_ind)
+            mono['pe_result'] = pe_results[tensors] = (pe_tensor, )  # this is a tuple
+        # construct list of factor lists after pre-evaluation
+    factor_lists = []
+    for mono in monos_pe:
+        factor_lists.append(list(mono['rest'] + mono['pe_result']))
+
+    node_pe = sumproduct_2_node(factorise(factor_lists, quad_ind, arg_ind_flat))
+    node_pe = reorder(node_pe, arg_ind_flat)
+    theta_pe = count_flop(node_pe)  # flop count for pre-evaluation method
+    return (node_pe, theta_pe)
+
+
+def find_optimal_factors(monos, arg_ind_flat):
+    gem_int = OrderedDict()  # Gem node -> int
+    int_gem = OrderedDict()  # int -> Gem node
+    counter = 0
+    for mono in monos:
+        for j in arg_ind_flat:
+            # really this should just have 1 element
+            for n in mono[j]:
+                if n not in gem_int:
+                    gem_int[n] = counter
+                    int_gem[counter] = n
+                    counter += 1
+    if counter == 0:
+        return tuple()
+    # add connections (list of tuples)
+    edges_sets_list = []
+    # num_edges = dict.fromkeys(int_gem.keys(), 0)
+    for mono in monos:
+        # this double loop should be optimised further
+        edges_sets_list.append(tuple(
+            [gem_int[n] for j in arg_ind_flat for n in mono[j]]))
+
+    # product of extents of argument indices of nodes
+    extent = dict().fromkeys(int_gem.keys())
+    for key in extent:
+        arg_ind = set(int_gem[key].free_indices) & set(arg_ind_flat)
+        extent[key] = numpy.product([i.extent for i in arg_ind])
+    # set up the ILP
+    import pulp as ilp
+    prob = ilp.LpProblem('factorise', ilp.LpMinimize)
+    nodes = ilp.LpVariable.dicts('node', int_gem.keys(), 0, 1, ilp.LpBinary)
+
+    # objective function
+    big = 1000000  # some arbitrary big number
+    prob += ilp.lpSum(nodes[i]*(big - extent[i]) for i in int_gem)
+
+    # constraints (need to account for >2 argument indices)
+    for edges_set in edges_sets_list:
+        prob += ilp.lpSum(nodes[i] for i in edges_set) >= 1
+
+    prob.solve()
+    if prob.status != 1:
+        raise AssertionError("Something bad happened during ILP")
+
+    nodes_to_pull = tuple([n for n, node_number in gem_int.items()
+                           if nodes[node_number].value() == 1])
+    return nodes_to_pull
+
+
+def cse(node, quad_ind, arg_ind_flat):
+    """
+    common subexpression elimination
+    :param node:
+    :param quad_ind:
+    :param arg_ind:
+    :return:
+    """
+    # do not expand quadrature terms all the way
+    expand_cse = expand_all_product(node, arg_ind_flat)
+    monos_cse = flatten_sum(expand_cse, arg_ind_flat)
+    # need a firt pass of monos to combine terms which have same nodes for all arg_ind
+    # this should be in a loop if >2 arg_ind
+    if len(arg_ind_flat) > 1:
+        optimal_factors = find_optimal_factors(monos_cse, arg_ind_flat)
+    else:
+        optimal_factors = list()
+    # pull out the optimal factors and form factor_list
+    factor_lists = list()
+    factor_dict = OrderedDict().fromkeys(optimal_factors)
+    for of in factor_dict:
+        factor_dict[of] = list()
+    for mono in monos_cse:
+        all_factors = [f for g in (0, 1, 2) + arg_ind_flat for f in mono[g]]
+        for of in optimal_factors:
+            if of in all_factors:
+                all_factors.remove(of)
+                factor_dict[of].append(all_factors)
+                break
+        else:
+            factor_lists.append(all_factors)
+    for of, factors in factor_dict.items():
+        # factors = list of lists representing sum of products
+        if len(factors) == 1:
+            # just one product
+            factor_lists.append([of] + factors[0])
+        else:
+            if len(arg_ind_flat) > 2:
+                # more argument indices to process
+                if len(set(of.free_indices) & set(arg_ind_flat)) != 1:
+                    raise AssertionError("this should not happen")
+                ind = (set(of.free_indices) & set(arg_ind_flat)).pop()
+                new_arg_ind_flat = tuple([i for i in arg_ind_flat if i != ind])
+                if len(arg_ind_flat) - len(new_arg_ind_flat) != 1:
+                    raise AssertionError("this should not happen")
+                factor_lists.append([of, cse(sumproduct_2_node(factors),
+                                             quad_ind, new_arg_ind_flat)])
+            else:
+                # remember to factorise factor list here
+                factor_lists.append([of, sumproduct_2_node(factorise(factors, quad_ind, arg_ind_flat))])
+    return sumproduct_2_node(factorise(factor_lists, quad_ind, arg_ind_flat))
+
+
+def gen_lex_sequence(items):
+    """
+    generate lexicographical order of permutations.
+    e.g. (i,j,k) -> [(i,), (i,j), (i,j,k), (j), (j,k), (k)]
+    :param items:
+    :return:
+    """
+    if not items:
+        return list()
+    result = gen_lex_sequence(items[1:])
+    return [(items[0],)] + [(items[0],) + x for x in result] + result
+
+
+@singledispatch
+def _reorder(node, self, indices):
+    """
+    Reorder Sum and Product to promote hoisting
+    :param node:
+    :param self:
+    :param indices:
+    :return:
+    """
+    raise AssertionError("cannot handle type %s" % type(node))
+
+
+_reorder.register(Node)(reuse_if_untouched_arg)
+
+
+@_reorder.register(IndexSum)
+def _reorder_indexsum(node, self, indices):
+    new_indices = tuple(indices)
+    for i in node.multiindex:
+        if i not in indices:
+            new_indices = (i,) + new_indices  # insert quadrature indice in front
+    new_children = [self(child, new_indices) for child in node.children]
+    return node.reconstruct(*new_children)
+
+
+@_reorder.register(Product)
+@_reorder.register(Sum)
+def _reorder_product_sum(node, self, indices):
+    _class = type(node)
+    all_factors = list(collect_terms(node, _class))
+    factor_lists = list()
+    for curr_indices in [()] + gen_lex_sequence(indices):
+        fl = list()
+        for f in all_factors:
+            if set(f.free_indices) == set(curr_indices):
+                fl.append(self(f, indices))
+        if fl:
+            factor_lists.append(fl)
+    if isinstance(node, Sum):
+        root = Zero()
+    elif isinstance(node, Product):
+        root = one
+    else:
+        raise AssertionError("wrong class")
+    return reduce(_class, [reduce(_class, _fl, root) for _fl in factor_lists], root)
+
+
+def reorder(node, indices=None):
+    if not indices:
+        indices = node.free_indices
+    mapper = MemoizerArg(_reorder)
+    return mapper(node, indices)
+
+
+def optimise(node, quad_ind, arg_ind):
+    # there are Zero() sometimes
+    if isinstance(node, Constant):
+        return node
+    arg_ind_flat = tuple([i for id in arg_ind for i in id])
+    # do not expand quadrature terms all the way
+    if isinstance(node, IndexSum):
+        node_cse = IndexSum(cse(node.children[0], quad_ind, arg_ind_flat), node.multiindex)
+    else:
+        node_cse = cse(node, quad_ind, arg_ind_flat)
+    node_cse = reorder(node_cse, arg_ind_flat)
+    theta_cse = count_flop(node_cse)
+    if can_pre_evaluate(node, quad_ind, arg_ind):
+        node_pe, theta_pe = pre_evaluate(node, quad_ind, arg_ind_flat)
+        if theta_cse > theta_pe:
+            return node_pe
+    return node_cse
+
+    # now we need to really pre-evaluate the tensors
+    # for tensors in pe_results:
+    #     array = contract(tensors, (i,), (j, k))
+    #     pe_results[tensors] = Indexed(Literal(array, '')
+    #
+    # return pe_results
+
+
+def optimise_list(expressions, quadrature_indices, argument_indices):
+    if propogate_failure(expressions):
+        return expressions
+    return [optimise(node, quadrature_indices, argument_indices) for node in expressions]
+
+
+def propogate_failure(expressions):
+    for n in traversal(expressions):
+        if isinstance(n, Failure):
+            return True
+    return False
