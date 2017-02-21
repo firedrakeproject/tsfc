@@ -523,35 +523,38 @@ def count_flop(node):
 
 
 @singledispatch
-def _expand_all_product(node, self, index):
-    # ---------------------------------------
-    # Expand all products recursively if free index of node include index
-    # from :param:`index`
-    # e.g (a+(b+c)d)e = ae + bde + cde
-
+def _expand_products(node, self):
     raise AssertionError("cannot handle type %s" % type(node))
 
 
-_expand_all_product.register(Node)(reuse_if_untouched_arg)
+_expand_products.register(Node)(reuse_if_untouched)
 
 
-@_expand_all_product.register(Product)
-def _expand_all_product_common(node, self, index):
-    a = self(node.children[0], index)
-    b = self(node.children[1], index)
-    if isinstance(b, Sum) and any([i in b.free_indices for i in index]):
-        return Sum(self(Product(a, b.children[0]), index),
-                   self(Product(a, b.children[1]), index))
-    elif isinstance(a, Sum) and any([i in a.free_indices for i in index]):
-        return Sum(self(Product(a.children[0], b), index),
-                   self(Product(a.children[1], b), index))
+@_expand_products.register(Product)
+def _expand_products_prod(node, self):
+    a = self(node.children[0])
+    b = self(node.children[1])
+    if isinstance(b, Sum) and set(b.free_indices) & self.index_set:
+        return Sum(self(Product(a, b.children[0])),
+                   self(Product(a, b.children[1])))
+    elif isinstance(a, Sum) and set(a.free_indices) & self.index_set:
+        return Sum(self(Product(a.children[0], b)),
+                   self(Product(a.children[1], b)))
     else:
         return node
 
 
-def expand_all_product(node, index):
-    mapper = MemoizerArg(_expand_all_product)
-    return mapper(node, index)
+def expand_products(node, indices):
+    """
+    Expand products recursively if free indices of the node contains index from :param indices
+    e.g (a+(b+c)d)e = ae + bde + cde
+    :param node: gem expression
+    :param indices: tuple of indices
+    :return: gem expression with products expanded
+    """
+    mapper = Memoizer(_expand_products)
+    mapper.index_set = set(indices)
+    return mapper(node)
 
 
 def collect_terms(node, node_type):
@@ -790,7 +793,7 @@ def can_pre_evaluate(node, quad_ind, arg_ind):
 def pre_evaluate(node, quad_ind, arg_ind_flat):
     quad_ind_set = set(quad_ind)
     # extents = dict().fromkeys(quad_ind + arg_ind_flat)
-    expand_pe = expand_all_product(node.children[0], quad_ind + arg_ind_flat)
+    expand_pe = expand_products(node.children[0], quad_ind + arg_ind_flat)
     monos_pe = flatten_sum(expand_pe, arg_ind_flat)
     # identify number of distinct pre-evaluate tensors
     pe_results = dict()
@@ -887,7 +890,7 @@ def cse(node, quad_ind, arg_ind_flat):
     :return:
     """
     # do not expand quadrature terms all the way
-    expand_cse = expand_all_product(node, arg_ind_flat)
+    expand_cse = expand_products(node, arg_ind_flat)
     monos_cse = flatten_sum(expand_cse, arg_ind_flat)
     # need a firt pass of monos to combine terms which have same nodes for all arg_ind
     # this should be in a loop if >2 arg_ind
