@@ -2,13 +2,14 @@ from __future__ import absolute_import, print_function, division
 from six.moves import range
 
 import collections
+import itertools
 import time
 from functools import reduce
 from itertools import chain
 
 from ufl.algorithms import extract_arguments, extract_coefficients
 from ufl.algorithms.analysis import has_type
-from ufl.classes import Form, CellVolume
+from ufl.classes import Form, CellVolume, Argument, FunctionSpace
 from ufl.log import GREEN
 
 import gem
@@ -90,17 +91,24 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     fiat_cell = as_fiat_cell(cell)
     integration_dim, entity_ids = lower_integral_type(fiat_cell, integral_type)
 
-    argument_indices = tuple(tuple(gem.Index(extent=e)
-                                   for e in create_element(arg.ufl_element()).index_shape)
+    argument_indices = tuple(tuple(tuple(gem.Index(extent=e)
+                                         for e in create_element(elem).index_shape)
+                                   for elem in ufl_utils.unmix_element(arg.ufl_element()))
                              for arg in arguments)
-    flat_argument_indices = tuple(chain(*argument_indices))
+    flat_argument_indices = tuple(chain(*chain(*argument_indices)))
     quadrature_indices = []
 
     # Dict mapping domains to index in original_form.ufl_domains()
     domain_numbering = form_data.original_form.domain_numbering()
     builder = interface.KernelBuilder(integral_type, integral_data.subdomain_id,
                                       domain_numbering[integral_data.domain])
-    return_variables = builder.set_arguments(arguments, argument_indices)
+    return_variables = []
+    fake_args = [[Argument(FunctionSpace(arg.ufl_domain(), sub_elem), arg.number())
+                  for sub_elem in ufl_utils.unmix_element(arg.ufl_element())]
+                 for arg in arguments]
+    for split_indices, split_args in zip(itertools.product(*argument_indices),
+                                         itertools.product(*fake_args)):
+        return_variables.extend(builder.set_arguments(split_args, split_indices))
 
     coordinates = ufl_utils.coordinate_coefficient(mesh)
     builder.set_coordinates(coordinates)
@@ -119,13 +127,13 @@ def compile_integral(integral_data, form_data, prefix, parameters,
                       precision=parameters["precision"],
                       integration_dim=integration_dim,
                       entity_ids=entity_ids,
-                      argument_indices=argument_indices,
+                      # argument_indices=argument_indices,
                       index_cache=index_cache)
 
     kernel_cfg["facetarea"] = facetarea_generator(mesh, coordinates, kernel_cfg, integral_type)
     kernel_cfg["cellvolume"] = cellvolume_generator(mesh, coordinates, kernel_cfg)
 
-    irs = []
+    irs = collections.defaultdict(list)
     for integral in integral_data.integrals:
         params = {}
         # Record per-integral parameters
@@ -157,14 +165,19 @@ def compile_integral(integral_data, form_data, prefix, parameters,
 
         config = kernel_cfg.copy()
         config.update(quadrature_rule=quad_rule)
-        ir = fem.compile_ufl(integrand, interior_facet=interior_facet, **config)
-        if parameters["unroll_indexsum"]:
-            ir = opt.unroll_indexsum(ir, max_extent=parameters["unroll_indexsum"])
-        ir = [gem.index_sum(expr, quadrature_multiindex) for expr in ir]
-        irs.append(ir)
+        for idx, expr in ufl_utils.split_expression(integrand, arguments):
+            config_ = config.copy()
+            config_.update(argument_indices=tuple(foo[ii] for foo, ii in zip(argument_indices, idx)))
+            ir = fem.compile_ufl(expr, interior_facet=interior_facet, **config_)
+            if parameters["unroll_indexsum"]:
+                ir = opt.unroll_indexsum(ir, max_extent=parameters["unroll_indexsum"])
+            ir = [gem.index_sum(expr, quadrature_multiindex) for expr in ir]
+            irs[idx].append(ir)
 
     # Sum the expressions that are part of the same restriction
-    ir = list(reduce(gem.Sum, e, gem.Zero()) for e in zip(*irs))
+    ir = list(reduce(gem.Sum, e, gem.Zero())
+              for idx in sorted(irs)
+              for e in zip(*irs[idx]))
 
     # Need optimised roots for COFFEE
     ir = impero_utils.preprocess_gem(ir)
@@ -178,9 +191,10 @@ def compile_integral(integral_data, form_data, prefix, parameters,
                                         remove_zeros=True)
 
     # Generate COFFEE
-    index_names = [(si, name + str(n))
-                   for index, name in zip(argument_indices, ['j', 'k'])
-                   for n, si in enumerate(index)]
+    index_names = []
+    # index_names = [(si, name + str(n))
+    #                for index, name in zip(argument_indices, ['j', 'k'])
+    #                for n, si in enumerate(index)]
     if len(quadrature_indices) == 1:
         index_names.append((quadrature_indices[0], 'ip'))
     else:

@@ -147,7 +147,8 @@ class KernelBuilder(KernelBuilderBase):
 
         self.kernel = Kernel(integral_type=integral_type, subdomain_id=subdomain_id,
                              domain_number=domain_number)
-        self.local_tensor = None
+        self.argument_counter = 0
+        self.local_tensors = []
         self.coordinates_arg = None
         self.coefficient_args = []
         self.coefficient_split = {}
@@ -172,8 +173,10 @@ class KernelBuilder(KernelBuilderBase):
         :arg indices: GEM argument indices
         :returns: GEM expression representing the return variable
         """
-        self.local_tensor, expressions = prepare_arguments(
-            arguments, indices, interior_facet=self.interior_facet)
+        local_tensor, expressions = prepare_arguments(
+            arguments, indices, interior_facet=self.interior_facet, name="A{}".format(self.argument_counter))
+        self.argument_counter += 1
+        self.local_tensors.append(local_tensor)
         return expressions
 
     def set_coordinates(self, coefficient):
@@ -227,7 +230,7 @@ class KernelBuilder(KernelBuilderBase):
         :arg body: function body (:class:`coffee.Block` node)
         :returns: :class:`Kernel` object
         """
-        args = [self.local_tensor, self.coordinates_arg]
+        args = self.local_tensors + [self.coordinates_arg]
         if self.kernel.oriented:
             args.append(cell_orientations_coffee_arg)
         args.extend(self.coefficient_args)
@@ -298,7 +301,7 @@ def prepare_coefficient(coefficient, name, interior_facet=False):
     return funarg, expression
 
 
-def prepare_arguments(arguments, multiindices, interior_facet=False):
+def prepare_arguments(arguments, multiindices, interior_facet=False, name="A"):
     """Bridges the kernel interface and the GEM abstraction for
     Arguments.  Vector Arguments are rearranged here for interior
     facet integrals.
@@ -337,8 +340,8 @@ def prepare_arguments(arguments, multiindices, interior_facet=False):
         c_shape = tuple(u_shape)
         slicez = [[slice(s) for s in u_shape]]
 
-    funarg = coffee.Decl(SCALAR_TYPE, coffee.Symbol("A", rank=c_shape))
-    varexp = gem.Variable("A", c_shape)
+    funarg = coffee.Decl(SCALAR_TYPE, coffee.Symbol(name, rank=c_shape))
+    varexp = gem.Variable(name, c_shape)
     expressions = [expression(gem.view(varexp, *slices)) for slices in slicez]
     return funarg, prune(expressions)
 
