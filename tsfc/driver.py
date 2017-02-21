@@ -106,8 +106,9 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     fake_args = [[Argument(FunctionSpace(arg.ufl_domain(), sub_elem), arg.number())
                   for sub_elem in ufl_utils.unmix_element(arg.ufl_element())]
                  for arg in arguments]
-    for bar, args in zip(itertools.product(*argument_indices), itertools.product(*fake_args)):
-        return_variables.extend(builder.set_arguments(args, bar))
+    for split_indices, split_args in zip(itertools.product(*argument_indices),
+                                         itertools.product(*fake_args)):
+        return_variables.extend(builder.set_arguments(split_args, split_indices))
 
     coordinates = ufl_utils.coordinate_coefficient(mesh)
     builder.set_coordinates(coordinates)
