@@ -566,12 +566,12 @@ def collect_terms(node, node_type):
     :return: list of all terms
     """
     from collections import deque
-    terms = []  # collected terms
-    queue = deque([node])  # queue of children nodes to process
+    terms = []
+    queue = [node]
     while queue:
-        child = queue.popleft()
+        child = queue.pop()
         if isinstance(child, node_type):
-            queue.extendleft(reversed(child.children))
+            queue.extend(child.children)
         else:
             terms.append(child)
     return tuple(terms)
