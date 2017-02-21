@@ -578,17 +578,19 @@ def collect_terms(node, node_type):
 
 def flatten_sum(node, argument_indices):
     """
-    factorise :param:`node` into sum of products, group factors of each product
-    based on its dependency on index:
-    1) nothing (key = 0)
-    2) i (key = 1)
-    3) (i)j (key = j)
-    4) (i)k (key = k)
-    ...
-    5) (i)jk (key = 2)
+    factorise :param:`node` into sum of products, factors of each product are organised
+    in a OrderedDict, based on their dependencies on argument indices. For instance, assuming
+    argument indices are j, k, and another (e.g. quadrature) index i, each OrderedDict will
+    have items:
+    1. key = 0, factors with no free indices
+    2. key = 1, factors not indexed with either j or k, but indexed with other indices (e.g. i)
+    3. key = j, factors indexed with j, possibly also indexed with other indices (e.g. i)
+    4. key = k, factors indexed with k, possibly also indexed with other indices (e.g. i)
+    5. key = 2, factors indexed with more than 1 argument indices
+    This generalises to the cases with more than 2 argument indices
     :param node: root of expression
-    :param index: tuple of argument (linear) indices
-    :return: dictionary to list of factors
+    :param argument_indices: tuple of argument (linear) indices
+    :return: tuple of dictionary of list of factors
     """
     monos = collect_terms(node, Sum)
     result = []
@@ -600,26 +602,19 @@ def flatten_sum(node, argument_indices):
         for factor in collect_terms(mono, Product):
             fi = factor.free_indices
             if not fi:
+                # no free indices
                 d[0].append(factor)
             else:
                 ind_set = set(fi) & arg_ind_set
                 if len(ind_set) > 1:
-                    # Aijk
+                    # more than 1 argument indices
                     d[2].append(factor)
                 elif len(ind_set) == 0:
-                    # Ai
+                    # no argument indices
                     d[1].append(factor)
                 else:
-                    # Aij
+                    # single argument index
                     d[ind_set.pop()].append(factor)
-            # elif j in fi and k in fi:
-            #     d[2].append(factor)
-            # elif j in fi:
-            #     d[j].append(factor)
-            # elif k in fi:
-            #     d[k].append(factor)
-            # else:
-            #     d[1].append(factor)
         for i in d:
             d[i] = tuple(d[i])
         result.append(d)
