@@ -206,6 +206,7 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     kernel_name = "%s_%s_integral_%s" % (prefix, integral_type, integral_data.subdomain_id)
     temp = builder.construct_kernel(kernel_name, body)
     temp._ir = ir
+    temp._argument_ordering = flat_argument_indices
     return temp
 
 
