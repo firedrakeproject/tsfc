@@ -565,7 +565,6 @@ def collect_terms(node, node_type):
     :param node_type: class of node (e.g. Sum or Product)
     :return: list of all terms
     """
-    from collections import deque
     terms = []
     queue = [node]
     while queue:
