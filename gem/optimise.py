@@ -108,12 +108,9 @@ _reassociate_product.register(Node)(reuse_if_untouched)
 @_reassociate_product.register(Product)
 def _reassociate_product_prod(node, self):
     # collect all factors of product, sort by rank
-    # should use more sophisticated method later on for optimal result
     comp_func = lambda x: len(x.free_indices)
     factors = sorted(collect_terms(node, Product), key=comp_func)
-    # need to optimise away iterator <==> list
-    new_factors = list(map(self, factors))  # recursion
-    return reduce(Product, new_factors)
+    return reduce(Product, map(self, factors))
 
 
 def reassociate_product(expressions):
@@ -541,9 +538,11 @@ def _expand_products_prod(node, self):
         return node
 
 
+# TODO: arguablly should move this inside Kernel_Optimiser
 def expand_products(node, indices):
     """
-    Expand products recursively if free indices of the node contains index from :param indices
+    Expand products recursively if free indices of the node contains index
+    from :param indices
     e.g (a+(b+c)d)e = ae + bde + cde
     :param node: gem expression
     :param indices: tuple of indices
@@ -751,6 +750,7 @@ def contract(tensors, free_indices, indices):
 
 
 def can_pre_evaluate(node, quad_ind, arg_ind):
+    return False  # disable pre-evaluation for now
     if not quad_ind:
         # point evaluation, not integral
         return False
@@ -1029,3 +1029,77 @@ def propogate_failure(expressions):
         if isinstance(n, Failure):
             return True
     return False
+
+
+class Kernel_Optimiser(object):
+    """
+    An object holding a representation of a gem IR (as sum of products) and
+    perform optimisations which preserve the sematics of the IR.
+    Fields:
+    1. node
+    2. multiindex
+    3. arg_ind
+    4. rep: a list of dictionaries (summands) of list of factors, such that
+    node = Sum(summands), where a summand is Product(factors), possibly contracted
+    with multiindex
+    Factors are indexed with keys:
+        1. One of the argument indices (e.g. j):
+            factors depend on j but not other argument indices
+            All summands will have this item (to avoid checking existence),
+            with the values possibly as empty list
+        2. Combination of >1 argument indices (e.g. j, k):
+            factors depend on j and k, but not other argument indices
+            These are rarer and are added as factors are encourtered
+        3. string 'const':
+            factors with no free indices
+        4. string 'quad':
+            factors depend on indices (typically quadrature indices for reduction)
+            other than argument indices
+    """
+    def __init__(self, node, arg_ind):
+        """
+        Constructor
+        :param node: gem node
+        :param arg_ind: tuples of tuples of argument (linear) indices
+        """
+        self.node = node
+        self.arg_ind = arg_ind
+        if isinstance(node, IndexSum):
+            self.multiindex = node.multiindex
+            self.node = node.children[0]
+        else:
+            self.multiindex = ()
+        self._build_repr()
+
+    def _build_repr(self):
+        """
+        Build self.repr from self.node
+        """
+        # TODO: make this a property later
+        arg_ind_flat = tuple([i for id in self.arg_ind for i in id])
+        arg_ind_set = set(self.arg_ind)
+        node = expand_products(self.node, arg_ind_flat)
+        summands = collect_terms(node, Sum)
+        rep = []
+        for summand in summands:
+            d = OrderedDict()
+            for i in ['const', 'quad'] + list(arg_ind_flat):
+                d[i] = list()
+            for factor in collect_terms(summand, Product):
+                fi = factor.free_indices
+                if not fi:
+                    d['const'].append(factor)
+                else:
+                    ind_set = set(fi) & arg_ind_set
+                    if len(ind_set) > 1:
+                        key = tuple(i for i in arg_ind_flat if i in ind_set)
+                        if key in d:
+                            d[key].append(factor)
+                        else:
+                            d[key] = [factor]
+                    elif len(ind_set) == 0:
+                        d['quad'].append(factor)
+                    else:
+                        d[ind_set.pop()].append(factor)
+            rep.append(d)
+        self.rep = rep
