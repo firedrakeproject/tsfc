@@ -1111,8 +1111,7 @@ class LoopOptimiser(object):
             self.rep = rep
         else:
             self._build_repr()
-        self.opt_node = None
-
+        self.opt_node = None  # optimised gem node
 
     def _decide_key(self, factor):
         """
@@ -1204,7 +1203,7 @@ class LoopOptimiser(object):
         optimal_factors = [factor for factor, number in gem_int.items() if ilp_var[number].value() == 1]
         other_factors = [factor for factor, number in gem_int.items() if ilp_var[number].value() == 0]
         # TODO: investigate effects of sorting these two lists of factors
-        optimal_factors = sorted(optimal_factors, key = lambda f: extent[gem_int[f]])
+        optimal_factors = sorted(optimal_factors, key=lambda f: extent[gem_int[f]])
         other_factors = sorted(other_factors, key=lambda f: extent[gem_int[f]])
         # Sequence dictating order of factorisation
         factors_seq = optimal_factors + other_factors
@@ -1225,6 +1224,8 @@ class LoopOptimiser(object):
                 counter[factor] += 1
         if not counter:
             return
+        if max(counter.values()) < 2:
+            return
 
         mcf = None  # most common factor
         mcf_value = (0, 1)  # (number of free indices, count)
@@ -1237,6 +1238,7 @@ class LoopOptimiser(object):
                     mcf_value = (nfi, count)
         if not mcf:
             return
+        self.opt_node = None
         _summands = list()
         factored_out = list()
         for summand in self.rep:
@@ -1255,11 +1257,13 @@ class LoopOptimiser(object):
         for to_delete in factored_out:
             self.rep.remove(to_delete)
         new_summand = OrderedDict()
-        new_summand[key] = [mcf]
-        new_summand[self._decide_key(node)] = [node]
+        if self._decide_key(node) == key:
+            new_summand[key] = [mcf, node]
+        else:
+            new_summand[key] = [mcf]
+            new_summand[self._decide_key(node)] = [node]
         self.rep.append(new_summand)
         self.factorise_key(key)  # Continue factorising
-
 
     def factorise_arg(self, factors_seq):
         """
@@ -1268,8 +1272,8 @@ class LoopOptimiser(object):
         """
         if not factors_seq:
             # TODO: investigate if worthwhile to do a pass to check const common factors here
-            self.factorise_key('quad')
-            self.factorise_key('const')
+            # self.factorise_key('quad')
+            # self.factorise_key('const')
             return self.generate_node()
         cf = factors_seq[0]  # pick the first common factor
         key = self._decide_key(cf)
@@ -1287,6 +1291,7 @@ class LoopOptimiser(object):
             factored_out.append(summand)  # mark for deleting later
             # TODO: default fields might be missing from this OrderedDict(), consider wrap an object around it
             _summands.append(OrderedDict([(_k, _v) for (_k, _v) in summand.items() if _k != key]))
+        self.opt_node = None
         if len(_summands) > 1:
             # Proceed with the next common factor for the factorised part
             lo = LoopOptimiser(node=None, arg_ind=self.arg_ind, rep=_summands)
@@ -1308,7 +1313,6 @@ class LoopOptimiser(object):
         lo.factorise_arg(factors_seq[1:])
         return lo.generate_node()
 
-
     def generate_node(self):
         # TODO: Here need to consider the order of forming products, currently this only ensures same group gets multiplied first. Consider lexico order between groups.
         if self.opt_node:
@@ -1323,4 +1327,3 @@ class LoopOptimiser(object):
         if self.multiindex:
             self.opt_node = IndexSum(self.opt_node, self.multiindex)
         return self.opt_node
-
