@@ -996,6 +996,11 @@ def optimise(node, quad_ind, arg_ind):
     # there are Zero() sometimes
     if isinstance(node, Constant):
         return node
+    lo = LoopOptimiser(node, arg_ind)
+    optimal_arg = lo.find_optimal_arg_factors()
+    lo.factorise_arg(optimal_arg)
+    return lo.generate_node()
+
     arg_ind_flat = tuple([i for id in arg_ind for i in id])
     # do not expand quadrature terms all the way
     if isinstance(node, IndexSum):
@@ -1031,7 +1036,37 @@ def propogate_failure(expressions):
     return False
 
 
-class Kernel_Optimiser(object):
+def _list_2_node(children, self):
+    if len(children) < 3:
+        return reduce(self.func, children, self.base)
+    else:
+        mid = int(len(children) / 2)
+        return self((self(children[:mid]), self(children[mid:])))
+
+
+def list_2_node(function, children):
+    """
+    generate gem node from list of children
+    use recursion so that each term is not too long
+    i.e. (a+b) + (c+d) instead of (((a+b)+c)+d
+    :param children: list of children nodes
+    :return: gem node
+    """
+    # TODO: DAG awareness. Hashing with tuple is probably slow here.
+    # possibly need to be able to pass in a sequence (of free_indices) dictating the order of grouping children nodes
+    if function == Sum:
+        base = Zero()
+    elif function == Product:
+        base = one
+    else:
+        raise AssertionError('Cannot combine unless Sum or Product')
+    mapper = Memoizer(_list_2_node)
+    mapper.func = function
+    mapper.base = base
+    return mapper(tuple(children))
+
+
+class LoopOptimiser(object):
     """
     An object holding a representation of a gem IR (as sum of products) and
     perform optimisations which preserve the sematics of the IR.
@@ -1076,6 +1111,7 @@ class Kernel_Optimiser(object):
             self.rep = rep
         else:
             self._build_repr()
+        self.opt_node = None
 
 
     def _decide_key(self, factor):
@@ -1087,9 +1123,9 @@ class Kernel_Optimiser(object):
         if not fi:
             return 'const'
         else:
-            ind_set = set(fi) & arg_ind_set
+            ind_set = set(fi) & self.arg_ind_set
             if len(ind_set) > 1:
-                return tuple(i for i in arg_ind_flat if i in ind_set)
+                return tuple(i for i in self.arg_ind_flat if i in ind_set)
             elif len(ind_set) == 0:
                 return 'quad'
             else:
@@ -1118,9 +1154,6 @@ class Kernel_Optimiser(object):
     def find_optimal_arg_factors(self):
         # TODO: add guard so that self.rep is up to date here
         rep = self.rep
-        arg_ind_flat = tuple([i for id in self.arg_ind for i in id])
-        arg_ind_set = set(self.arg_ind_flat)
-
         gem_int = OrderedDict()  # Gem node -> int
         int_gem = OrderedDict()  # int -> Gem node
         extent = dict()  # stores product of extents of free indices
@@ -1136,7 +1169,7 @@ class Kernel_Optimiser(object):
                     if factor not in gem_int:
                         gem_int[factor] = counter
                         int_gem[counter] = factor
-                        extent[counter] = numpy.product([i.extent for i in set(factor.free_indices) & arg_ind_set])
+                        extent[counter] = numpy.product([i.extent for i in set(factor.free_indices) & self.arg_ind_set])
                         counter += 1
         if counter == 0:
             return tuple()
@@ -1144,7 +1177,7 @@ class Kernel_Optimiser(object):
         connections = []
         for summand in rep:
             connection = []
-            for key, factors in summand:
+            for key, factors in summand.items():
                 if key == 'const' or key == 'quad':
                     continue
                 connection.extend([gem_int[factor] for factor in factors])
@@ -1165,7 +1198,7 @@ class Kernel_Optimiser(object):
             ilp_prob += ilp.lpSum(ilp_var[i] for i in connection) >= 1
 
         ilp_prob.solve()
-        if prob.status != 1:
+        if ilp_prob.status != 1:
             raise AssertionError("Something bad happened during ILP")
 
         optimal_factors = [factor for factor, number in gem_int.items() if ilp_var[number].value() == 1]
@@ -1177,21 +1210,73 @@ class Kernel_Optimiser(object):
         factors_seq = optimal_factors + other_factors
         return factors_seq
 
+    def factorise_key(self, key):
+        """
+        Factorise common factors that have a particular :param key
+        """
+        if len(self.rep) < 2:
+            return
+        counter = OrderedDict()
+        for summand in self.rep:
+            if key not in summand:
+                continue
+            for factor in summand[key]:
+                counter.setdefault(factor, 0)
+                counter[factor] += 1
+        if not counter:
+            return
+
+        mcf = None  # most common factor
+        mcf_value = (0, 1)  # (number of free indices, count)
+        for factor, count in counter.items():
+            if count > 1:
+                nfi = len(factor.free_indices)
+                if nfi > mcf_value[0] or (nfi == mcf_value[0] and count > mcf_value[1]):
+                    # TODO: Possibly other heurstics than prioritizing factors with most free indices
+                    mcf = factor
+                    mcf_value = (nfi, count)
+        if not mcf:
+            return
+        _summands = list()
+        factored_out = list()
+        for summand in self.rep:
+            # TODO: This pattern of checking keys is repeated several times
+            if key not in summand:
+                continue
+            if mcf in summand[key]:
+                factored_out.append(summand)  # mark for deleting later
+                _factors = OrderedDict([(_k, _v) for (_k, _v) in summand.items() if _k != key])
+                _factors[key] = [factor for factor in summand[key] if factor != mcf]
+                _summands.append(_factors)
+        # TODO: Create a method for this
+        lo = LoopOptimiser(node=None, arg_ind=self.arg_ind, rep=_summands)
+        # TODO: Maybe can continue to factorise this new node
+        node = lo.generate_node()
+        for to_delete in factored_out:
+            self.rep.remove(to_delete)
+        new_summand = OrderedDict()
+        new_summand[key] = [mcf]
+        new_summand[self._decide_key(node)] = [node]
+        self.rep.append(new_summand)
+        self.factorise_key(key)  # Continue factorising
+
+
     def factorise_arg(self, factors_seq):
         """
         Factorise sequentially with common factors from :param factors_seq
         :param factors_seq: sequence of factors used to factorise
         """
         if not factors_seq:
-            self.generate_node()
-            return
-        rep = self.rep
+            # TODO: investigate if worthwhile to do a pass to check const common factors here
+            self.factorise_key('quad')
+            self.factorise_key('const')
+            return self.generate_node()
         cf = factors_seq[0]  # pick the first common factor
-        key = tuple(i for i in self.arg_ind_flat if i in cf.free_indices)
+        key = self._decide_key(cf)
         factored_out = list()
         # cf * Sum(_summands), where summand = Product(_factors)
         _summands = list()
-        for summand in rep:
+        for summand in self.rep:
             if key not in summand:
                 continue
             factors = summand[key]
@@ -1200,32 +1285,42 @@ class Kernel_Optimiser(object):
             if cf not in factors:
                 continue
             factored_out.append(summand)  # mark for deleting later
-            _factors = OrderedDict()
-            for _key, _fs in summand:
-                if key != key:
-                    _factors[key] = _fs
-            _summands.append(_factors)
-        if len(_factors) < 2:
-            # No common factor present, so no factorisation done with this factor
-            Ker_Opt = Kernel_Optimiser(node=None, arg_ind=self.arg_ind, rep=self.rep)
-            Ker_Opt.factorise_arg(factors_seq[1:])
-            return Ker_Opt.generate_node()
-        else:
-            Ker_Opt = Kernel_Optimiser(node=None, arg_ind=self.arg_ind, rep=_summands)
-            Ker_Opt.factorise_arg(factors_seq[1:])
-            node = Ker_Opt.generate_node()
-        # Delete factored out lines in rep
-        for to_delete in factored_out:
-            rep.remove(to_delete)
-        # Create new line in rep
-        new_summand = OrderedDict()
-        for i in ['const', 'quad'] + list(self.arg_ind_flat):
-            new_summand[i] = list()
-        new_summand[self._decide_key(cf)] = [cf]
-        new_summand[self._decide_key(node)] = [node]
-        return self.generate_node()
-        # TODO: investigate if worthwhile to do a pass to check const common factors here
+            # TODO: default fields might be missing from this OrderedDict(), consider wrap an object around it
+            _summands.append(OrderedDict([(_k, _v) for (_k, _v) in summand.items() if _k != key]))
+        if len(_summands) > 1:
+            # Proceed with the next common factor for the factorised part
+            lo = LoopOptimiser(node=None, arg_ind=self.arg_ind, rep=_summands)
+            lo.factorise_arg(factors_seq[1:])
+            node = lo.generate_node()
+            # Delete factored out lines in rep
+            for to_delete in factored_out:
+                self.rep.remove(to_delete)
+            # Create new line in rep
+            # TODO: Need an object to wrap around summands
+            new_summand = OrderedDict()
+            for i in ['const', 'quad'] + list(self.arg_ind_flat):
+                new_summand[i] = list()
+            new_summand[self._decide_key(cf)] = [cf]
+            new_summand[self._decide_key(node)] = [node]
+            self.rep.append(new_summand)
+        # Proceed with the next common factor
+        lo = LoopOptimiser(node=None, arg_ind=self.arg_ind, rep=self.rep)
+        lo.factorise_arg(factors_seq[1:])
+        return lo.generate_node()
 
 
     def generate_node(self):
-        return
+        # TODO: Here need to consider the order of forming products, currently this only ensures same group gets multiplied first. Consider lexico order between groups.
+        if self.opt_node:
+            return self.opt_node
+        _summands = list()
+        for summands in self.rep:
+            _factors = list()
+            for factors in summands.values():
+                _factors.append(list_2_node(Product, factors))
+            _summands.append(list_2_node(Product, _factors))
+        self.opt_node = list_2_node(Sum, _summands)
+        if self.multiindex:
+            self.opt_node = IndexSum(self.opt_node, self.multiindex)
+        return self.opt_node
+

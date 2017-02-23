@@ -55,22 +55,59 @@ def test_reassociate_product():
     assert result.children[0].children[1] == Cij
 
 
-def test_optimise():
-    I = J = 10
+def test_loop_optimise():
+    I = 20
+    J = K = 10
     i = Index('i', I)
     j = Index('j', J)
+    k = Index('k', K)
+
+    A1 = Variable('a1', (I,))
+    A2 = Variable('a2', (I,))
+    A3 = Variable('a3', (I,))
+    A1i = Indexed(A1, (i,))
+    A2i = Indexed(A2, (i,))
+    A3i = Indexed(A3, (i,))
+
     B = Variable('b', (J,))
-    C = Variable('c', (I,))
-    D = Variable('d', (I,))
-    # E = Variable('e', (I,))
+    C = Variable('c', (J,))
+    D = Variable('d', (J,))
     Bj = Indexed(B, (j,))
-    Ci = Indexed(C, (i,))
-    Di = Indexed(D, (i,))
-    # Ei = Indexed(E, (i,))
-    S = Sum(Product(Bj, Ci), Product(Bj, Di))
-    expr = IndexSum(S, (i,))
-    result = optimise(expr, (i, ), ((j, ), ))
+    Cj = Indexed(C, (j,))
+    Dj = Indexed(D, (j,))
+
+    E = Variable('e', (K,))
+    F = Variable('f', (K,))
+    G = Variable('g', (K,))
+    Ek = Indexed(E, (k,))
+    Fk = Indexed(F, (k,))
+    Gk = Indexed(G, (k,))
+
+    Z = Variable('z', ())
+
+    # Test Bj*Ek + Bj*Fk => Bj*(Ek + Fk)
+    expr = Sum(Product(Bj, Ek), Product(Bj, Fk))
+    result = optimise(expr, (i,), ((j, ), (k, )))
     assert count_flop(result) == 110
+
+    # Test that all common factors from optimal factors are applied
+    # Bj*Ek + Bj*Fk + Bj*Gk + Cj*Ek + Cj*Fk =>
+    # Bj*(Ek + Fk + Gk) + Cj*(Ek+Fk)
+    expr = Sum(Sum(Sum(Sum(Product(Bj, Ek), Product(Bj, Fk)),Product(Bj, Gk)),
+                   Product(Cj, Ek)), Product(Cj, Fk))
+    result = optimise(expr, (i,), ((j, ), (k, )))
+    assert count_flop(result) == 320
+
+    # Test that consts are factorised
+    # Z*A1i*Bj*Ek + Z*A2i*Bj*Ek + A3i*Bj*Ek + Z*A1i*Bj =>
+    # Bj*(Ek*(Z*(A1i + A2i) + A3i) + Z*A1i)
+
+    expr = Sum(Sum(Sum(Product(Z, Product(A1i, Product(Bj, Ek))),
+                       Product(Z, Product(A2i, Product(Bj, Ek)))),
+                   Product(A3i, Product(Bj, Ek))), Product(Z, Product(A1i, Bj)))
+    result = optimise(expr, (i,), ((j, ), (k, )))
+    assert count_flop(result) == 2480
+
 
 
 # def test_factorise():
