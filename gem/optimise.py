@@ -2,7 +2,7 @@
 expressions."""
 
 from __future__ import absolute_import, print_function, division
-from six import itervalues
+from six import itervalues, iteritems
 from six.moves import map, zip
 
 from collections import OrderedDict, deque
@@ -490,6 +490,10 @@ def count_flop_node(node):
 @count_flop_node.register(ListTensor)
 @count_flop_node.register(FlexiblyIndexed)
 @count_flop_node.register(IndexSum)
+@count_flop_node.register(LogicalNot)
+@count_flop_node.register(LogicalAnd)
+@count_flop_node.register(LogicalOr)
+@count_flop_node.register(Conditional)
 def count_flop_node_zero(node):
     return 0
 
@@ -500,10 +504,6 @@ def count_flop_node_zero(node):
 @count_flop_node.register(Product)
 @count_flop_node.register(Division)
 @count_flop_node.register(MathFunction)
-@count_flop_node.register(LogicalNot)
-@count_flop_node.register(LogicalAnd)
-@count_flop_node.register(LogicalOr)
-@count_flop_node.register(Conditional)
 def count_flop_node_single(node):
     return numpy.prod([idx.extent for idx in node.free_indices])
 
@@ -582,12 +582,12 @@ def optimise(node, quad_ind, arg_ind):
 
 
 def optimise_expressions(expressions, quadrature_indices, argument_indices):
-    if propogate_failure(expressions):
+    if propagate_failure(expressions):
         return expressions
     return [optimise(node, quadrature_indices, argument_indices) for node in expressions]
 
 
-def propogate_failure(expressions):
+def propagate_failure(expressions):
     for n in traversal(expressions):
         if isinstance(n, Failure):
             return True
@@ -598,7 +598,7 @@ def _list_2_node(children, self):
     if len(children) < 3:
         return reduce(self.func, children, self.base)
     else:
-        mid = int(len(children) / 2)
+        mid = len(children) // 2
         return self((self(children[:mid]), self(children[mid:])))
 
 
@@ -684,7 +684,7 @@ class LoopOptimiser(object):
             if len(ind_set) > 1:
                 return tuple(i for i in self.arg_ind_flat if i in ind_set)
             elif len(ind_set) == 0:
-                return 'quad'
+                return 'other'
             else:
                 return ind_set.pop()
 
@@ -697,45 +697,44 @@ class LoopOptimiser(object):
         rep = []
         for summand in summands:
             d = OrderedDict()
-            for i in ['const', 'quad'] + list(self.arg_ind_flat):
+            for i in ['const', 'other'] + list(self.arg_ind_flat):
                 d[i] = list()
             for factor in collect_terms(summand, Product):
                 key = self._decide_key(factor)
-                if key in d:
-                    d[key].append(factor)
-                else:
-                    d[key] = [factor]
+                d.setdefault(key, []).append(factor)
             rep.append(d)
         self.rep = rep
 
+    def factor_extent(self, factor):
+        """
+        Compute the product of extents of all argument indices of :param factor
+        """
+        return numpy.product([i.extent for i in set(factor.free_indices) & self.arg_ind_set])
+
     def find_optimal_arg_factors(self):
-        # TODO: add guard so that self.rep is up to date here
-        rep = self.rep
         gem_int = OrderedDict()  # Gem node -> int
         int_gem = OrderedDict()  # int -> Gem node
-        extent = dict()  # stores product of extents of free indices
         counter = 0
         # TODO: perhaps should keep a list of all nodes in the object
         # assign number to all factors
-        for summand in rep:
-            for key, factors in summand.items():
+        for summand in self.rep:
+            for key, factors in iteritems(summand):
                 # TODO: this pattern appears multiple times, need to rewrite
-                if key == 'const' or key == 'quad':
+                if key == 'const' or key == 'other':
                     continue
                 for factor in factors:
                     if factor not in gem_int:
                         gem_int[factor] = counter
                         int_gem[counter] = factor
-                        extent[counter] = numpy.product([i.extent for i in set(factor.free_indices) & self.arg_ind_set])
                         counter += 1
         if counter == 0:
             return tuple()
         # add connections (list of tuples)
         connections = []
-        for summand in rep:
+        for summand in self.rep:
             connection = []
-            for key, factors in summand.items():
-                if key == 'const' or key == 'quad':
+            for key, factors in iteritems(summand):
+                if key == 'const' or key == 'other':
                     continue
                 connection.extend([gem_int[factor] for factor in factors])
             connections.append(tuple(connection))
@@ -748,7 +747,7 @@ class LoopOptimiser(object):
         # Objective function
         # Minimise number of factors to pull. If same number, favour factor with larger extent
         big = 10000000  # some arbitrary big number
-        ilp_prob += ilp.lpSum(ilp_var[i] * (big - extent[i]) for i in int_gem)
+        ilp_prob += ilp.lpSum(ilp_var[i] * (big - self.factor_extent(int_gem[i])) for i in int_gem)
 
         # constraints
         for connection in connections:
@@ -758,11 +757,11 @@ class LoopOptimiser(object):
         if ilp_prob.status != 1:
             raise AssertionError("Something bad happened during ILP")
 
-        optimal_factors = [factor for factor, number in gem_int.items() if ilp_var[number].value() == 1]
-        other_factors = [factor for factor, number in gem_int.items() if ilp_var[number].value() == 0]
+        optimal_factors = [factor for factor, number in iteritems(gem_int) if ilp_var[number].value() == 1]
+        other_factors = [factor for factor, number in iteritems(gem_int) if ilp_var[number].value() == 0]
         # TODO: investigate effects of sorting these two lists of factors
-        optimal_factors = sorted(optimal_factors, key=lambda f: extent[gem_int[f]])
-        other_factors = sorted(other_factors, key=lambda f: extent[gem_int[f]])
+        optimal_factors = sorted(optimal_factors, key=lambda f: self.factor_extent(f), reverse=True)
+        other_factors = sorted(other_factors, key=lambda f: self.factor_extent(f), reverse=True)
         # Sequence dictating order of factorisation
         factors_seq = optimal_factors + other_factors
         return factors_seq
@@ -787,7 +786,7 @@ class LoopOptimiser(object):
 
         mcf = None  # most common factor
         mcf_value = (0, 1)  # (number of free indices, count)
-        for factor, count in counter.items():
+        for factor, count in iteritems(counter):
             if count > 1:
                 nfi = len(factor.free_indices)
                 if nfi > mcf_value[0] or (nfi == mcf_value[0] and count > mcf_value[1]):
@@ -805,7 +804,7 @@ class LoopOptimiser(object):
                 continue
             if mcf in summand[key]:
                 factored_out.append(summand)  # mark for deleting later
-                _factors = OrderedDict([(_k, _v) for (_k, _v) in summand.items() if _k != key])
+                _factors = OrderedDict([(_k, _v) for (_k, _v) in iteritems(summand) if _k != key])
                 _factors[key] = [factor for factor in summand[key] if factor != mcf]
                 _summands.append(_factors)
         # TODO: Create a method for this
@@ -830,7 +829,7 @@ class LoopOptimiser(object):
         """
         if not factors_seq:
             # TODO: investigate if worthwhile to do a pass to check const common factors here
-            # self.factorise_key('quad')
+            # self.factorise_key('other')
             # self.factorise_key('const')
             return self.generate_node()
         cf = factors_seq[0]  # pick the first common factor
@@ -848,7 +847,7 @@ class LoopOptimiser(object):
                 continue
             factored_out.append(summand)  # mark for deleting later
             # TODO: default fields might be missing from this OrderedDict(), consider wrap an object around it
-            _summands.append(OrderedDict([(_k, _v) for (_k, _v) in summand.items() if _k != key]))
+            _summands.append(OrderedDict([(_k, _v) for (_k, _v) in iteritems(summand) if _k != key]))
         self.opt_node = None
         if len(_summands) > 1:
             # Proceed with the next common factor for the factorised part
@@ -861,7 +860,7 @@ class LoopOptimiser(object):
             # Create new line in rep
             # TODO: Need an object to wrap around summands
             new_summand = OrderedDict()
-            for i in ['const', 'quad'] + list(self.arg_ind_flat):
+            for i in ['const', 'other'] + list(self.arg_ind_flat):
                 new_summand[i] = list()
             new_summand[self._decide_key(cf)] = [cf]
             new_summand[self._decide_key(node)] = [node]

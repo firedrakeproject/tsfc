@@ -149,9 +149,8 @@ class Identity(Constant):
 class Literal(Constant):
     """Tensor-valued constant"""
 
-    __slots__ = ('array', 'name')
+    __slots__ = ('array',)
     __front__ = ('array',)
-    __back__ = ('name',)
 
     def __new__(cls, array, name=None):
         array = asarray(array)
@@ -161,8 +160,7 @@ class Literal(Constant):
         else:
             return super(Literal, cls).__new__(cls)
 
-    def __init__(self, array, name=None):
-        self.name = name
+    def __init__(self, array):
         self.array = asarray(array, dtype=float)
 
     def is_equal(self, other):
