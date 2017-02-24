@@ -770,6 +770,7 @@ class LoopOptimiser(object):
         """
         Factorise common factors that have a particular :param key
         """
+        # TODO: Add a forbidden list of factors
         if len(self.rep) < 2:
             return
         counter = OrderedDict()
@@ -779,22 +780,11 @@ class LoopOptimiser(object):
             for factor in summand[key]:
                 counter.setdefault(factor, 0)
                 counter[factor] += 1
-        if not counter:
-            return
         if max(counter.values()) < 2:
             return
-
-        mcf = None  # most common factor
-        mcf_value = (0, 1)  # (number of free indices, count)
-        for factor, count in iteritems(counter):
-            if count > 1:
-                nfi = len(factor.free_indices)
-                if nfi > mcf_value[0] or (nfi == mcf_value[0] and count > mcf_value[1]):
-                    # TODO: Possibly other heurstics than prioritizing factors with most free indices
-                    mcf = factor
-                    mcf_value = (nfi, count)
-        if not mcf:
-            return
+        saved_flops = OrderedDict((((count_flop(factor) + 1)) * (count - 1), factor)
+                                  for (factor, count) in iteritems(counter))
+        mcf = saved_flops[max(saved_flops.keys())]  # most common factor
         self.opt_node = None
         _summands = list()
         factored_out = list()
