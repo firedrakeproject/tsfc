@@ -577,7 +577,8 @@ def optimise(node, quad_ind, arg_ind):
         return node
     lo = LoopOptimiser(node, arg_ind)
     optimal_arg = lo.find_optimal_arg_factors()
-    lo.factorise_arg(optimal_arg)
+    lo.factorise_arg(optimal_arg[0])
+    lo.factorise_arg(optimal_arg[1])
     return lo.generate_node()
 
 
@@ -763,8 +764,7 @@ class LoopOptimiser(object):
         optimal_factors = sorted(optimal_factors, key=lambda f: self.factor_extent(f), reverse=True)
         other_factors = sorted(other_factors, key=lambda f: self.factor_extent(f), reverse=True)
         # Sequence dictating order of factorisation
-        factors_seq = optimal_factors + other_factors
-        return factors_seq
+        return (tuple(optimal_factors), tuple(other_factors))
 
     def factorise_key(self, key):
         """
@@ -780,6 +780,8 @@ class LoopOptimiser(object):
             for factor in summand[key]:
                 counter.setdefault(factor, 0)
                 counter[factor] += 1
+        if not counter:
+            return
         if max(counter.values()) < 2:
             return
         saved_flops = OrderedDict((((count_flop(factor) + 1)) * (count - 1), factor)
