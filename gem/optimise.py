@@ -2,7 +2,7 @@
 expressions."""
 
 from __future__ import absolute_import, print_function, division
-from six import itervalues, iteritems
+from six import itervalues, iteritems, iterkeys
 from six.moves import map, zip
 
 from collections import OrderedDict, deque
@@ -619,6 +619,7 @@ def optimise(node, quad_ind, arg_ind):
     lo = LoopOptimiser(rep=rep, multiindex=multiindex, arg_ind=arg_ind)
     optimal_arg = lo.find_optimal_arg_factors()
     lo.factorise_arg(optimal_arg[0] + optimal_arg[1])
+    lo.factorise_key(('other', 'const'), no_arg_factor=False)
     return lo.generate_node()
 
 
@@ -675,6 +676,12 @@ class Summand(OrderedDict):
             self.pop('arg_ind_flat')
             for i in ['const', 'other'] + list(kwargs['arg_ind_flat']):
                 self[i] = list()
+
+    def arg_keys(self):
+        return [k for k in iterkeys(self) if k != 'const' and k != 'other']
+
+    def contains_arg_factor(self):
+        return any([self[k] != [] for k in self.arg_keys()])
 
 
 class LoopOptimiser(object):
@@ -779,58 +786,66 @@ class LoopOptimiser(object):
         # Sequence dictating order of factorisation
         return (tuple(optimal_factors), tuple(other_factors))
 
-    def factorise_key(self, key):
+    def factorise_key(self, keys, no_arg_factor=True):
         """
-        Factorise common factors that have a particular :param key
+        Factorise common factors that have a particular key from :param keys
+        :param no_arg_factor: do not factorise if Summand contains argument
+        factors, since this might destroy subsequent factorisation passes.
         """
-        # TODO: Add a forbidden list of factors
         if len(self.rep) < 2:
             return
         counter = OrderedDict()
         for summand in self.rep:
-            if key not in summand:
+            if no_arg_factor and summand.contains_arg_factor():
                 continue
-            for factor in OrderedDict().fromkeys(summand[key]):
-                counter.setdefault(factor, 0)
-                counter[factor] += 1
+            for _key in keys:
+                if _key not in summand:
+                    continue
+                # One factor could appear multiple times in a Summand
+                for factor in OrderedDict().fromkeys(summand[_key]):
+                    counter.setdefault(factor, 0)
+                    counter[factor] += 1
         if not counter:
             return
         if max(counter.values()) < 2:
             return
+        # TODO: No need to use dict here
         saved_flops = OrderedDict((((count_flop(factor) + 1)) * (count - 1), factor)
                                   for (factor, count) in iteritems(counter))
         mcf = saved_flops[max(saved_flops.keys())]  # most common factor
+        mcf_key = self._decide_key(mcf)
         _summands = list()
         factored_out = list()
         for summand in self.rep:
-            # TODO: This pattern of checking keys is repeated several times
-            if key not in summand:
+            if no_arg_factor and summand.contains_arg_factor():
                 continue
-            if mcf in summand[key]:
+            if mcf_key not in summand:
+                continue
+            if mcf in summand[mcf_key]:
                 factored_out.append(summand)  # mark for deleting later
                 _factors = Summand(summand)
-                _factors[key].remove(mcf)
+                _factors[mcf_key].remove(mcf)
                 _summands.append(_factors)
-        # TODO: Create a method for this
         lo = LoopOptimiser(rep=_summands, multiindex=(), arg_ind=self.arg_ind)
+        lo.factorise_key(keys, no_arg_factor)
         # TODO: Maybe can continue to factorise this new node
         node = lo.generate_node()
         for to_delete in factored_out:
             self.rep.remove(to_delete)
         new_summand = Summand(arg_ind_flat=self.arg_ind_flat)
         new_summand[self._decide_key(node)] = [node]
-        new_summand[key].insert(0, mcf)
+        new_summand[mcf_key].insert(0, mcf)
         self.rep.append(new_summand)
-        self.factorise_key(key)  # Continue factorising
+        self.factorise_key(keys, no_arg_factor)  # Continue factorising
 
     def factorise_arg(self, factors_seq):
         """
         Factorise sequentially with common factors from :param factors_seq
         :param factors_seq: sequence of factors used to factorise
         """
+        # Return if rep < 2
         if not factors_seq:
-            self.factorise_key('other')
-            self.factorise_key('const')
+            self.factorise_key(('other', 'const'))
             return
         cf = factors_seq[0]  # pick the first common factor
         key = self._decide_key(cf)
@@ -865,10 +880,7 @@ class LoopOptimiser(object):
             self.rep.append(new_summand)
         # Proceed with the next common factor
         # TODO: investigate if worthwhile to do a pass to check const common factors here
-        if len(factors_seq) > 1:
-            self.factorise_arg(factors_seq[1:])
-        self.factorise_key('other')
-        self.factorise_key('const')
+        self.factorise_arg(factors_seq[1:])
 
     def generate_node(self):
         # TODO: Here need to consider the order of forming products, currently this only ensures same group gets multiplied first. Consider lexico order between groups.
