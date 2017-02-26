@@ -572,10 +572,53 @@ def collect_terms(node, node_type):
     return tuple(terms)
 
 
+def decide_key(factor, arg_ind_flat, arg_ind_set):
+    """
+    Helper function to decide the appropriate key of a factor
+    :param factor: gem node
+    :param arg_ind_flat: set of argument indices
+    """
+    fi = factor.free_indices
+    if not fi:
+        return 'const'
+    else:
+        ind_set = set(fi) & arg_ind_set
+        if len(ind_set) > 1:
+            return tuple(i for i in arg_ind_flat if i in ind_set)
+        elif len(ind_set) == 0:
+            return 'other'
+        else:
+            return ind_set.pop()
+
+
+def build_repr(node, arg_ind):
+    """
+    Build representation from self.node
+    """
+    arg_ind_flat = tuple([i for indices in arg_ind for i in indices])
+    multiindex = ()
+    if isinstance(node, IndexSum):
+        multiindex = node.multiindex
+        node = node.children[0]
+    node = expand_products(node, arg_ind_flat)
+    summands = collect_terms(node, Sum)
+    rep = []
+    for summand in summands:
+        d = OrderedDict()
+        for i in ['const', 'other'] + list(arg_ind_flat):
+            d[i] = list()
+        for factor in collect_terms(summand, Product):
+            key = decide_key(factor, arg_ind_flat, set(arg_ind_flat))
+            d.setdefault(key, []).append(factor)
+        rep.append(d)
+    return (rep, multiindex)
+
+
 def optimise(node, quad_ind, arg_ind):
     if isinstance(node, Constant):
         return node
-    lo = LoopOptimiser(node, arg_ind)
+    rep, multiindex = build_repr(node, arg_ind)
+    lo = LoopOptimiser(rep=rep, multiindex=multiindex, arg_ind=arg_ind)
     optimal_arg = lo.find_optimal_arg_factors()
     lo.factorise_arg(optimal_arg[0] + optimal_arg[1])
     return lo.generate_node()
@@ -649,67 +692,28 @@ class LoopOptimiser(object):
             factors depend on indices (typically quadrature indices for reduction)
             other than argument indices
     """
-    def __init__(self, node, arg_ind, rep=None):
+    def __init__(self, rep, multiindex, arg_ind):
         """
         Constructor
-        :param node: gem node
+        :param node: representation of a gem node as summation of products
         :param arg_ind: tuples of tuples of argument (linear) indices
         """
-        self.node = node
-        self.arg_ind = arg_ind
-        # TODO: make these two properties of the object
-        self.arg_ind_flat = tuple([i for id in self.arg_ind for i in id])
-        self.arg_ind_set = set(self.arg_ind_flat)
-        if isinstance(node, IndexSum):
-            self.multiindex = node.multiindex
-            self.node = node.children[0]
-        else:
-            self.multiindex = ()
-        if rep:
-            self.rep = rep
-        else:
-            self._build_repr()
-        self.opt_node = None  # optimised gem node
-
-    def _decide_key(self, factor):
-        """
-        Helper function to decide the appropriate key of a factor
-        :param factor: gem node
-        """
-        fi = factor.free_indices
-        if not fi:
-            return 'const'
-        else:
-            ind_set = set(fi) & self.arg_ind_set
-            if len(ind_set) > 1:
-                return tuple(i for i in self.arg_ind_flat if i in ind_set)
-            elif len(ind_set) == 0:
-                return 'other'
-            else:
-                return ind_set.pop()
-
-    def _build_repr(self):
-        """
-        Build self.repr from self.node
-        """
-        node = expand_products(self.node, self.arg_ind_flat)
-        summands = collect_terms(node, Sum)
-        rep = []
-        for summand in summands:
-            d = OrderedDict()
-            for i in ['const', 'other'] + list(self.arg_ind_flat):
-                d[i] = list()
-            for factor in collect_terms(summand, Product):
-                key = self._decide_key(factor)
-                d.setdefault(key, []).append(factor)
-            rep.append(d)
+        self.node = None
         self.rep = rep
+        self.arg_ind = arg_ind
+        self.multiindex = multiindex
+        # TODO: make these two properties of the object
+        self.arg_ind_flat = tuple([i for indices in self.arg_ind for i in indices])
+        self.arg_ind_set = set(self.arg_ind_flat)
 
     def factor_extent(self, factor):
         """
         Compute the product of extents of all argument indices of :param factor
         """
         return numpy.product([i.extent for i in set(factor.free_indices) & self.arg_ind_set])
+
+    def _decide_key(self, node):
+        return decide_key(node, self.arg_ind_flat, self.arg_ind_set)
 
     def find_optimal_arg_factors(self):
         gem_int = OrderedDict()  # Gem node -> int
@@ -786,7 +790,6 @@ class LoopOptimiser(object):
         saved_flops = OrderedDict((((count_flop(factor) + 1)) * (count - 1), factor)
                                   for (factor, count) in iteritems(counter))
         mcf = saved_flops[max(saved_flops.keys())]  # most common factor
-        self.opt_node = None
         _summands = list()
         factored_out = list()
         for summand in self.rep:
@@ -797,10 +800,9 @@ class LoopOptimiser(object):
                 factored_out.append(summand)  # mark for deleting later
                 _factors = OrderedDict(summand)
                 _factors[key].remove(mcf)
-                # _factors = OrderedDict([(_k, _v) for (_k, _v) in iteritems(summand) if _k != key])
                 _summands.append(_factors)
         # TODO: Create a method for this
-        lo = LoopOptimiser(node=None, arg_ind=self.arg_ind, rep=_summands)
+        lo = LoopOptimiser(rep=_summands, multiindex=(), arg_ind=self.arg_ind)
         # TODO: Maybe can continue to factorise this new node
         node = lo.generate_node()
         for to_delete in factored_out:
@@ -839,10 +841,10 @@ class LoopOptimiser(object):
             factored_out.append(summand)  # mark for deleting later
             # TODO: default fields might be missing from this OrderedDict(), consider wrap an object around it
             _summands.append(OrderedDict([(_k, _v) for (_k, _v) in iteritems(summand) if _k != key]))
-        self.opt_node = None
+        self.node = None
         if len(_summands) > 1:
             # Proceed with the next common factor for the factorised part
-            lo = LoopOptimiser(node=None, arg_ind=self.arg_ind, rep=_summands)
+            lo = LoopOptimiser(rep=_summands, multiindex=(), arg_ind=self.arg_ind)
             lo.factorise_arg(factors_seq[1:])
             node = lo.generate_node()
             # Delete factored out lines in rep
@@ -865,15 +867,15 @@ class LoopOptimiser(object):
 
     def generate_node(self):
         # TODO: Here need to consider the order of forming products, currently this only ensures same group gets multiplied first. Consider lexico order between groups.
-        if self.opt_node:
-            return self.opt_node
+        if self.node:
+            return self.node
         _summands = list()
         for summands in self.rep:
             _factors = list()
             for factors in summands.values():
                 _factors.append(list_2_node(Product, factors))
             _summands.append(list_2_node(Product, _factors))
-        self.opt_node = list_2_node(Sum, _summands)
+        self.node = list_2_node(Sum, _summands)
         if self.multiindex:
-            self.opt_node = IndexSum(self.opt_node, self.multiindex)
-        return self.opt_node
+            self.node = IndexSum(self.node, self.multiindex)
+        return self.node
