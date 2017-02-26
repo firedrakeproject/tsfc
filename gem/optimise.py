@@ -577,8 +577,7 @@ def optimise(node, quad_ind, arg_ind):
         return node
     lo = LoopOptimiser(node, arg_ind)
     optimal_arg = lo.find_optimal_arg_factors()
-    lo.factorise_arg(optimal_arg[0])
-    lo.factorise_arg(optimal_arg[1])
+    lo.factorise_arg(optimal_arg[0] + optimal_arg[1])
     return lo.generate_node()
 
 
@@ -729,7 +728,7 @@ class LoopOptimiser(object):
                         int_gem[counter] = factor
                         counter += 1
         if counter == 0:
-            return tuple()
+            return ((), ())
         # add connections (list of tuples)
         connections = []
         for summand in self.rep:
@@ -777,7 +776,7 @@ class LoopOptimiser(object):
         for summand in self.rep:
             if key not in summand:
                 continue
-            for factor in summand[key]:
+            for factor in OrderedDict().fromkeys(summand[key]):
                 counter.setdefault(factor, 0)
                 counter[factor] += 1
         if not counter:
@@ -796,8 +795,9 @@ class LoopOptimiser(object):
                 continue
             if mcf in summand[key]:
                 factored_out.append(summand)  # mark for deleting later
-                _factors = OrderedDict([(_k, _v) for (_k, _v) in iteritems(summand) if _k != key])
-                _factors[key] = [factor for factor in summand[key] if factor != mcf]
+                _factors = OrderedDict(summand)
+                _factors[key].remove(mcf)
+                # _factors = OrderedDict([(_k, _v) for (_k, _v) in iteritems(summand) if _k != key])
                 _summands.append(_factors)
         # TODO: Create a method for this
         lo = LoopOptimiser(node=None, arg_ind=self.arg_ind, rep=_summands)
@@ -820,10 +820,9 @@ class LoopOptimiser(object):
         :param factors_seq: sequence of factors used to factorise
         """
         if not factors_seq:
-            # TODO: investigate if worthwhile to do a pass to check const common factors here
-            # self.factorise_key('other')
-            # self.factorise_key('const')
-            return self.generate_node()
+            self.factorise_key('other')
+            self.factorise_key('const')
+            return
         cf = factors_seq[0]  # pick the first common factor
         key = self._decide_key(cf)
         factored_out = list()
@@ -858,9 +857,11 @@ class LoopOptimiser(object):
             new_summand[self._decide_key(node)] = [node]
             self.rep.append(new_summand)
         # Proceed with the next common factor
-        lo = LoopOptimiser(node=None, arg_ind=self.arg_ind, rep=self.rep)
-        lo.factorise_arg(factors_seq[1:])
-        return lo.generate_node()
+        # TODO: investigate if worthwhile to do a pass to check const common factors here
+        if len(factors_seq) > 1:
+            self.factorise_arg(factors_seq[1:])
+        self.factorise_key('other')
+        self.factorise_key('const')
 
     def generate_node(self):
         # TODO: Here need to consider the order of forming products, currently this only ensures same group gets multiplied first. Consider lexico order between groups.
