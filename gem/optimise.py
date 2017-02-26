@@ -604,9 +604,7 @@ def build_repr(node, arg_ind):
     summands = collect_terms(node, Sum)
     rep = []
     for summand in summands:
-        d = OrderedDict()
-        for i in ['const', 'other'] + list(arg_ind_flat):
-            d[i] = list()
+        d = Summand(arg_ind_flat=arg_ind_flat)
         for factor in collect_terms(summand, Product):
             key = decide_key(factor, arg_ind_flat, set(arg_ind_flat))
             d.setdefault(key, []).append(factor)
@@ -665,6 +663,18 @@ def list_2_node(function, children):
     mapper.func = function
     mapper.base = base
     return mapper(tuple(children))
+
+
+class Summand(OrderedDict):
+    """
+    An object wrapped around an OrderedDict to represent a product node
+    """
+    def __init__(self, *args, **kwargs):
+        OrderedDict.__init__(self, *args, **kwargs)
+        if 'arg_ind_flat' in kwargs:
+            self.pop('arg_ind_flat')
+            for i in ['const', 'other'] + list(kwargs['arg_ind_flat']):
+                self[i] = list()
 
 
 class LoopOptimiser(object):
@@ -798,7 +808,7 @@ class LoopOptimiser(object):
                 continue
             if mcf in summand[key]:
                 factored_out.append(summand)  # mark for deleting later
-                _factors = OrderedDict(summand)
+                _factors = Summand(summand)
                 _factors[key].remove(mcf)
                 _summands.append(_factors)
         # TODO: Create a method for this
@@ -807,12 +817,9 @@ class LoopOptimiser(object):
         node = lo.generate_node()
         for to_delete in factored_out:
             self.rep.remove(to_delete)
-        new_summand = OrderedDict()
-        if self._decide_key(node) == key:
-            new_summand[key] = [mcf, node]
-        else:
-            new_summand[key] = [mcf]
-            new_summand[self._decide_key(node)] = [node]
+        new_summand = Summand(arg_ind_flat=self.arg_ind_flat)
+        new_summand[self._decide_key(node)] = [node]
+        new_summand[key].insert(0, mcf)
         self.rep.append(new_summand)
         self.factorise_key(key)  # Continue factorising
 
@@ -839,8 +846,9 @@ class LoopOptimiser(object):
             if cf not in factors:
                 continue
             factored_out.append(summand)  # mark for deleting later
-            # TODO: default fields might be missing from this OrderedDict(), consider wrap an object around it
-            _summands.append(OrderedDict([(_k, _v) for (_k, _v) in iteritems(summand) if _k != key]))
+            new_summand = Summand(summand)
+            new_summand[key] = []
+            _summands.append(new_summand)
         self.node = None
         if len(_summands) > 1:
             # Proceed with the next common factor for the factorised part
@@ -851,12 +859,9 @@ class LoopOptimiser(object):
             for to_delete in factored_out:
                 self.rep.remove(to_delete)
             # Create new line in rep
-            # TODO: Need an object to wrap around summands
-            new_summand = OrderedDict()
-            for i in ['const', 'other'] + list(self.arg_ind_flat):
-                new_summand[i] = list()
-            new_summand[self._decide_key(cf)] = [cf]
+            new_summand = Summand(arg_ind_flat=self.arg_ind_flat)
             new_summand[self._decide_key(node)] = [node]
+            new_summand[self._decide_key(cf)].insert(0, cf)
             self.rep.append(new_summand)
         # Proceed with the next common factor
         # TODO: investigate if worthwhile to do a pass to check const common factors here
