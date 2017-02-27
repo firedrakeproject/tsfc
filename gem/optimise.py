@@ -572,6 +572,44 @@ def collect_terms(node, node_type):
     return tuple(terms)
 
 
+@singledispatch
+def _hoist_indexsum(node, self):
+    raise AssertionError("cannot handle type %s" % type(node))
+
+
+_hoist_indexsum.register(Node)(reuse_if_untouched)
+
+
+@_hoist_indexsum.register(IndexSum)
+def _hoist_indexsum_indexsum(node, self):
+    child = self(node.children[0])
+    if isinstance(child, Product):
+        mi_set = set(node.multiindex)
+        factors = collect_terms(child, Product)
+        hoisted_factors = []
+        remaining_factors = []
+        for factor in factors:
+            if set(factor.free_indices) & mi_set:
+                remaining_factors.append(factor)
+            else:
+                hoisted_factors.append(factor)
+        if hoisted_factors:
+            new_indexsum = IndexSum(reduce(Product, remaining_factors, one), node.multiindex)
+            return Product(reduce(Product, hoisted_factors, one), new_indexsum)
+    return node
+
+
+def hoist_indexsum(node):
+    """
+    lifting factors invariant in the contraction indices out of an IndexSum
+    e.g. IndexSum(A*B, (i,)) = A * IndexSum(B), if A is independent of i
+    :param node:
+    :return:
+    """
+    mapper = Memoizer(_hoist_indexsum)
+    return mapper(node)
+
+
 def decide_key(factor, arg_ind_flat, arg_ind_set):
     """
     Helper function to decide the appropriate key of a factor
@@ -620,6 +658,7 @@ def optimise(node, quad_ind, arg_ind):
     optimal_arg = lo.find_optimal_arg_factors()
     lo.factorise_arg(optimal_arg[0] + optimal_arg[1])
     lo.factorise_key(('other', 'const'), no_arg_factor=False)
+    # TODO: hoisting out of IndexSum
     return lo.generate_node()
 
 
@@ -707,6 +746,23 @@ class Summand(OrderedDict):
 
     def sorted_arg_keys(self, arg_ind_flat):
         return sort_keys(self.arg_keys(), arg_ind_flat)
+
+    def keys_contain_indices(self, indices):
+        """
+        Returns list of keys which contains any of the index in indices
+        """
+        indices_set = set(indices)
+        result = list()
+        # TODO: Do not need to check 'const' here
+        for key, factors in iteritems(self):
+            for factor in factors:
+                if set(factor.free_indices) & indices_set:
+                    result.append(key)
+                    break
+        return result
+
+    def keys_not_contain_indices(self, indices):
+        return [key for key in iterkeys(self) if key not in self.keys_contain_indices(indices)]
 
 
 class LoopOptimiser(object):
@@ -930,6 +986,20 @@ class LoopOptimiser(object):
         # TODO: Here need to consider the order of forming products, currently this only ensures same group gets multiplied first. Consider lexico order between groups.
         if self.node:
             return self.node
+        if self.multiindex and len(self.rep) == 1:
+            # Hoisting out of IndexSum
+            hoist_keys = self.rep[0].keys_not_contain_indices(self.multiindex)
+            if hoist_keys:
+                hoisted_summand = Summand(arg_ind_flat=self.arg_ind_flat)
+                unhoisted_summand = Summand(self.rep[0])
+                for key in hoist_keys:
+                    hoisted_summand[key] = self.rep[0][key]
+                    unhoisted_summand[key] = []
+                hoisted_node = LoopOptimiser(rep=[hoisted_summand], multiindex=(), arg_ind=self.arg_ind).generate_node()
+                new_summand_node = LoopOptimiser(rep=[unhoisted_summand], multiindex=(), arg_ind=self.arg_ind).generate_node()
+                self.node = Product(hoisted_node, IndexSum(new_summand_node, self.multiindex))
+                return self.node
+
         _summands = Summand(arg_ind_flat=self.arg_ind_flat)
         for summand in self.rep:
             _factors = list()
