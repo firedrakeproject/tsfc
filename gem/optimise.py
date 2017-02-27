@@ -535,7 +535,7 @@ def _expand_products_prod(node, self):
         return Sum(self(Product(a.children[0], b)),
                    self(Product(a.children[1], b)))
     else:
-        return node
+        return Product(a, b)
 
 
 # TODO: arguablly should move this inside Kernel_Optimiser
@@ -637,6 +637,8 @@ def propagate_failure(expressions):
 
 
 def _list_2_node(children, self):
+    if not self.balanced:
+        return reduce(self.func, children, self.base)
     if len(children) < 3:
         return reduce(self.func, children, self.base)
     else:
@@ -644,7 +646,7 @@ def _list_2_node(children, self):
         return self((self(children[:mid]), self(children[mid:])))
 
 
-def list_2_node(function, children):
+def list_2_node(function, children, balanced=True):
     """
     generate gem node from list of children
     use recursion so that each term is not too long
@@ -653,7 +655,6 @@ def list_2_node(function, children):
     :return: gem node
     """
     # TODO: DAG awareness. Hashing with tuple is probably slow here.
-    # possibly need to be able to pass in a sequence (of free_indices) dictating the order of grouping children nodes
     if function == Sum:
         base = Zero()
     elif function == Product:
@@ -663,7 +664,28 @@ def list_2_node(function, children):
     mapper = Memoizer(_list_2_node)
     mapper.func = function
     mapper.base = base
+    mapper.balanced = balanced
     return mapper(tuple(children))
+
+
+def sort_keys(keys, arg_ind_flat):
+    """
+    sort keys of :class: `Summand` by lexicographical order, according to the order they
+    appear in :param arg_ind_flat.
+    e.g. [j, k, (j,k)] => [j, (j,k), k]
+    """
+    # Convert keys to string and sort by lexicographical order
+    index_2_letter = dict().fromkeys(arg_ind_flat)
+    start_number = ord('a')
+    for number, arg_ind in enumerate(arg_ind_flat, start=start_number):
+        index_2_letter[arg_ind] = chr(number)
+    strings = dict().fromkeys(keys)
+    for key in keys:
+        if isinstance(key, Index):
+            strings[key] = [index_2_letter[key]]
+        else:
+            strings[key] = [index_2_letter[i] for i in key]
+    return sorted(keys, key=lambda k: strings[k])
 
 
 class Summand(OrderedDict):
@@ -682,6 +704,9 @@ class Summand(OrderedDict):
 
     def contains_arg_factor(self):
         return any([self[k] != [] for k in self.arg_keys()])
+
+    def sorted_arg_keys(self, arg_ind_flat):
+        return sort_keys(self.arg_keys(), arg_ind_flat)
 
 
 class LoopOptimiser(object):
@@ -731,6 +756,13 @@ class LoopOptimiser(object):
 
     def _decide_key(self, node):
         return decide_key(node, self.arg_ind_flat, self.arg_ind_set)
+
+    def all_arg_keys(self):
+        _keys = OrderedDict()
+        for summands in self.rep:
+            for key in summands.arg_keys():
+                _keys[key] = None
+        return tuple(_keys.keys())
 
     def find_optimal_arg_factors(self):
         gem_int = OrderedDict()  # Gem node -> int
@@ -826,16 +858,25 @@ class LoopOptimiser(object):
                 _factors = Summand(summand)
                 _factors[mcf_key].remove(mcf)
                 _summands.append(_factors)
+
+        assert(len(_summands) == counter[mcf])
         lo = LoopOptimiser(rep=_summands, multiindex=(), arg_ind=self.arg_ind)
         lo.factorise_key(keys, no_arg_factor)
         # TODO: Maybe can continue to factorise this new node
-        node = lo.generate_node()
         for to_delete in factored_out:
             self.rep.remove(to_delete)
-        new_summand = Summand(arg_ind_flat=self.arg_ind_flat)
-        new_summand[self._decide_key(node)] = [node]
-        new_summand[mcf_key].insert(0, mcf)
-        self.rep.append(new_summand)
+        if len(lo.rep) == 1:
+            # result of further factorisation is a Product
+            new_summand = lo.rep[0]
+            new_summand[mcf_key].insert(0, mcf)
+            self.rep.append(new_summand)
+        else:
+            # result of further factorisation is a Sum
+            node = lo.generate_node()
+            new_summand = Summand(arg_ind_flat=self.arg_ind_flat)
+            new_summand[self._decide_key(node)] = [node]
+            new_summand[mcf_key].insert(0, mcf)
+            self.rep.append(new_summand)
         self.factorise_key(keys, no_arg_factor)  # Continue factorising
 
     def factorise_arg(self, factors_seq):
@@ -843,9 +884,9 @@ class LoopOptimiser(object):
         Factorise sequentially with common factors from :param factors_seq
         :param factors_seq: sequence of factors used to factorise
         """
-        # Return if rep < 2
+        # TODO: Return if rep < 2 ?
         if not factors_seq:
-            self.factorise_key(('other', 'const'))
+            self.factorise_key(('other', 'const'), no_arg_factor=False)
             return
         cf = factors_seq[0]  # pick the first common factor
         key = self._decide_key(cf)
@@ -864,35 +905,44 @@ class LoopOptimiser(object):
             new_summand = Summand(summand)
             new_summand[key] = []
             _summands.append(new_summand)
-        self.node = None
         if len(_summands) > 1:
             # Proceed with the next common factor for the factorised part
             lo = LoopOptimiser(rep=_summands, multiindex=(), arg_ind=self.arg_ind)
             lo.factorise_arg(factors_seq[1:])
-            node = lo.generate_node()
             # Delete factored out lines in rep
             for to_delete in factored_out:
                 self.rep.remove(to_delete)
-            # Create new line in rep
-            new_summand = Summand(arg_ind_flat=self.arg_ind_flat)
-            new_summand[self._decide_key(node)] = [node]
-            new_summand[self._decide_key(cf)].insert(0, cf)
-            self.rep.append(new_summand)
+            if len(lo.rep) == 1:
+                new_summand = lo.rep[0]
+                new_summand[key].insert(0, cf)
+                self.rep.append(new_summand)
+            else:
+                node = lo.generate_node()
+                # Create new line in rep
+                new_summand = Summand(arg_ind_flat=self.arg_ind_flat)
+                new_summand[self._decide_key(node)] = [node]
+                new_summand[key].insert(0, cf)
+                self.rep.append(new_summand)
         # Proceed with the next common factor
-        # TODO: investigate if worthwhile to do a pass to check const common factors here
         self.factorise_arg(factors_seq[1:])
 
     def generate_node(self):
         # TODO: Here need to consider the order of forming products, currently this only ensures same group gets multiplied first. Consider lexico order between groups.
         if self.node:
             return self.node
-        _summands = list()
-        for summands in self.rep:
+        _summands = Summand(arg_ind_flat=self.arg_ind_flat)
+        for summand in self.rep:
             _factors = list()
-            for factors in summands.values():
-                _factors.append(list_2_node(Product, factors))
-            _summands.append(list_2_node(Product, _factors))
-        self.node = list_2_node(Sum, _summands)
+            for key in ['const', 'other'] + summand.sorted_arg_keys(self.arg_ind_flat):
+                _factors.append(list_2_node(Product, summand[key]))
+            _summand_node = list_2_node(Product, _factors, balanced=False)
+            _key = self._decide_key(_summand_node)
+            _summands.setdefault(_key, []).append(_summand_node)
+
+        _combined_summands = list()
+        for _key in ['const', 'other'] + _summands.sorted_arg_keys(self.arg_ind_flat):
+            _combined_summands.append(list_2_node(Sum, _summands[_key]))
+        self.node = list_2_node(Sum, _combined_summands, balanced=False)
         if self.multiindex:
             self.node = IndexSum(self.node, self.multiindex)
         return self.node
