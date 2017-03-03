@@ -761,8 +761,8 @@ class Summand(OrderedDict):
                     break
         return result
 
-    def keys_not_contain_indices(self, indices):
-        return [key for key in iterkeys(self) if key not in self.keys_contain_indices(indices)]
+    def arg_keys_not_contain_indices(self, indices):
+        return [key for key in self.arg_keys() if key not in self.keys_contain_indices(indices)]
 
 
 class LoopOptimiser(object):
@@ -988,7 +988,7 @@ class LoopOptimiser(object):
             return self.node
         if self.multiindex and len(self.rep) == 1:
             # Hoisting out of IndexSum
-            hoist_keys = self.rep[0].keys_not_contain_indices(self.multiindex)
+            hoist_keys = self.rep[0].arg_keys_not_contain_indices(self.multiindex)
             if hoist_keys:
                 hoisted_summand = Summand(arg_ind_flat=self.arg_ind_flat)
                 unhoisted_summand = Summand(self.rep[0])
