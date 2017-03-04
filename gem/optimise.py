@@ -7,7 +7,8 @@ from six.moves import map, zip
 
 from collections import OrderedDict, deque
 from functools import reduce
-from itertools import permutations
+from itertools import permutations, count
+from cached_property import cached_property
 
 import numpy
 from singledispatch import singledispatch
@@ -489,7 +490,6 @@ def count_flop_node(node):
 @count_flop_node.register(Variable)
 @count_flop_node.register(ListTensor)
 @count_flop_node.register(FlexiblyIndexed)
-@count_flop_node.register(IndexSum)
 @count_flop_node.register(LogicalNot)
 @count_flop_node.register(LogicalAnd)
 @count_flop_node.register(LogicalOr)
@@ -508,12 +508,19 @@ def count_flop_node_single(node):
     return numpy.prod([idx.extent for idx in node.free_indices])
 
 
-def count_flop(node):
-    """Count total number of flops of a gem expression, assuming hoisting and
-    reuse"""
-    flops = sum(map(count_flop_node, traversal([node])))
+@count_flop_node.register(IndexSum)
+def count_flop_node_index_sum(node):
+    return numpy.prod([idx.extent for idx in node.multiindex])
 
-    return flops
+
+def count_flop(node):
+    """
+    Count the total floating point operations required to compute a gem node.
+    This function assumes that all subnodes that occur more than once induce a
+    temporary, and are therefore only computed once.
+    """
+    # TODO: Add tests for this function
+    return sum(map(count_flop_node, traversal([node])))
 
 
 @singledispatch
@@ -538,7 +545,7 @@ def _expand_products_prod(node, self):
         return Product(a, b)
 
 
-# TODO: arguablly should move this inside Kernel_Optimiser
+# TODO: arguablly should move this inside LoopOptimiser
 def expand_products(node, indices):
     """
     Expand products recursively if free indices of the node contains index
@@ -669,6 +676,9 @@ def optimise_expressions(expressions, quadrature_indices, argument_indices):
 
 
 def propagate_failure(expressions):
+    """
+    Check if any gem nodes is Failure. In that case there is no need for subsequent optimisation.
+    """
     for n in traversal(expressions):
         if isinstance(n, Failure):
             return True
@@ -729,7 +739,20 @@ def sort_keys(keys, arg_ind_flat):
 
 class Summand(OrderedDict):
     """
-    An object wrapped around an OrderedDict to represent a product node
+    An object wrapped around an OrderedDict to represent product of gem nodes (factors)
+    The factors are indexed with keys:
+        1. One of the argument indices (e.g. j):
+            factors which depend on j but not other argument indices
+            All summands will have this item (to avoid checking existence),
+            with the values being an empty list possibly.
+        2. Tuple of more than one argument indices (e.g. (j, k)):
+            factors which depend on j and k, but not other argument indices
+            These are rarer and are added as factors are encourtered
+        3. string 'const':
+            factors with no free indices
+        4. string 'other':
+            factors depend on indices (typically quadrature indices for reduction)
+            other than argument indices
     """
     def __init__(self, *args, **kwargs):
         OrderedDict.__init__(self, *args, **kwargs)
@@ -751,10 +774,12 @@ class Summand(OrderedDict):
         """
         Returns list of keys which contains any of the index in indices
         """
+        assert len(indices) > 0
         indices_set = set(indices)
         result = list()
-        # TODO: Do not need to check 'const' here
         for key, factors in iteritems(self):
+            if key == "const":
+                continue
             for factor in factors:
                 if set(factor.free_indices) & indices_set:
                     result.append(key)
@@ -767,28 +792,11 @@ class Summand(OrderedDict):
 
 class LoopOptimiser(object):
     """
-    An object holding a representation of a gem IR (as sum of products) and
-    perform optimisations which preserve the sematics of the IR.
-    Fields:
-    1. node
-    2. multiindex
-    3. arg_ind
-    4. rep: a list of dictionaries (summands) of list of factors, such that
-    node = Sum(summands), where a summand is Product(factors), possibly contracted
-    with multiindex
-    Factors are indexed with keys:
-        1. One of the argument indices (e.g. j):
-            factors depend on j but not other argument indices
-            All summands will have this item (to avoid checking existence),
-            with the values possibly as empty list
-        2. Combination of >1 argument indices (e.g. j, k):
-            factors depend on j and k, but not other argument indices
-            These are rarer and are added as factors are encourtered
-        3. string 'const':
-            factors with no free indices
-        4. string 'quad':
-            factors depend on indices (typically quadrature indices for reduction)
-            other than argument indices
+    An object wrapping around a representation (as sum of products) of a gem node and
+    perform optimisations which preserve the sematics of the gem node.
+
+    Attributes:
+        rep: a list of :class: `Summand`s, the sum of which gives the gem node represented
     """
     def __init__(self, rep, multiindex, arg_ind):
         """
@@ -800,9 +808,14 @@ class LoopOptimiser(object):
         self.rep = rep
         self.arg_ind = arg_ind
         self.multiindex = multiindex
-        # TODO: make these two properties of the object
-        self.arg_ind_flat = tuple([i for indices in self.arg_ind for i in indices])
-        self.arg_ind_set = set(self.arg_ind_flat)
+
+    @cached_property
+    def arg_ind_flat(self):
+        return tuple([i for indices in self.arg_ind for i in indices])
+
+    @cached_property
+    def arg_ind_set(self):
+        return set(self.arg_ind_flat)
 
     def factor_extent(self, factor):
         """
@@ -821,53 +834,43 @@ class LoopOptimiser(object):
         return tuple(_keys.keys())
 
     def find_optimal_arg_factors(self):
-        gem_int = OrderedDict()  # Gem node -> int
-        int_gem = OrderedDict()  # int -> Gem node
-        counter = 0
-        # TODO: perhaps should keep a list of all nodes in the object
-        # assign number to all factors
-        for summand in self.rep:
-            for key, factors in iteritems(summand):
-                # TODO: this pattern appears multiple times, need to rewrite
-                if key == 'const' or key == 'other':
-                    continue
-                for factor in factors:
-                    if factor not in gem_int:
-                        gem_int[factor] = counter
-                        int_gem[counter] = factor
-                        counter += 1
-        if counter == 0:
-            return ((), ())
-        # add connections (list of tuples)
+        index = count()
+        factor_index = OrderedDict()  # Gem node -> int
         connections = []
+        # add connections (list of lists)
         for summand in self.rep:
             connection = []
-            for key, factors in iteritems(summand):
-                if key == 'const' or key == 'other':
-                    continue
-                connection.extend([gem_int[factor] for factor in factors])
+            for key in summand.arg_keys():
+                for factor in summand[key]:
+                    if factor not in factor_index:
+                        factor_index[factor] = next(index)
+                    connection.append(factor_index[factor])
             connections.append(tuple(connection))
+
+        if len(factor_index) == 0:
+            return ((), ())
 
         # set up the ILP
         import pulp as ilp
         ilp_prob = ilp.LpProblem('gem factorise', ilp.LpMinimize)
-        ilp_var = ilp.LpVariable.dicts('node', int_gem.keys(), 0, 1, ilp.LpBinary)
+        ilp_var = ilp.LpVariable.dicts('node', range(len(factor_index)), 0, 1, ilp.LpBinary)
 
         # Objective function
         # Minimise number of factors to pull. If same number, favour factor with larger extent
         big = 10000000  # some arbitrary big number
-        ilp_prob += ilp.lpSum(ilp_var[i] * (big - self.factor_extent(int_gem[i])) for i in int_gem)
+        ilp_prob += ilp.lpSum(
+            ilp_var[index] * (big - self.factor_extent(factor)) for factor, index in iteritems(factor_index))
 
         # constraints
         for connection in connections:
-            ilp_prob += ilp.lpSum(ilp_var[i] for i in connection) >= 1
+            ilp_prob += ilp.lpSum(ilp_var[index] for index in connection) >= 1
 
         ilp_prob.solve()
         if ilp_prob.status != 1:
             raise AssertionError("Something bad happened during ILP")
 
-        optimal_factors = [factor for factor, number in iteritems(gem_int) if ilp_var[number].value() == 1]
-        other_factors = [factor for factor, number in iteritems(gem_int) if ilp_var[number].value() == 0]
+        optimal_factors = [factor for factor, _index in iteritems(factor_index) if ilp_var[_index].value() == 1]
+        other_factors = [factor for factor, _index in iteritems(factor_index) if ilp_var[_index].value() == 0]
         # TODO: investigate effects of sorting these two lists of factors
         optimal_factors = sorted(optimal_factors, key=lambda f: self.factor_extent(f), reverse=True)
         other_factors = sorted(other_factors, key=lambda f: self.factor_extent(f), reverse=True)
@@ -940,9 +943,11 @@ class LoopOptimiser(object):
         Factorise sequentially with common factors from :param factors_seq
         :param factors_seq: sequence of factors used to factorise
         """
-        # TODO: Return if rep < 2 ?
+        if len(self.rep) < 2:
+            return
         if not factors_seq:
-            self.factorise_key(('other', 'const'), no_arg_factor=False)
+            # TODO: Seems like no_arg_factor should always be True, need further verification
+            self.factorise_key(('other', 'const'), no_arg_factor=True)
             return
         cf = factors_seq[0]  # pick the first common factor
         key = self._decide_key(cf)
@@ -983,11 +988,10 @@ class LoopOptimiser(object):
         self.factorise_arg(factors_seq[1:])
 
     def generate_node(self):
-        # TODO: Here need to consider the order of forming products, currently this only ensures same group gets multiplied first. Consider lexico order between groups.
         if self.node:
             return self.node
         if self.multiindex and len(self.rep) == 1:
-            # Hoisting out of IndexSum
+            # If argument factors do not contain reduction indices, do the reduction without such factors
             hoist_keys = self.rep[0].arg_keys_not_contain_indices(self.multiindex)
             if hoist_keys:
                 hoisted_summand = Summand(arg_ind_flat=self.arg_ind_flat)
