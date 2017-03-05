@@ -663,10 +663,20 @@ def optimise(node, quad_ind, arg_ind):
     rep, multiindex = build_repr(node, arg_ind)
     lo = LoopOptimiser(rep=rep, multiindex=multiindex, arg_ind=arg_ind)
     optimal_arg = lo.find_optimal_arg_factors()
-    lo.factorise_arg(optimal_arg[0] + optimal_arg[1])
-    lo.factorise_key(('other', 'const'), no_arg_factor=False)
-    # TODO: hoisting out of IndexSum
-    return lo.generate_node()
+    lo.factorise_arg(optimal_arg[0] + optimal_arg[1], no_arg_factor=True)
+    node1 = lo.generate_node()
+
+    rep, multiindex = build_repr(node, arg_ind)
+    lo = LoopOptimiser(rep=rep, multiindex=multiindex, arg_ind=arg_ind)
+    lo.factorise_arg(optimal_arg[0] + optimal_arg[1], no_arg_factor=False)
+    node2 = lo.generate_node()
+
+    print('Node1 = {0}'.format(count_flop(node1)))
+    print('Node2 = {0}'.format(count_flop(node2)))
+    if count_flop(node1) < count_flop(node2):
+        return node1
+    else:
+        return node2
 
 
 def optimise_expressions(expressions, quadrature_indices, argument_indices):
@@ -695,7 +705,7 @@ def _list_2_node(children, self):
         return self((self(children[:mid]), self(children[mid:])))
 
 
-def list_2_node(function, children, balanced=True):
+def list_2_node(function, children, balanced=True, sort=False):
     """
     generate gem node from list of children
     use recursion so that each term is not too long
@@ -704,6 +714,8 @@ def list_2_node(function, children, balanced=True):
     :return: gem node
     """
     # TODO: DAG awareness. Hashing with tuple is probably slow here.
+    if sort:
+        children = sorted(children)
     if function == Sum:
         base = Zero()
     elif function == Product:
@@ -790,6 +802,7 @@ class Summand(OrderedDict):
         return [key for key in self.arg_keys() if key not in self.keys_contain_indices(indices)]
 
 
+# TODO: Better naming for LoopOptimiser and Summand, to reflect their mathematical identity (Product and Sum)
 class LoopOptimiser(object):
     """
     An object wrapping around a representation (as sum of products) of a gem node and
@@ -828,10 +841,20 @@ class LoopOptimiser(object):
 
     def all_arg_keys(self):
         _keys = OrderedDict()
-        for summands in self.rep:
-            for key in summands.arg_keys():
+        for summand in self.rep:
+            for key in summand.arg_keys():
                 _keys[key] = None
         return tuple(_keys.keys())
+
+    def collapse_keys(self, keys):
+        """
+        collapse factors with keys in :param: keys into one gem node
+        """
+        for summand in self.rep:
+            for key in keys:
+                if summand[key]:
+                    # empty list as left as [], instead of Literal(1.0)
+                    summand[key] = [list_2_node(Product, summand[key], balanced=True, sort=True)]
 
     def find_optimal_arg_factors(self):
         index = count()
@@ -900,45 +923,43 @@ class LoopOptimiser(object):
             return
         if max(counter.values()) < 2:
             return
-        # TODO: No need to use dict here
-        saved_flops = OrderedDict((((count_flop(factor) + 1)) * (count - 1), factor)
-                                  for (factor, count) in iteritems(counter))
-        mcf = saved_flops[max(saved_flops.keys())]  # most common factor
-        mcf_key = self._decide_key(mcf)
+        common_factors = sorted([(k, v) for k, v in iteritems(counter) if v > 1], key=lambda x: x[1], reverse=True)
+        cf, count = common_factors[0]
+        cf_key = self._decide_key(cf)
         _summands = list()
         factored_out = list()
         for summand in self.rep:
             if no_arg_factor and summand.contains_arg_factor():
                 continue
-            if mcf_key not in summand:
+            if cf_key not in summand:
                 continue
-            if mcf in summand[mcf_key]:
+            if cf in summand[cf_key]:
                 factored_out.append(summand)  # mark for deleting later
                 _factors = Summand(summand)
-                _factors[mcf_key].remove(mcf)
+                _factors[cf_key].remove(cf)
                 _summands.append(_factors)
-
-        assert(len(_summands) == counter[mcf])
+        # from IPython import embed; embed()
+        assert(len(_summands) == count)
         lo = LoopOptimiser(rep=_summands, multiindex=(), arg_ind=self.arg_ind)
+        # continue to factorise this new node
         lo.factorise_key(keys, no_arg_factor)
-        # TODO: Maybe can continue to factorise this new node
         for to_delete in factored_out:
             self.rep.remove(to_delete)
         if len(lo.rep) == 1:
             # result of further factorisation is a Product
             new_summand = lo.rep[0]
-            new_summand[mcf_key].insert(0, mcf)
+            new_summand[cf_key].insert(0, cf)
             self.rep.append(new_summand)
         else:
             # result of further factorisation is a Sum
             node = lo.generate_node()
             new_summand = Summand(arg_ind_flat=self.arg_ind_flat)
             new_summand[self._decide_key(node)] = [node]
-            new_summand[mcf_key].insert(0, mcf)
+            new_summand[cf_key].insert(0, cf)
             self.rep.append(new_summand)
         self.factorise_key(keys, no_arg_factor)  # Continue factorising
 
-    def factorise_arg(self, factors_seq):
+    def factorise_arg(self, factors_seq, no_arg_factor=True):
         """
         Factorise sequentially with common factors from :param factors_seq
         :param factors_seq: sequence of factors used to factorise
@@ -946,8 +967,10 @@ class LoopOptimiser(object):
         if len(self.rep) < 2:
             return
         if not factors_seq:
-            # TODO: Seems like no_arg_factor should always be True, need further verification
-            self.factorise_key(('other', 'const'), no_arg_factor=True)
+            self.collapse_keys(('other', 'const'))
+            self.factorise_key(('other', 'const'), no_arg_factor=no_arg_factor)
+            # self.collapse_keys(('const',))
+            # self.factorise_key(('const',), no_arg_factor=False)
             return
         cf = factors_seq[0]  # pick the first common factor
         key = self._decide_key(cf)
@@ -969,7 +992,7 @@ class LoopOptimiser(object):
         if len(_summands) > 1:
             # Proceed with the next common factor for the factorised part
             lo = LoopOptimiser(rep=_summands, multiindex=(), arg_ind=self.arg_ind)
-            lo.factorise_arg(factors_seq[1:])
+            lo.factorise_arg(factors_seq[1:], no_arg_factor)
             # Delete factored out lines in rep
             for to_delete in factored_out:
                 self.rep.remove(to_delete)
@@ -985,11 +1008,11 @@ class LoopOptimiser(object):
                 new_summand[key].insert(0, cf)
                 self.rep.append(new_summand)
         # Proceed with the next common factor
-        self.factorise_arg(factors_seq[1:])
+        self.factorise_arg(factors_seq[1:], no_arg_factor)
 
     def generate_node(self):
-        if self.node:
-            return self.node
+        # if self.node:
+        #     return self.node
         if self.multiindex and len(self.rep) == 1:
             # If argument factors do not contain reduction indices, do the reduction without such factors
             hoist_keys = self.rep[0].arg_keys_not_contain_indices(self.multiindex)
