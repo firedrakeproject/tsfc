@@ -671,8 +671,8 @@ def optimise(node, quad_ind, arg_ind):
     lo.factorise_arg(optimal_arg[0] + optimal_arg[1], no_arg_factor=False)
     node2 = lo.generate_node()
 
-    print('Node1 = {0}'.format(count_flop(node1)))
-    print('Node2 = {0}'.format(count_flop(node2)))
+    # print('Node1 = {0}'.format(count_flop(node1)))
+    # print('Node2 = {0}'.format(count_flop(node2)))
     if count_flop(node1) < count_flop(node2):
         return node1
     else:
@@ -967,7 +967,7 @@ class LoopOptimiser(object):
         if len(self.rep) < 2:
             return
         if not factors_seq:
-            self.collapse_keys(('other', 'const'))
+            # self.collapse_keys(('other', 'const'))
             self.factorise_key(('other', 'const'), no_arg_factor=no_arg_factor)
             # self.collapse_keys(('const',))
             # self.factorise_key(('const',), no_arg_factor=False)
