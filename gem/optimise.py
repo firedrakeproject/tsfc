@@ -510,7 +510,7 @@ def count_flop_node_single(node):
 
 @count_flop_node.register(IndexSum)
 def count_flop_node_index_sum(node):
-    return numpy.prod([idx.extent for idx in node.multiindex])
+    return numpy.prod([idx.extent for idx in node.multiindex + node.free_indices])
 
 
 def count_flop(node):
@@ -663,14 +663,18 @@ def optimise(node, quad_ind, arg_ind):
     rep, multiindex = build_repr(node, arg_ind)
     lo = LoopOptimiser(rep=rep, multiindex=multiindex, arg_ind=arg_ind)
     optimal_arg = lo.find_optimal_arg_factors()
-    lo.factorise_arg(optimal_arg[0] + optimal_arg[1])
+    lo.factorise_arg(optimal_arg[0] + optimal_arg[1], no_arg_factor=True)
+    node1 = lo.generate_node()
 
-    print('Node1 = {0}'.format(count_flop(lo.node1)))
-    print('Node2 = {0}'.format(count_flop(lo.node2)))
-    if count_flop(lo.node1) < count_flop(lo.node2):
-        return lo.node1
+    rep, multiindex = build_repr(node, arg_ind)
+    lo = LoopOptimiser(rep=rep, multiindex=multiindex, arg_ind=arg_ind)
+    lo.factorise_arg(optimal_arg[0] + optimal_arg[1], no_arg_factor=False)
+    node2 = lo.generate_node()
+
+    if count_flop(node1) < count_flop(node2):
+        return node1
     else:
-        return lo.node2
+        return node2
 
 
 def optimise_expressions(expressions, quadrature_indices, argument_indices):
@@ -709,7 +713,7 @@ def list_2_node(function, children, balanced=True, sort=False):
     """
     # TODO: DAG awareness. Hashing with tuple is probably slow here.
     if sort:
-        children = sorted(children)
+        children = sorted(children, key=lambda x:numpy.product([i.extent for i in x.free_indices]), reverse=True)
     if function == Sum:
         base = Zero()
     elif function == Product:
@@ -814,6 +818,7 @@ class LoopOptimiser(object):
         self.rep = rep
         self.arg_ind = arg_ind
         self.multiindex = multiindex
+        self.nodes = None
 
     @cached_property
     def arg_ind_flat(self):
@@ -907,7 +912,8 @@ class LoopOptimiser(object):
         if max(counter.values()) < 2:
             return
         common_factors = sorted([(k, v) for k, v in iteritems(counter) if v > 1],
-                                key=lambda x: (count_flop(x[0]) + 1) * (x[1] - 1),
+                                key = lambda x: x[1],
+                                # key=lambda x: (count_flop(x[0]) + 1) * (x[1] - 1),
                                 reverse=True)
         cf, count = common_factors[0]
         cf_key = self._decide_key(cf)
@@ -923,7 +929,6 @@ class LoopOptimiser(object):
                 _factors = Summand(summand)
                 _factors[cf_key].remove(cf)
                 _summands.append(_factors)
-        # from IPython import embed; embed()
         assert(len(_summands) == count)
         lo = LoopOptimiser(rep=_summands, multiindex=(), arg_ind=self.arg_ind)
         # continue to factorise this new node
@@ -944,20 +949,15 @@ class LoopOptimiser(object):
             self.rep.append(new_summand)
         self.factorise_key(keys, no_arg_factor)  # Continue factorising
 
-    def factorise_arg(self, factors_seq):
+    def factorise_arg(self, factors_seq, no_arg_factor=True):
         """
         Factorise sequentially with common factors from :param factors_seq
         :param factors_seq: sequence of factors used to fa  ctorise
         """
         if len(self.rep) < 2:
-            self.node1 = self.node2 = self.generate_node()
             return
         if not factors_seq:
-            # Try two strategies
-            self.factorise_key(('other', 'const'), no_arg_factor=True)
-            self.node1 = self.generate_node()
-            self.factorise_key(('other', 'const'), no_arg_factor=False)
-            self.node2 = self.generate_node()
+            self.factorise_key(('other', 'const'), no_arg_factor=no_arg_factor)
             return
         cf = factors_seq[0]  # pick the first common factor
         key = self._decide_key(cf)
@@ -979,7 +979,7 @@ class LoopOptimiser(object):
         if len(_summands) > 1:
             # Proceed with the next common factor for the factorised part
             lo = LoopOptimiser(rep=_summands, multiindex=(), arg_ind=self.arg_ind)
-            lo.factorise_arg(factors_seq[1:])
+            lo.factorise_arg(factors_seq[1:], no_arg_factor)
             # Delete factored out lines in rep
             for to_delete in factored_out:
                 self.rep.remove(to_delete)
@@ -995,7 +995,7 @@ class LoopOptimiser(object):
                 new_summand[key].insert(0, cf)
                 self.rep.append(new_summand)
         # Proceed with the next common factor
-        self.factorise_arg(factors_seq[1:])
+        self.factorise_arg(factors_seq[1:], no_arg_factor)
 
     def generate_node(self):
         if self.multiindex and len(self.rep) == 1:
@@ -1015,15 +1015,15 @@ class LoopOptimiser(object):
         for summand in self.rep:
             _factors = list()
             for key in ['const', 'other'] + summand.sorted_arg_keys(self.arg_ind_flat):
-                _factors.append(list_2_node(Product, summand[key]))
-            _summand_node = list_2_node(Product, _factors, balanced=False)
+                _factors.append(list_2_node(Product, summand[key], sort=False))
+            _summand_node = list_2_node(Product, _factors, balanced=False, sort=False)
             _key = self._decide_key(_summand_node)
             _summands.setdefault(_key, []).append(_summand_node)
 
         _combined_summands = list()
         for _key in ['const', 'other'] + _summands.sorted_arg_keys(self.arg_ind_flat):
-            _combined_summands.append(list_2_node(Sum, _summands[_key]))
-        node = list_2_node(Sum, _combined_summands, balanced=False)
+            _combined_summands.append(list_2_node(Sum, _summands[_key], sort=False))
+        node = list_2_node(Sum, _combined_summands, balanced=False, sort=False)
         if self.multiindex:
             node = IndexSum(node, self.multiindex)
         return node
