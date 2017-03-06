@@ -519,7 +519,7 @@ def count_flop(node):
     This function assumes that all subnodes that occur more than once induce a
     temporary, and are therefore only computed once.
     """
-    # TODO: Add tests for this function
+    # TODO: Add tests for this function (number still somewhat diffferent from COFFEE visitor)
     return sum(map(count_flop_node, traversal([node])))
 
 
@@ -663,20 +663,14 @@ def optimise(node, quad_ind, arg_ind):
     rep, multiindex = build_repr(node, arg_ind)
     lo = LoopOptimiser(rep=rep, multiindex=multiindex, arg_ind=arg_ind)
     optimal_arg = lo.find_optimal_arg_factors()
-    lo.factorise_arg(optimal_arg[0] + optimal_arg[1], no_arg_factor=True)
-    node1 = lo.generate_node()
+    lo.factorise_arg(optimal_arg[0] + optimal_arg[1])
 
-    rep, multiindex = build_repr(node, arg_ind)
-    lo = LoopOptimiser(rep=rep, multiindex=multiindex, arg_ind=arg_ind)
-    lo.factorise_arg(optimal_arg[0] + optimal_arg[1], no_arg_factor=False)
-    node2 = lo.generate_node()
-
-    # print('Node1 = {0}'.format(count_flop(node1)))
-    # print('Node2 = {0}'.format(count_flop(node2)))
-    if count_flop(node1) < count_flop(node2):
-        return node1
+    print('Node1 = {0}'.format(count_flop(lo.node1)))
+    print('Node2 = {0}'.format(count_flop(lo.node2)))
+    if count_flop(lo.node1) < count_flop(lo.node2):
+        return lo.node1
     else:
-        return node2
+        return lo.node2
 
 
 def optimise_expressions(expressions, quadrature_indices, argument_indices):
@@ -817,7 +811,6 @@ class LoopOptimiser(object):
         :param node: representation of a gem node as summation of products
         :param arg_ind: tuples of tuples of argument (linear) indices
         """
-        self.node = None
         self.rep = rep
         self.arg_ind = arg_ind
         self.multiindex = multiindex
@@ -845,16 +838,6 @@ class LoopOptimiser(object):
             for key in summand.arg_keys():
                 _keys[key] = None
         return tuple(_keys.keys())
-
-    def collapse_keys(self, keys):
-        """
-        collapse factors with keys in :param: keys into one gem node
-        """
-        for summand in self.rep:
-            for key in keys:
-                if summand[key]:
-                    # empty list as left as [], instead of Literal(1.0)
-                    summand[key] = [list_2_node(Product, summand[key], balanced=True, sort=True)]
 
     def find_optimal_arg_factors(self):
         index = count()
@@ -923,7 +906,9 @@ class LoopOptimiser(object):
             return
         if max(counter.values()) < 2:
             return
-        common_factors = sorted([(k, v) for k, v in iteritems(counter) if v > 1], key=lambda x: x[1], reverse=True)
+        common_factors = sorted([(k, v) for k, v in iteritems(counter) if v > 1],
+                                key=lambda x: (count_flop(x[0]) + 1) * (x[1] - 1),
+                                reverse=True)
         cf, count = common_factors[0]
         cf_key = self._decide_key(cf)
         _summands = list()
@@ -959,18 +944,20 @@ class LoopOptimiser(object):
             self.rep.append(new_summand)
         self.factorise_key(keys, no_arg_factor)  # Continue factorising
 
-    def factorise_arg(self, factors_seq, no_arg_factor=True):
+    def factorise_arg(self, factors_seq):
         """
         Factorise sequentially with common factors from :param factors_seq
-        :param factors_seq: sequence of factors used to factorise
+        :param factors_seq: sequence of factors used to fa  ctorise
         """
         if len(self.rep) < 2:
+            self.node1 = self.node2 = self.generate_node()
             return
         if not factors_seq:
-            # self.collapse_keys(('other', 'const'))
-            self.factorise_key(('other', 'const'), no_arg_factor=no_arg_factor)
-            # self.collapse_keys(('const',))
-            # self.factorise_key(('const',), no_arg_factor=False)
+            # Try two strategies
+            self.factorise_key(('other', 'const'), no_arg_factor=True)
+            self.node1 = self.generate_node()
+            self.factorise_key(('other', 'const'), no_arg_factor=False)
+            self.node2 = self.generate_node()
             return
         cf = factors_seq[0]  # pick the first common factor
         key = self._decide_key(cf)
@@ -992,7 +979,7 @@ class LoopOptimiser(object):
         if len(_summands) > 1:
             # Proceed with the next common factor for the factorised part
             lo = LoopOptimiser(rep=_summands, multiindex=(), arg_ind=self.arg_ind)
-            lo.factorise_arg(factors_seq[1:], no_arg_factor)
+            lo.factorise_arg(factors_seq[1:])
             # Delete factored out lines in rep
             for to_delete in factored_out:
                 self.rep.remove(to_delete)
@@ -1008,11 +995,9 @@ class LoopOptimiser(object):
                 new_summand[key].insert(0, cf)
                 self.rep.append(new_summand)
         # Proceed with the next common factor
-        self.factorise_arg(factors_seq[1:], no_arg_factor)
+        self.factorise_arg(factors_seq[1:])
 
     def generate_node(self):
-        # if self.node:
-        #     return self.node
         if self.multiindex and len(self.rep) == 1:
             # If argument factors do not contain reduction indices, do the reduction without such factors
             hoist_keys = self.rep[0].arg_keys_not_contain_indices(self.multiindex)
@@ -1024,8 +1009,7 @@ class LoopOptimiser(object):
                     unhoisted_summand[key] = []
                 hoisted_node = LoopOptimiser(rep=[hoisted_summand], multiindex=(), arg_ind=self.arg_ind).generate_node()
                 new_summand_node = LoopOptimiser(rep=[unhoisted_summand], multiindex=(), arg_ind=self.arg_ind).generate_node()
-                self.node = Product(hoisted_node, IndexSum(new_summand_node, self.multiindex))
-                return self.node
+                return Product(hoisted_node, IndexSum(new_summand_node, self.multiindex))
 
         _summands = Summand(arg_ind_flat=self.arg_ind_flat)
         for summand in self.rep:
@@ -1039,7 +1023,7 @@ class LoopOptimiser(object):
         _combined_summands = list()
         for _key in ['const', 'other'] + _summands.sorted_arg_keys(self.arg_ind_flat):
             _combined_summands.append(list_2_node(Sum, _summands[_key]))
-        self.node = list_2_node(Sum, _combined_summands, balanced=False)
+        node = list_2_node(Sum, _combined_summands, balanced=False)
         if self.multiindex:
-            self.node = IndexSum(self.node, self.multiindex)
-        return self.node
+            node = IndexSum(node, self.multiindex)
+        return node
