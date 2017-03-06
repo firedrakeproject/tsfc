@@ -713,7 +713,7 @@ def list_2_node(function, children, balanced=True, sort=False):
     """
     # TODO: DAG awareness. Hashing with tuple is probably slow here.
     if sort:
-        children = sorted(children, key=lambda x:numpy.product([i.extent for i in x.free_indices]), reverse=True)
+        children = sorted(children, key=lambda x: numpy.product([i.extent for i in x.free_indices]), reverse=True)
     if function == Sum:
         base = Zero()
     elif function == Product:
@@ -912,7 +912,7 @@ class LoopOptimiser(object):
         if max(counter.values()) < 2:
             return
         common_factors = sorted([(k, v) for k, v in iteritems(counter) if v > 1],
-                                key = lambda x: x[1],
+                                key=lambda x: x[1],
                                 # key=lambda x: (count_flop(x[0]) + 1) * (x[1] - 1),
                                 reverse=True)
         cf, count = common_factors[0]
