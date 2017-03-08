@@ -663,18 +663,8 @@ def optimise(node, quad_ind, arg_ind):
     rep, multiindex = build_repr(node, arg_ind)
     lo = LoopOptimiser(rep=rep, multiindex=multiindex, arg_ind=arg_ind)
     optimal_arg = lo.find_optimal_arg_factors()
-    lo.factorise_arg(optimal_arg[0] + optimal_arg[1], no_arg_factor=True)
-    node1 = lo.generate_node()
-
-    rep, multiindex = build_repr(node, arg_ind)
-    lo = LoopOptimiser(rep=rep, multiindex=multiindex, arg_ind=arg_ind)
-    lo.factorise_arg(optimal_arg[0] + optimal_arg[1], no_arg_factor=False)
-    node2 = lo.generate_node()
-
-    if count_flop(node1) < count_flop(node2):
-        return node1
-    else:
-        return node2
+    lo.factorise_arg(optimal_arg[0] + optimal_arg[1], factorise_const=False)
+    return lo.generate_node()
 
 
 def optimise_expressions(expressions, quadrature_indices, argument_indices):
@@ -845,13 +835,6 @@ class LoopOptimiser(object):
     def _decide_key(self, node):
         return decide_key(node, self.arg_ind_flat, self.arg_ind_set)
 
-    def all_arg_keys(self):
-        _keys = OrderedDict()
-        for summand in self.rep:
-            for key in summand.arg_keys():
-                _keys[key] = None
-        return tuple(_keys.keys())
-
     def find_optimal_arg_factors(self):
         index = count()
         factor_index = OrderedDict()  # Gem node -> int
@@ -904,19 +887,23 @@ class LoopOptimiser(object):
         key = self._decide_key(atom)
         # TODO: consider make a copy of rep so that self.rep is untouched
         to_add_2 = list()
+        remove_locator = dict()  # avoid scanning the list twice to remove atom
         for idx, summand in enumerate(self.rep):
             if key not in summand:
                 continue
-            if atom not in summand[key]:
-                continue
-            to_add_2.append(idx)
+            for factor_idx, factor in enumerate(summand[key]):
+                if factor == atom:
+                    remove_locator[idx] = factor_idx
+                    to_add_2.append(idx)
+                    continue
         if len(to_add_2) <= 1:
             return (self, None)
         rep1 = list()
         rep2 = list()
         for idx, summand in enumerate(self.rep):
             if idx in to_add_2:
-                summand[key].remove(atom)
+                summand[key] = [factor for (factor_idx, factor) in enumerate(summand[key])
+                                if factor_idx != remove_locator[idx]]
                 rep2.append(summand)
             else:
                 rep1.append(summand)
@@ -924,18 +911,14 @@ class LoopOptimiser(object):
         lo2 = LoopOptimiser(rep=rep2, multiindex=(), arg_ind=self.arg_ind)
         return (lo1, lo2)
 
-    def factorise_key(self, keys, no_arg_factor=True, sort_func=None):
+    def factorise_key(self, keys, sort_func=None):
         """
         Factorise common factors that have a particular key from :param keys
-        :param no_arg_factor: do not factorise if Summand contains argument
-        factors, since this might destroy subsequent factorisation passes.
         """
         if len(self.rep) < 2:
             return
         counter = OrderedDict()
         for summand in self.rep:
-            if no_arg_factor and summand.contains_arg_factor():
-                continue
             for _key in keys:
                 if _key not in summand:
                     continue
@@ -957,7 +940,7 @@ class LoopOptimiser(object):
         lo1, lo2 = self.factorise_atom(cf)
         assert(len(lo2.rep) == count)
         # continue to factorise this new node
-        lo2.factorise_key(keys, no_arg_factor, sort_func)
+        lo2.factorise_key(keys, sort_func)
         if len(lo2.rep) == 1:
             # result of further factorisation is a Product
             new_summand = lo2.rep[0]
@@ -971,9 +954,9 @@ class LoopOptimiser(object):
             new_summand[cf_key].insert(0, cf)
             lo1.rep.append(new_summand)
         self.rep = lo1.rep
-        self.factorise_key(keys, no_arg_factor, sort_func)  # Continue factorising
+        self.factorise_key(keys, sort_func)  # Continue factorising
 
-    def factorise_arg(self, factors_seq, no_arg_factor=True):
+    def factorise_arg(self, factors_seq, factorise_const=False):
         """
         Factorise sequentially with common factors from :param factors_seq
         :param factors_seq: sequence of factors used to fa  ctorise
@@ -981,9 +964,10 @@ class LoopOptimiser(object):
         if len(self.rep) < 2:
             return
         if not factors_seq:
-            # sort_func = lambda x: (count_flop(x[0]) + 1) * (x[1] - 1)
-            sort_func = None
-            self.factorise_key(('other', 'const'), no_arg_factor=no_arg_factor, sort_func=sort_func)
+            if factorise_const:
+                # sort_func = lambda x: (count_flop(x[0]) + 1) * (x[1] - 1)
+                sort_func = None
+                self.factorise_key(('other', 'const'), sort_func=sort_func)
             return
         cf = factors_seq[0]  # pick the first common factor
         key = self._decide_key(cf)
@@ -991,11 +975,11 @@ class LoopOptimiser(object):
         # this = lo1 + cf * lo2
         lo1, lo2 = self.factorise_atom(cf)
         if lo2 is None:
-            self.factorise_arg(factors_seq[1:], no_arg_factor)
+            self.factorise_arg(factors_seq[1:], factorise_const)
             return
 
         # Proceed with the next common factor for the factorised part
-        lo2.factorise_arg(factors_seq[1:], no_arg_factor)
+        lo2.factorise_arg(factors_seq[1:], factorise_const)
         if len(lo2.rep) == 1:
             # result is a product
             new_summand = lo2.rep[0]
@@ -1010,7 +994,7 @@ class LoopOptimiser(object):
             lo1.rep.append(new_summand)
         self.rep = lo1.rep
         # Proceed with the next common factor
-        self.factorise_arg(factors_seq[1:], no_arg_factor)
+        self.factorise_arg(factors_seq[1:], factorise_const)
         return
 
     def generate_node(self):
