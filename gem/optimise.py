@@ -896,6 +896,34 @@ class LoopOptimiser(object):
         # Sequence dictating order of factorisation
         return (tuple(optimal_factors), tuple(other_factors))
 
+    def factorise_atom(self, atom):
+        """
+        factorise this LoopOptimiser (this) into two LoopOptimiser, lo1 and lo2, such that
+        this = lo1 + lo2 * atom
+        """
+        key = self._decide_key(atom)
+        # TODO: consider make a copy of rep so that self.rep is untouched
+        to_add_2 = list()
+        for idx, summand in enumerate(self.rep):
+            if key not in summand:
+                continue
+            if atom not in summand[key]:
+                continue
+            to_add_2.append(idx)
+        if len(to_add_2) <= 1:
+            return (self, None)
+        rep1 = list()
+        rep2 = list()
+        for idx, summand in enumerate(self.rep):
+            if idx in to_add_2:
+                summand[key].remove(atom)
+                rep2.append(summand)
+            else:
+                rep1.append(summand)
+        lo1 = LoopOptimiser(rep=rep1, multiindex=self.multiindex, arg_ind=self.arg_ind)
+        lo2 = LoopOptimiser(rep=rep2, multiindex=(), arg_ind=self.arg_ind)
+        return (lo1, lo2)
+
     def factorise_key(self, keys, no_arg_factor=True, sort_func=None):
         """
         Factorise common factors that have a particular key from :param keys
@@ -926,43 +954,23 @@ class LoopOptimiser(object):
                                 reverse=True)
         cf, count = common_factors[0]
         cf_key = self._decide_key(cf)
-        _summands = list()
-        to_delete = list()
-        for idx, summand in enumerate(self.rep):
-            if no_arg_factor and summand.contains_arg_factor():
-                continue
-            if cf_key not in summand:
-                continue
-            cf_idx = None
-            for factor_idx, factor in enumerate(summand[cf_key]):
-                if factor == cf:
-                    cf_idx = factor_idx
-                    break
-            if cf_idx is None:
-                # common factor not present
-                continue
-            to_delete.append(idx)  # mark the summand for deleting later
-            _factors = Summand(summand)
-            _factors[cf_key] = [factor for (factor_idx, factor) in enumerate(summand[cf_key]) if factor_idx != cf_idx]
-            _summands.append(_factors)
-        assert(len(_summands) == count)
-        lo = LoopOptimiser(rep=_summands, multiindex=(), arg_ind=self.arg_ind)
+        lo1, lo2 = self.factorise_atom(cf)
+        assert(len(lo2.rep) == count)
         # continue to factorise this new node
-        lo.factorise_key(keys, no_arg_factor, sort_func)
-        # delete items that are factored out (avoid comparison of OrderedDict which is expensive)
-        self.rep = [summand for (idx, summand) in enumerate(self.rep) if idx not in to_delete]
-        if len(lo.rep) == 1:
+        lo2.factorise_key(keys, no_arg_factor, sort_func)
+        if len(lo2.rep) == 1:
             # result of further factorisation is a Product
-            new_summand = lo.rep[0]
+            new_summand = lo2.rep[0]
             new_summand[cf_key].insert(0, cf)
-            self.rep.append(new_summand)
+            lo1.rep.append(new_summand)
         else:
             # result of further factorisation is a Sum
-            node = lo.generate_node()
+            node = lo2.generate_node()
             new_summand = Summand(arg_ind_flat=self.arg_ind_flat)
             new_summand[self._decide_key(node)] = [node]
             new_summand[cf_key].insert(0, cf)
-            self.rep.append(new_summand)
+            lo1.rep.append(new_summand)
+        self.rep = lo1.rep
         self.factorise_key(keys, no_arg_factor, sort_func)  # Continue factorising
 
     def factorise_arg(self, factors_seq, no_arg_factor=True):
@@ -979,40 +987,31 @@ class LoopOptimiser(object):
             return
         cf = factors_seq[0]  # pick the first common factor
         key = self._decide_key(cf)
-        to_delete = list()
-        # cf * Sum(_summands), where summand = Product(_factors)
-        _summands = list()
-        for idx, summand in enumerate(self.rep):
-            if key not in summand:
-                continue
-            factors = summand[key]
-            if len(factors) > 1:
-                raise AssertionError("There should be only one argument factor")
-            if cf not in factors:
-                continue
-            to_delete.append(idx)  # mark for deleting later
-            new_summand = Summand(summand)
-            new_summand[key] = []
-            _summands.append(new_summand)
-        if len(_summands) > 1:
-            # Proceed with the next common factor for the factorised part
-            lo = LoopOptimiser(rep=_summands, multiindex=(), arg_ind=self.arg_ind)
-            lo.factorise_arg(factors_seq[1:], no_arg_factor)
-            # Delete factored out lines in rep
-            self.rep = [summand for (idx, summand) in enumerate(self.rep) if idx not in to_delete]
-            if len(lo.rep) == 1:
-                new_summand = lo.rep[0]
-                new_summand[key].insert(0, cf)
-                self.rep.append(new_summand)
-            else:
-                node = lo.generate_node()
-                # Create new line in rep
-                new_summand = Summand(arg_ind_flat=self.arg_ind_flat)
-                new_summand[self._decide_key(node)] = [node]
-                new_summand[key].insert(0, cf)
-                self.rep.append(new_summand)
+
+        # this = lo1 + cf * lo2
+        lo1, lo2 = self.factorise_atom(cf)
+        if lo2 is None:
+            self.factorise_arg(factors_seq[1:], no_arg_factor)
+            return
+
+        # Proceed with the next common factor for the factorised part
+        lo2.factorise_arg(factors_seq[1:], no_arg_factor)
+        if len(lo2.rep) == 1:
+            # result is a product
+            new_summand = lo2.rep[0]
+            new_summand[key].insert(0, cf)
+            lo1.rep.append(new_summand)
+        else:
+            node = lo2.generate_node()
+            # Create new line in rep
+            new_summand = Summand(arg_ind_flat=self.arg_ind_flat)
+            new_summand[self._decide_key(node)] = [node]
+            new_summand[key].insert(0, cf)
+            lo1.rep.append(new_summand)
+        self.rep = lo1.rep
         # Proceed with the next common factor
         self.factorise_arg(factors_seq[1:], no_arg_factor)
+        return
 
     def generate_node(self):
         if self.multiindex and len(self.rep) == 1:
