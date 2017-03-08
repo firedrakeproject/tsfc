@@ -828,6 +828,14 @@ class LoopOptimiser(object):
     def arg_ind_set(self):
         return set(self.arg_ind_flat)
 
+    def copy(self):
+        new_rep = list(self.rep)
+        for new_summand, summand in zip(new_rep, self.rep):
+            new_summand = Summand(summand)
+            for k, v in iteritems(summand):
+                new_summand[k] = list(v)
+        return LoopOptimiser(rep=new_rep, multiindex=self.multiindex, arg_ind=self.arg_ind)
+
     def factor_extent(self, factor):
         """
         Compute the product of extents of all argument indices of :param factor
@@ -888,7 +896,7 @@ class LoopOptimiser(object):
         # Sequence dictating order of factorisation
         return (tuple(optimal_factors), tuple(other_factors))
 
-    def factorise_key(self, keys, no_arg_factor=True):
+    def factorise_key(self, keys, no_arg_factor=True, sort_func=None):
         """
         Factorise common factors that have a particular key from :param keys
         :param no_arg_factor: do not factorise if Summand contains argument
@@ -911,30 +919,38 @@ class LoopOptimiser(object):
             return
         if max(counter.values()) < 2:
             return
+        if sort_func is None:
+            sort_func = lambda x: x[1]
         common_factors = sorted([(k, v) for k, v in iteritems(counter) if v > 1],
-                                key=lambda x: x[1],
-                                # key=lambda x: (count_flop(x[0]) + 1) * (x[1] - 1),
+                                key=sort_func,
                                 reverse=True)
         cf, count = common_factors[0]
         cf_key = self._decide_key(cf)
         _summands = list()
-        factored_out = list()
-        for summand in self.rep:
+        to_delete = list()
+        for idx, summand in enumerate(self.rep):
             if no_arg_factor and summand.contains_arg_factor():
                 continue
             if cf_key not in summand:
                 continue
-            if cf in summand[cf_key]:
-                factored_out.append(summand)  # mark for deleting later
-                _factors = Summand(summand)
-                _factors[cf_key].remove(cf)
-                _summands.append(_factors)
+            cf_idx = None
+            for factor_idx, factor in enumerate(summand[cf_key]):
+                if factor == cf:
+                    cf_idx = factor_idx
+                    break
+            if cf_idx is None:
+                # common factor not present
+                continue
+            to_delete.append(idx)  # mark the summand for deleting later
+            _factors = Summand(summand)
+            _factors[cf_key] = [factor for (factor_idx, factor) in enumerate(summand[cf_key]) if factor_idx != cf_idx]
+            _summands.append(_factors)
         assert(len(_summands) == count)
         lo = LoopOptimiser(rep=_summands, multiindex=(), arg_ind=self.arg_ind)
         # continue to factorise this new node
-        lo.factorise_key(keys, no_arg_factor)
-        for to_delete in factored_out:
-            self.rep.remove(to_delete)
+        lo.factorise_key(keys, no_arg_factor, sort_func)
+        # delete items that are factored out (avoid comparison of OrderedDict which is expensive)
+        self.rep = [summand for (idx, summand) in enumerate(self.rep) if idx not in to_delete]
         if len(lo.rep) == 1:
             # result of further factorisation is a Product
             new_summand = lo.rep[0]
@@ -947,7 +963,7 @@ class LoopOptimiser(object):
             new_summand[self._decide_key(node)] = [node]
             new_summand[cf_key].insert(0, cf)
             self.rep.append(new_summand)
-        self.factorise_key(keys, no_arg_factor)  # Continue factorising
+        self.factorise_key(keys, no_arg_factor, sort_func)  # Continue factorising
 
     def factorise_arg(self, factors_seq, no_arg_factor=True):
         """
@@ -957,14 +973,16 @@ class LoopOptimiser(object):
         if len(self.rep) < 2:
             return
         if not factors_seq:
-            self.factorise_key(('other', 'const'), no_arg_factor=no_arg_factor)
+            # sort_func = lambda x: (count_flop(x[0]) + 1) * (x[1] - 1)
+            sort_func = None
+            self.factorise_key(('other', 'const'), no_arg_factor=no_arg_factor, sort_func=sort_func)
             return
         cf = factors_seq[0]  # pick the first common factor
         key = self._decide_key(cf)
-        factored_out = list()
+        to_delete = list()
         # cf * Sum(_summands), where summand = Product(_factors)
         _summands = list()
-        for summand in self.rep:
+        for idx, summand in enumerate(self.rep):
             if key not in summand:
                 continue
             factors = summand[key]
@@ -972,7 +990,7 @@ class LoopOptimiser(object):
                 raise AssertionError("There should be only one argument factor")
             if cf not in factors:
                 continue
-            factored_out.append(summand)  # mark for deleting later
+            to_delete.append(idx)  # mark for deleting later
             new_summand = Summand(summand)
             new_summand[key] = []
             _summands.append(new_summand)
@@ -981,8 +999,7 @@ class LoopOptimiser(object):
             lo = LoopOptimiser(rep=_summands, multiindex=(), arg_ind=self.arg_ind)
             lo.factorise_arg(factors_seq[1:], no_arg_factor)
             # Delete factored out lines in rep
-            for to_delete in factored_out:
-                self.rep.remove(to_delete)
+            self.rep = [summand for (idx, summand) in enumerate(self.rep) if idx not in to_delete]
             if len(lo.rep) == 1:
                 new_summand = lo.rep[0]
                 new_summand[key].insert(0, cf)
