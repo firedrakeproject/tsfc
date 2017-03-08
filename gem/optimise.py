@@ -663,7 +663,12 @@ def optimise(node, quad_ind, arg_ind):
     rep, multiindex = build_repr(node, arg_ind)
     lo = LoopOptimiser(rep=rep, multiindex=multiindex, arg_ind=arg_ind)
     optimal_arg = lo.find_optimal_arg_factors()
-    lo.factorise_arg(optimal_arg[0] + optimal_arg[1], factorise_const=False)
+    N = len(optimal_arg[0])  # number of factors in the inner most loop
+    if N >= max([i.extent for i in lo.arg_ind_flat]):
+        include_arg = True
+    else:
+        include_arg = False
+    lo.factorise_arg(optimal_arg[0] + optimal_arg[1], include_arg)
     return lo.generate_node()
 
 
@@ -879,23 +884,29 @@ class LoopOptimiser(object):
         # Sequence dictating order of factorisation
         return (tuple(optimal_factors), tuple(other_factors))
 
-    def factorise_atom(self, atom):
+    def factorise_atom(self, atom, factor_location=None):
         """
-        factorise this LoopOptimiser (this) into two LoopOptimiser, lo1 and lo2, such that
-        this = lo1 + lo2 * atom
+        factorise this LoopOptimiser (this) into two LoopOptimiser, lo1 and lo2,
+        such that this = lo1 + lo2 * atom
+        :param factor_location: dictionary of location of factors (avoid
+        scanning the list again if it has already been established)
         """
         key = self._decide_key(atom)
         # TODO: consider make a copy of rep so that self.rep is untouched
-        to_add_2 = list()
-        remove_locator = dict()  # avoid scanning the list twice to remove atom
-        for idx, summand in enumerate(self.rep):
-            if key not in summand:
-                continue
-            for factor_idx, factor in enumerate(summand[key]):
-                if factor == atom:
-                    remove_locator[idx] = factor_idx
-                    to_add_2.append(idx)
+        if factor_location is None:
+            to_add_2 = list()
+            factor_location = dict()  # avoid scanning the list twice to remove atom
+            for idx, summand in enumerate(self.rep):
+                if key not in summand:
                     continue
+                for factor_idx, factor in enumerate(summand[key]):
+                    if factor == atom:
+                        factor_location[idx] = factor_idx
+                        to_add_2.append(idx)
+                        continue
+        else:
+            to_add_2 = list(iterkeys(factor_location))
+
         if len(to_add_2) <= 1:
             return (self, None)
         rep1 = list()
@@ -903,7 +914,7 @@ class LoopOptimiser(object):
         for idx, summand in enumerate(self.rep):
             if idx in to_add_2:
                 summand[key] = [factor for (factor_idx, factor) in enumerate(summand[key])
-                                if factor_idx != remove_locator[idx]]
+                                if factor_idx != factor_location[idx]]
                 rep2.append(summand)
             else:
                 rep1.append(summand)
@@ -911,36 +922,40 @@ class LoopOptimiser(object):
         lo2 = LoopOptimiser(rep=rep2, multiindex=(), arg_ind=self.arg_ind)
         return (lo1, lo2)
 
-    def factorise_key(self, keys, sort_func=None):
+    def factorise_key(self, keys, sort_func=None, include_arg=False):
         """
         Factorise common factors that have a particular key from :param keys
+        :param factorise_arg: whether to factorise terms depedent on argument indices
+        (normally this is not beneficial)
         """
         if len(self.rep) < 2:
             return
-        counter = OrderedDict()
-        for summand in self.rep:
+        # record location of factors
+        # e.g. factor -> ( 1 -> 2 ), factor is at location #2 of summand #1
+        factor_loc = OrderedDict()
+        for idx, summand in enumerate(self.rep):
+            if not include_arg and summand.contains_arg_factor():
+                continue
             for _key in keys:
                 if _key not in summand:
                     continue
-                # One factor could appear multiple times in a Summand
-                for factor in OrderedDict().fromkeys(summand[_key]):
-                    counter.setdefault(factor, 0)
-                    counter[factor] += 1
-        if not counter:
+                # if duplicated factors exist, this will just get the last one
+                for factor_idx, factor in enumerate(summand[_key]):
+                    (factor_loc.setdefault(factor, OrderedDict()))[idx] = factor_idx
+        if not factor_loc:
             return
-        if max(counter.values()) < 2:
+        common_factors = [(k, v) for k, v in iteritems(factor_loc) if len(v) > 1]
+        if not common_factors:
             return
         if sort_func is None:
-            sort_func = lambda x: x[1]
-        common_factors = sorted([(k, v) for k, v in iteritems(counter) if v > 1],
-                                key=sort_func,
-                                reverse=True)
+            sort_func = lambda x: len(x[1])
+        common_factors = sorted(common_factors, key=sort_func, reverse=True)
         cf, count = common_factors[0]
         cf_key = self._decide_key(cf)
-        lo1, lo2 = self.factorise_atom(cf)
-        assert(len(lo2.rep) == count)
+        lo1, lo2 = self.factorise_atom(cf, factor_loc[cf])
+        assert(len(lo2.rep) == len(count))
         # continue to factorise this new node
-        lo2.factorise_key(keys, sort_func)
+        lo2.factorise_key(keys, sort_func, include_arg)
         if len(lo2.rep) == 1:
             # result of further factorisation is a Product
             new_summand = lo2.rep[0]
@@ -954,9 +969,9 @@ class LoopOptimiser(object):
             new_summand[cf_key].insert(0, cf)
             lo1.rep.append(new_summand)
         self.rep = lo1.rep
-        self.factorise_key(keys, sort_func)  # Continue factorising
+        self.factorise_key(keys, sort_func, include_arg)  # Continue factorising
 
-    def factorise_arg(self, factors_seq, factorise_const=False):
+    def factorise_arg(self, factors_seq, include_arg=False):
         """
         Factorise sequentially with common factors from :param factors_seq
         :param factors_seq: sequence of factors used to fa  ctorise
@@ -964,10 +979,7 @@ class LoopOptimiser(object):
         if len(self.rep) < 2:
             return
         if not factors_seq:
-            if factorise_const:
-                # sort_func = lambda x: (count_flop(x[0]) + 1) * (x[1] - 1)
-                sort_func = None
-                self.factorise_key(('other', 'const'), sort_func=sort_func)
+            self.factorise_key(('other', 'const'), include_arg=include_arg)
             return
         cf = factors_seq[0]  # pick the first common factor
         key = self._decide_key(cf)
@@ -975,11 +987,12 @@ class LoopOptimiser(object):
         # this = lo1 + cf * lo2
         lo1, lo2 = self.factorise_atom(cf)
         if lo2 is None:
-            self.factorise_arg(factors_seq[1:], factorise_const)
+            self.factorise_arg(factors_seq[1:], include_arg)
+            self.factorise_key(('other', 'const'), include_arg=include_arg)
             return
 
         # Proceed with the next common factor for the factorised part
-        lo2.factorise_arg(factors_seq[1:], factorise_const)
+        lo2.factorise_arg(factors_seq[1:], include_arg)
         if len(lo2.rep) == 1:
             # result is a product
             new_summand = lo2.rep[0]
@@ -994,7 +1007,8 @@ class LoopOptimiser(object):
             lo1.rep.append(new_summand)
         self.rep = lo1.rep
         # Proceed with the next common factor
-        self.factorise_arg(factors_seq[1:], factorise_const)
+        self.factorise_arg(factors_seq[1:], include_arg)
+        self.factorise_key(('other', 'const'), include_arg=include_arg)
         return
 
     def generate_node(self):
