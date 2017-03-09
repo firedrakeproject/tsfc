@@ -12,7 +12,7 @@ from itertools import chain, combinations, permutations, product
 import numpy
 from singledispatch import singledispatch
 
-from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
+from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg, traversal
 from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
                      Product, Sum, Comparison, Conditional, Division,
                      Index, VariableIndex, Indexed, FlexiblyIndexed,
@@ -531,25 +531,43 @@ def _collect_monomials(expression, self):
     return result
 
 
-def collect_monomials(expression, classifier):
-    """Refactorises an expression into a sum-of-products form, using
+def collect_monomials(expressions, classifier):
+    """Refactorises expressions into a sum-of-products form, using
     distributivity rules (i.e. a*(b + c) -> a*b + a*c).  Expansion
     proceeds until all "compound" expressions are broken up.
 
-    :arg expression: a GEM expression to refactorise
+    :arg expressions: GEM expressions to refactorise
     :arg classifier: a function that can classify any GEM expression
                      as ``ATOMIC``, ``COMPOUND``, or ``OTHER``.  This
                      classification drives the factorisation.
 
-    :returns: list of monomials; each monomial is a summand and a
+    :returns: list of list of monomials; the outer list has one entry
+              for each expression; each monomial is a summand and a
               structured description of a product
 
     :raises FactorisationError: Failed to break up some "compound"
                                 expressions with expansion.
     """
+    # Get ComponentTensors out of the way
+    expressions = remove_componenttensors(expressions)
+
+    # Get ListTensors out of the way
+    must_unroll = []  # indices to unroll
+    for node in traversal(expressions):
+        if isinstance(node, Indexed):
+            child, = node.children
+            if isinstance(child, ListTensor) and classifier(node) == COMPOUND:
+                must_unroll.extend(node.multiindex)
+    if must_unroll:
+        must_unroll = set(must_unroll)
+        expressions = unroll_indexsum(expressions,
+                                      predicate=lambda i: i in must_unroll)
+        expressions = remove_componenttensors(expressions)
+
+    # Finally, refactorise expressions
     mapper = Memoizer(_collect_monomials)
     mapper.classifier = classifier
-    return mapper(expression)
+    return list(map(mapper, expressions))
 
 
 @singledispatch
