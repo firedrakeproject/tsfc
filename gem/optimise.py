@@ -636,19 +636,16 @@ def decide_key(factor, arg_ind_flat, arg_ind_set):
             return ind_set.pop()
 
 
-def build_repr(node, arg_ind, arg_ind_expand=None):
+def build_repr(node, arg_ind):
     """
     Build representation from self.node
     """
-    if arg_ind_expand is None:
-        arg_ind_expand = arg_ind
     arg_ind_flat = tuple([i for indices in arg_ind for i in indices])
-    arg_ind_expand_flat = tuple([i for indices in arg_ind_expand for i in indices])
     multiindex = ()
     if isinstance(node, IndexSum):
         multiindex = node.multiindex
         node = node.children[0]
-    node = expand_products(node, arg_ind_expand_flat)
+    node = expand_products(node, arg_ind_flat)
     summands = collect_terms(node, Sum)
     rep = []
     for summand in summands:
@@ -664,32 +661,18 @@ def optimise(node, quad_ind, arg_ind):
     if isinstance(node, Constant):
         return node
 
-    rep, multiindex = build_repr(node, arg_ind, ())
-    lo = LoopOptimiser(rep=rep, multiindex=multiindex, arg_ind=arg_ind)
-    optimal_arg = lo.find_optimal_arg_factors()
-    N = len(optimal_arg[0])  # number of factors in the inner most loop
-    if N >= max([i.extent for i in lo.arg_ind_flat] + [0]):
-        include_arg = True
-    else:
-        include_arg = False
-    lo.factorise_arg(optimal_arg[0] + optimal_arg[1], include_arg)
-    node1 = lo.generate_node()
-
     rep, multiindex = build_repr(node, arg_ind)
     lo = LoopOptimiser(rep=rep, multiindex=multiindex, arg_ind=arg_ind)
     optimal_arg = lo.find_optimal_arg_factors()
-    N = len(optimal_arg[0])  # number of factors in the inner most loop
-    if N >= max([i.extent for i in lo.arg_ind_flat] + [0]):
+    include_arg = False
+    if all([len(set(f.free_indices) & set(quad_ind)) == 0 for f in optimal_arg[0] + optimal_arg[1]]):
         include_arg = True
     else:
-        include_arg = False
+        N = len(optimal_arg[0])  # number of factors in the inner most loop
+        if N >= max([i.extent for i in lo.arg_ind_flat] + [0]):
+            include_arg = True
     lo.factorise_arg(optimal_arg[0] + optimal_arg[1], include_arg)
-    node2 = lo.generate_node()
-    print(count_flop(node1))
-    print(count_flop(node2))
-    if count_flop(node1) < count_flop(node2):
-        return node1
-    return node2
+    return lo.generate_node()
 
 
 def optimise_expressions(expressions, quadrature_indices, argument_indices):
