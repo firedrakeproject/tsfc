@@ -430,15 +430,13 @@ class FactorisationError(Exception):
     pass
 
 
-def collect_monomials(expression, classifier):
+def _collect_monomials(expression, self):
     """Refactorises an expression into a sum-of-products form, using
     distributivity rules (i.e. a*(b + c) -> a*b + a*c).  Expansion
     proceeds until all "compound" expressions are broken up.
 
     :arg expression: a GEM expression to refactorise
-    :arg classifier: a function that can classify any GEM expression
-                     as ``ATOMIC``, ``COMPOUND``, or ``OTHER``.  This
-                     classification drives the factorisation.
+    :arg self: function for recursive calls
 
     :returns: list of monomials; each monomial is a summand and a
               structured description of a product
@@ -449,14 +447,14 @@ def collect_monomials(expression, classifier):
     # Phase 1: Collect and categorise product terms
     def stop_at(expr):
         # Break up compounds only
-        return classifier(expr) != COMPOUND
+        return self.classifier(expr) != COMPOUND
     common_indices, terms = traverse_product(expression, stop_at=stop_at)
 
     common_atomics = []
     common_others = []
     compounds = []
     for term in terms:
-        cls = classifier(term)
+        cls = self.classifier(term)
         if cls == ATOMIC:
             common_atomics.append(term)
         elif cls == COMPOUND:
@@ -475,8 +473,7 @@ def collect_monomials(expression, classifier):
             # recursion and fail gracefully raising an exception.
             raise FactorisationError(expr)
         # Recurse into each summand, concatenate their results
-        sums.append(chain.from_iterable(collect_monomials(summand, classifier)
-                                        for summand in summands))
+        sums.append(chain.from_iterable(map(self, summands)))
 
     # Phase 3: Expansion
     #
@@ -532,6 +529,27 @@ def collect_monomials(expression, classifier):
         rest = reduce(Sum, [m.rest for m in monomials])
         result.append(Monomial(sum_indices, atomics, rest))
     return result
+
+
+def collect_monomials(expression, classifier):
+    """Refactorises an expression into a sum-of-products form, using
+    distributivity rules (i.e. a*(b + c) -> a*b + a*c).  Expansion
+    proceeds until all "compound" expressions are broken up.
+
+    :arg expression: a GEM expression to refactorise
+    :arg classifier: a function that can classify any GEM expression
+                     as ``ATOMIC``, ``COMPOUND``, or ``OTHER``.  This
+                     classification drives the factorisation.
+
+    :returns: list of monomials; each monomial is a summand and a
+              structured description of a product
+
+    :raises FactorisationError: Failed to break up some "compound"
+                                expressions with expansion.
+    """
+    mapper = Memoizer(_collect_monomials)
+    mapper.classifier = classifier
+    return mapper(expression)
 
 
 @singledispatch
