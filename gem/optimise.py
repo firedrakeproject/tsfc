@@ -2,8 +2,8 @@
 expressions."""
 
 from __future__ import absolute_import, print_function, division
-from six import itervalues, iteritems, iterkeys
-from six.moves import map, zip
+from six import iterkeys, iteritems, itervalues
+from six.moves import filter, map, zip
 
 from collections import OrderedDict, deque
 from functools import reduce
@@ -434,8 +434,7 @@ _unroll_indexsum.register(Node)(reuse_if_untouched)
 
 @_unroll_indexsum.register(IndexSum)  # noqa
 def _(node, self):
-    unroll = tuple(index for index in node.multiindex
-                   if index.extent <= self.max_extent)
+    unroll = tuple(filter(self.predicate, node.multiindex))
     if unroll:
         # Unrolling
         summand = self(node.children[0])
@@ -450,15 +449,16 @@ def _(node, self):
         return reuse_if_untouched(node, self)
 
 
-def unroll_indexsum(expressions, max_extent):
+def unroll_indexsum(expressions, predicate):
     """Unrolls IndexSums below a specified extent.
 
     :arg expressions: list of expression DAGs
-    :arg max_extent: maximum extent for which IndexSums are unrolled
+    :arg predicate: a predicate function on :py:class:`Index` objects
+                    that tells whether to unroll a particular index
     :returns: list of expression DAGs with some unrolled IndexSums
     """
     mapper = Memoizer(_unroll_indexsum)
-    mapper.max_extent = max_extent
+    mapper.predicate = predicate
     return list(map(mapper, expressions))
 
 
@@ -472,7 +472,7 @@ def aggressive_unroll(expression):
         expression, = remove_componenttensors((ListTensor(tensor),))
 
     # Unroll summation
-    expression, = unroll_indexsum((expression,), max_extent=numpy.inf)
+    expression, = unroll_indexsum((expression,), predicate=lambda index: True)
     expression, = remove_componenttensors((expression,))
     return expression
 
