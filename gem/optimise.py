@@ -2,12 +2,12 @@
 expressions."""
 
 from __future__ import absolute_import, print_function, division
-from six import itervalues
+from six import iteritems, itervalues
 from six.moves import filter, intern, map, zip
 
-from collections import OrderedDict, namedtuple
+from collections import OrderedDict, defaultdict, namedtuple
 from functools import reduce
-from itertools import chain, combinations, permutations, product
+from itertools import combinations, permutations, product
 
 import numpy
 from singledispatch import singledispatch
@@ -409,8 +409,8 @@ OTHER = intern('other')
 
 
 Monomial = namedtuple('Monomial', ['sum_indices', 'atomics', 'rest'])
-"""Monomial type, used in the return type of
-:py:func:`collect_monomials`.
+"""Monomial type, representation of a tensor product with some
+distinguished factors (called atomics).
 
 - sum_indices: indices to sum over
 - atomics: tuple of expressions classified as ATOMIC
@@ -423,6 +423,78 @@ A :py:class:`Monomial` is a structured description of the expression:
     IndexSum(reduce(Product, atomics, rest), sum_indices)
 
 """
+
+
+class MonomialSum(object):
+    """Represents a sum of :py:class:`Monomial`s.
+
+    The set of :py:class:`Monomial` summands are represented as a
+    mapping from a pair of unordered ``sum_indices`` and unordered
+    ``atomics`` to a ``rest`` GEM expression.  This representation
+    makes it easier to merge similar monomials.
+    """
+    def __init__(self):
+        # (unordered sum_indices, unordered atomics) -> rest
+        self.monomials = defaultdict(Zero)
+
+        # We shall retain ordering for deterministic code generation:
+        #
+        # (unordered sum_indices, unordered atomics) ->
+        #     (ordered sum_indices, ordered atomics)
+        self.ordering = OrderedDict()
+
+    def add(self, sum_indices, atomics, rest):
+        """Updates the :py:class:`MonomialSum` adding a new monomial."""
+        sum_indices = tuple(sum_indices)
+        sum_indices_set = frozenset(sum_indices)
+        # Sum indices cannot have duplicates
+        assert len(sum_indices) == len(sum_indices_set)
+
+        atomics = tuple(atomics)
+        atomics_set = frozenset(atomics)
+        if len(atomics) != len(atomics_set):
+            raise NotImplementedError("MonomialSum does not support duplicate atomics")
+
+        assert isinstance(rest, Node)
+
+        key = (sum_indices_set, atomics_set)
+        self.monomials[key] = Sum(self.monomials[key], rest)
+        self.ordering.setdefault(key, (sum_indices, atomics))
+
+    def __iter__(self):
+        """Iteration yields :py:class:`Monomial` objects"""
+        for key, (sum_indices, atomics) in iteritems(self.ordering):
+            rest = self.monomials[key]
+            yield Monomial(sum_indices, atomics, rest)
+
+    @staticmethod
+    def sum(*args):
+        """Sum of multiple :py:class:`MonomialSum`s"""
+        result = MonomialSum()
+        for arg in args:
+            assert isinstance(arg, MonomialSum)
+            # Optimised implementation: no need to decompose and
+            # reconstruct key.
+            for key, rest in iteritems(arg.monomials):
+                result.monomials[key] = Sum(result.monomials[key], rest)
+            for key, value in iteritems(arg.ordering):
+                result.ordering.setdefault(key, value)
+        return result
+
+    @staticmethod
+    def product(*args):
+        """Product of multiple :py:class:`MonomialSum`s"""
+        result = MonomialSum()
+        for monomials in product(*args):
+            sum_indices = []
+            atomics = []
+            rest = one
+            for s, a, r in monomials:
+                sum_indices.extend(s)
+                atomics.extend(a)
+                rest = Product(r, rest)
+            result.add(sum_indices, atomics, rest)
+        return result
 
 
 class FactorisationError(Exception):
@@ -438,8 +510,7 @@ def _collect_monomials(expression, self):
     :arg expression: a GEM expression to refactorise
     :arg self: function for recursive calls
 
-    :returns: list of monomials; each monomial is a summand and a
-              structured description of a product
+    :returns: :py:class:`MonomialSum`
 
     :raises FactorisationError: Failed to break up some "compound"
                                 expressions with expansion.
@@ -449,6 +520,7 @@ def _collect_monomials(expression, self):
         # Break up compounds only
         return self.classifier(expr) != COMPOUND
     common_indices, terms = traverse_product(expression, stop_at=stop_at)
+    common_indices = tuple(common_indices)
 
     common_atomics = []
     common_others = []
@@ -463,6 +535,7 @@ def _collect_monomials(expression, self):
             common_others.append(term)
         else:
             raise ValueError("Classifier returned illegal value.")
+    common_atomics = tuple(common_atomics)
 
     # Phase 2: Attempt to break up compound terms into summands
     sums = []
@@ -473,29 +546,16 @@ def _collect_monomials(expression, self):
             # recursion and fail gracefully raising an exception.
             raise FactorisationError(expr)
         # Recurse into each summand, concatenate their results
-        sums.append(chain.from_iterable(map(self, summands)))
+        sums.append(MonomialSum.sum(*map(self, summands)))
 
     # Phase 3: Expansion
     #
-    # Each element of ``sums`` is list (representing a sum) of
-    # monomials corresponding to one compound product term.  Expansion
-    # produces a series (representing a sum) of products of monomials.
-    unfactored = OrderedDict()
-    for partials in product(*sums):
-        # ``partials`` is a tuple of :py:class:`Monomial`s.  Here we
-        # construct their "product" with the common atomic and other
-        # factors.
-
-        # Copy common ingredients
-        all_indices = list(common_indices)
-        atomics = list(common_atomics)
-        others = list(common_others)
-
-        # Decompose monomial named tuples
-        for monomial in partials:
-            all_indices.extend(monomial.sum_indices)
-            atomics.extend(monomial.atomics)
-            others.append(monomial.rest)
+    # Each element of ``sums`` is a MonomialSum.  Expansion produces a
+    # series (representing a sum) of products of monomials.
+    result = MonomialSum()
+    for s, a, r in MonomialSum.product(*sums):
+        all_indices = common_indices + s
+        atomics = common_atomics + a
 
         # All free indices that appear in atomic terms
         atomic_indices = set().union(*[atomic.free_indices
@@ -513,21 +573,9 @@ def _collect_monomials(expression, self):
 
         # Not really sum factorisation, but rather just an optimised
         # way of building a product.
-        rest = sum_factorise(rest_indices, others)
+        rest = sum_factorise(rest_indices, common_others + [r])
 
-        monomial = Monomial(sum_indices, tuple(atomics), rest)
-        key = (frozenset(sum_indices), frozenset(atomics))
-        unfactored.setdefault(key, []).append(monomial)
-
-    # Phase 4: Re-factorise.
-    #
-    # Merge ``rest`` for identical ``sum_indices`` and ``atomics``.
-    result = []
-    for monomials in itervalues(unfactored):
-        sum_indices = monomials[0].sum_indices
-        atomics = monomials[0].atomics
-        rest = reduce(Sum, [m.rest for m in monomials])
-        result.append(Monomial(sum_indices, atomics, rest))
+        result.add(sum_indices, atomics, rest)
     return result
 
 
@@ -541,9 +589,7 @@ def collect_monomials(expressions, classifier):
                      as ``ATOMIC``, ``COMPOUND``, or ``OTHER``.  This
                      classification drives the factorisation.
 
-    :returns: list of list of monomials; the outer list has one entry
-              for each expression; each monomial is a summand and a
-              structured description of a product
+    :returns: list of :py:class:`MonomialSum`s
 
     :raises FactorisationError: Failed to break up some "compound"
                                 expressions with expansion.
