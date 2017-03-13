@@ -573,10 +573,46 @@ def collect_terms(node, node_type):
     while queue:
         child = queue.pop()
         if isinstance(child, node_type):
-            queue.extend(child.children)
+            queue.extend(reversed(child.children))
         else:
             terms.append(child)
     return tuple(terms)
+
+
+def collect_monomials(node, arg_ind_flat):
+    arg_ind_set = set(arg_ind_flat)
+    mapper = dict([(0, node)])
+    reverse_mapper = dict([(node, 0)])
+    stack = deque(iteritems(mapper))  # [0]
+    monomials = [tuple(iterkeys(mapper))]  # [(0,)]
+    index = count(1)
+    while stack:
+        number, factor = stack.popleft()
+        if isinstance(factor, Product) or (isinstance(factor, Sum) and set(factor.free_indices) & arg_ind_set):
+            new_items = []
+            for child in factor.children:
+                if child in reverse_mapper:
+                    idx = reverse_mapper[child]
+                else:
+                    idx = next(index)
+                    mapper[idx] = child
+                    reverse_mapper[child] = idx
+                new_items.append((idx, child))
+            stack.extend(new_items)
+
+            new_mono = []
+            for mono in monomials:
+                if number in mono:
+                    if isinstance(factor, Product):
+                        new_mono.append(tuple([x for x in mono if x != number] + [item[0] for item in new_items]))
+                    else:
+                        for item in new_items:
+                            new_mono.append(tuple(
+                                [x if x != number else item[0] for x in mono]))
+            monomials = [m for m in monomials if number not in m]
+            monomials.extend(new_mono)
+
+    return (monomials, mapper)
 
 
 @singledispatch
