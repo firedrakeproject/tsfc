@@ -5,9 +5,9 @@ from __future__ import absolute_import, print_function, division
 from six import iterkeys, iteritems, itervalues
 from six.moves import filter, map, zip
 
-from collections import OrderedDict, deque
-from functools import reduce
-from itertools import permutations, count
+from collections import OrderedDict, defaultdict, namedtuple, deque
+from functools import reduce, partial
+from itertools import permutations, count, product
 from cached_property import cached_property
 
 import numpy
@@ -523,6 +523,293 @@ def count_flop(node):
     return sum(map(count_flop_node, traversal([node])))
 
 
+# Refactorisation classes
+
+ATOMIC = intern('atomic')
+"""Label: the expression need not be broken up into smaller parts"""
+
+COMPOUND = intern('compound')
+"""Label: the expression must be broken up into smaller parts"""
+
+OTHER = intern('other')
+"""Label: the expression is irrelevant with regards to refactorisation"""
+
+
+def traverse_product(expression, stop_at=None):
+    """Traverses a product tree and collects factors, also descending into
+    tensor contractions (IndexSum).  The nominators of divisions are
+    also broken up, but not the denominators.
+
+    :arg expression: a GEM expression
+    :arg stop_at: Optional predicate on GEM expressions.  If specified
+                  and returns true for some subexpression, that
+                  subexpression is not broken into further factors
+                  even if it is a product-like expression.
+    :returns: (sum_indices, terms)
+              - sum_indices: list of indices to sum over
+              - terms: list of product terms
+    """
+    sum_indices = []
+    terms = []
+
+    stack = [expression]
+    while stack:
+        expr = stack.pop()
+        if stop_at is not None and stop_at(expr):
+            terms.append(expr)
+        elif isinstance(expr, IndexSum):
+            stack.append(expr.children[0])
+            sum_indices.extend(expr.multiindex)
+        elif isinstance(expr, Product):
+            stack.extend(reversed(expr.children))
+        elif isinstance(expr, Division):
+            # Break up products in the dividend, but not in divisor.
+            dividend, divisor = expr.children
+            if dividend == one:
+                terms.append(expr)
+            else:
+                stack.append(Division(one, divisor))
+                stack.append(dividend)
+        else:
+            terms.append(expr)
+
+    return sum_indices, terms
+
+
+def traverse_sum(expression, stop_at=None):
+    """Traverses a summation tree and collects summands.
+
+    :arg expression: a GEM expression
+    :arg stop_at: Optional predicate on GEM expressions.  If specified
+                  and returns true for some subexpression, that
+                  subexpression is not broken into further summands
+                  even if it is an addition.
+    :returns: list of summand expressions
+    """
+    stack = [expression]
+    result = []
+    while stack:
+        expr = stack.pop()
+        if stop_at is not None and stop_at(expr):
+            result.append(expr)
+        elif isinstance(expr, Sum):
+            stack.extend(reversed(expr.children))
+        else:
+            result.append(expr)
+    return result
+
+
+class MonomialSum(object):
+    def __init__(self):
+        self.monomials = defaultdict(Zero)
+        self.ordering = OrderedDict()
+
+    @staticmethod
+    def sum(*args):
+        result = MonomialSum()
+        for arg in args:
+            assert isinstance(arg, MonomialSum)
+            for key, rest in iteritems(arg.monomials):
+                result.monomials[key] = Sum(rest, result.monomials[key])
+            for key, value in iteritems(arg.ordering):
+                result.ordering.setdefault(key, value)
+        return result
+
+    @staticmethod
+    def product(*args):
+        result = MonomialSum()
+        for keys in product(*[arg.ordering for arg in args]):
+            rest = one
+            sum_indices = []
+            atomics = []
+            for key, arg in zip(keys, args):
+                rest = Product(arg.monomials[key], rest)
+                indices, terms = arg.ordering[key]
+                assert not set(sum_indices).intersection(indices)
+                assert not set(atomics).intersection(terms)
+                sum_indices.extend(indices)
+                atomics.extend(terms)
+            key = (frozenset(sum_indices), frozenset(atomics))
+            result.monomials[key] = Sum(rest, result.monomials[key])
+            result.ordering.setdefault(key, (sum_indices, atomics))
+        return result
+
+    def argument_indices_extent(self, factor):
+        return numpy.product([i.extent for i in set(factor.free_indices).intersection(self.argument_indices)])
+
+    def find_optimal_atomics(self):
+        index = count()
+        atomic_index = OrderedDict()  # Atomic gem node -> int
+        connections = []
+        # add connections (list of lists)
+        for (_, atomics) in iterkeys(self.monomials):
+            connection = []
+            for atomic in atomics:
+                if atomic not in atomic_index:
+                    atomic_index[atomic] = next(index)
+                connection.append(atomic_index[atomic])
+            connections.append(tuple(connection))
+        return (atomic_index, connections)
+
+        if len(atomic_index) == 0:
+            return ((), ())
+
+        # set up the ILP
+        import pulp as ilp
+        ilp_prob = ilp.LpProblem('gem factorise', ilp.LpMinimize)
+        ilp_var = ilp.LpVariable.dicts('node', range(len(atomic_index)), 0, 1, ilp.LpBinary)
+
+        # Objective function
+        # Minimise number of factors to pull. If same number, favour factor with larger extent
+        big = 10000000  # some arbitrary big number
+        ilp_prob += ilp.lpSum(ilp_var[index] * (big - self.factor_extent(atomic)) for atomic, index in iteritems(atomic_index))
+
+        # constraints
+        for connection in connections:
+            ilp_prob += ilp.lpSum(ilp_var[index] for index in connection) >= 1
+
+        ilp_prob.solve()
+        if ilp_prob.status != 1:
+            raise AssertionError("Something bad happened during ILP")
+
+        optimal_factors = [factor for factor, _index in iteritems(factor_index) if ilp_var[_index].value() == 1]
+        other_factors = [factor for factor, _index in iteritems(factor_index) if ilp_var[_index].value() == 0]
+        # TODO: investigate effects of sorting these two lists of factors
+        optimal_factors = sorted(optimal_factors, key=lambda f: self.factor_extent(f), reverse=True)
+        other_factors = sorted(other_factors, key=lambda f: self.factor_extent(f), reverse=True)
+        # Sequence dictating order of factorisation
+        return (tuple(optimal_factors), tuple(other_factors))
+
+
+Monomial = namedtuple('Monomial', ['sum_indices', 'atomics', 'rest'])
+"""Monomial type, used in the return type of
+:py:func:`collect_monomials`.
+
+- sum_indices: indices to sum over
+- atomics: tuple of expressions classified as ATOMIC
+- rest: a single expression classified as OTHER
+
+A :py:class:`Monomial` is a structured description of the expression:
+
+.. code-block:: python
+
+    IndexSum(reduce(Product, atomics, rest), sum_indices)
+
+"""
+
+
+class FactorisationError(Exception):
+    """Raised when factorisation fails to achieve some desired form."""
+    pass
+
+
+def _collect_monomials(expression, self):
+    """Refactorises an expression into a sum-of-products form, using
+    distributivity rules (i.e. a*(b + c) -> a*b + a*c).  Expansion
+    proceeds until all "compound" expressions are broken up.
+
+    :arg expression: a GEM expression to refactorise
+    :arg self: function for recursive calls
+
+    :returns: list of monomials; each monomial is a summand and a
+              structured description of a product
+
+    :raises FactorisationError: Failed to break up some "compound"
+                                expressions with expansion.
+    """
+    # Phase 1: Collect and categorise product terms
+    def stop_at(expr):
+        # Break up compounds only
+        return self.classifier(expr) != COMPOUND
+    common_indices, terms = traverse_product(expression, stop_at=stop_at)
+
+    common_atomics = []
+    common_others = []
+    compounds = []
+    for term in terms:
+        cls = self.classifier(term)
+        if cls == ATOMIC:
+            common_atomics.append(term)
+        elif cls == COMPOUND:
+            compounds.append(term)
+        elif cls == OTHER:
+            common_others.append(term)
+        else:
+            raise ValueError("Classifier returned illegal value.")
+
+    # Phase 2: Attempt to break up compound terms into summands
+    sums = []
+    for expr in compounds:
+        summands = traverse_sum(expr, stop_at=stop_at)
+        if len(summands) <= 1:
+            # Compound term is not an addition, avoid infinite
+            # recursion and fail gracefully raising an exception.
+            raise FactorisationError(expr)
+        # Recurse into each summand, concatenate their results
+        sums.append(MonomialSum.sum(*map(self, summands)))
+    expanded = MonomialSum.product(*sums)
+
+    # Phase 3: Expansion
+    #
+    # Each element of ``sums`` is list (representing a sum) of
+    # monomials corresponding to one compound product term.  Expansion
+    # produces a series (representing a sum) of products of monomials.
+    result = MonomialSum()
+    for key, (indices, terms) in iteritems(expanded.ordering):
+        rest = expanded.monomials[key]
+
+        all_indices = common_indices + indices
+        assert len(all_indices) == len(set(all_indices))
+        atomics = common_atomics + terms
+        assert len(atomics) == len(set(atomics))
+        others = common_others + [rest]
+
+        # All free indices that appear in atomic terms
+        atomic_indices = set().union(*[atomic.free_indices
+                                       for atomic in atomics])
+
+        # Sum indices that appear in atomic terms
+        # (will go to the result :py:class:`Monomial`)
+        sum_indices = tuple(index for index in all_indices
+                            if index in atomic_indices)
+
+        # Sum indices that do not appear in atomic terms
+        # (can factorise them over atomic terms immediately)
+        rest_indices = tuple(index for index in all_indices
+                             if index not in atomic_indices)
+
+        # Not really sum factorisation, but rather just an optimised
+        # way of building a product.
+        rest = sum_factorise(rest_indices, others)
+
+        new_key = (frozenset(sum_indices), frozenset(atomics))
+        result.monomials[new_key] = rest
+        result.ordering.setdefault(new_key, (tuple(sum_indices), tuple(atomics)))
+
+    return result
+
+
+def collect_monomials(expression, classifier):
+    """Refactorises an expression into a sum-of-products form, using
+    distributivity rules (i.e. a*(b + c) -> a*b + a*c).  Expansion
+    proceeds until all "compound" expressions are broken up.
+
+    :arg expression: a GEM expression to refactorise
+    :arg classifier: a function that can classify any GEM expression
+                     as ``ATOMIC``, ``COMPOUND``, or ``OTHER``.  This
+                     classification drives the factorisation.
+
+    :returns: list of monomials; each monomial is a summand and a
+              structured description of a product
+
+    :raises FactorisationError: Failed to break up some "compound"
+                                expressions with expansion.
+    """
+    mapper = Memoizer(_collect_monomials)
+    mapper.classifier = classifier
+    return mapper(expression)
+
+
 @singledispatch
 def _expand_products(node, self):
     raise AssertionError("cannot handle type %s" % type(node))
@@ -577,42 +864,6 @@ def collect_terms(node, node_type):
         else:
             terms.append(child)
     return tuple(terms)
-
-
-def collect_monomials(node, arg_ind_flat):
-    arg_ind_set = set(arg_ind_flat)
-    mapper = dict([(0, node)])
-    reverse_mapper = dict([(node, 0)])
-    stack = deque(iteritems(mapper))  # [0]
-    monomials = [tuple(iterkeys(mapper))]  # [(0,)]
-    index = count(1)
-    while stack:
-        number, factor = stack.popleft()
-        if isinstance(factor, Product) or (isinstance(factor, Sum) and set(factor.free_indices) & arg_ind_set):
-            new_items = []
-            for child in factor.children:
-                if child in reverse_mapper:
-                    idx = reverse_mapper[child]
-                else:
-                    idx = next(index)
-                    mapper[idx] = child
-                    reverse_mapper[child] = idx
-                new_items.append((idx, child))
-            stack.extend(new_items)
-
-            new_mono = []
-            for mono in monomials:
-                if number in mono:
-                    if isinstance(factor, Product):
-                        new_mono.append(tuple([x for x in mono if x != number] + [item[0] for item in new_items]))
-                    else:
-                        for item in new_items:
-                            new_mono.append(tuple(
-                                [x if x != number else item[0] for x in mono]))
-            monomials = [m for m in monomials if number not in m]
-            monomials.extend(new_mono)
-
-    return (monomials, mapper)
 
 
 @singledispatch
@@ -694,12 +945,21 @@ def build_repr(node, arg_ind):
 
 
 def optimise(node, quad_ind, arg_ind):
-    if isinstance(node, Constant):
-        return node
+    flat_argument_indices = tuple([i for indices in arg_ind for i in indices])
+    def classify(argument_indices, expression):
+        n = len(argument_indices.intersection(expression.free_indices))
+        if n == 0:
+            return OTHER
+        elif n == 1:
+            return ATOMIC
+        else:
+            return COMPOUND
+    classifier = partial(classify, set(flat_argument_indices))
+    monomial_sum = collect_monomials(node, classifier)
+    monomial_sum.flat_argument_indices = flat_argument_indices
+    optimal_atomics = monomial_sum.find_optimal_atomics()
+    return optimal_atomics
 
-    rep, multiindex = build_repr(node, arg_ind)
-    lo = LoopOptimiser(rep=rep, multiindex=multiindex, arg_ind=arg_ind)
-    optimal_arg = lo.find_optimal_arg_factors()
     include_arg = False
     if all([len(set(f.free_indices) & set(quad_ind)) == 0 for f in optimal_arg[0] + optimal_arg[1]]):
         include_arg = True
