@@ -142,12 +142,12 @@ def _collect_monomials(expression, self):
     common_others = []
     compounds = []
     for term in terms:
-        cls = self.classifier(term)
-        if cls == ATOMIC:
+        label = self.classifier(term)
+        if label == ATOMIC:
             common_atomics.append(term)
-        elif cls == COMPOUND:
+        elif label == COMPOUND:
             compounds.append(term)
-        elif cls == OTHER:
+        elif label == OTHER:
             common_others.append(term)
         else:
             raise ValueError("Classifier returned illegal value.")
