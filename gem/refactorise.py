@@ -5,7 +5,7 @@ from __future__ import absolute_import, print_function, division
 from six import iteritems
 from six.moves import intern, map
 
-from collections import OrderedDict, defaultdict, namedtuple
+from collections import Counter, OrderedDict, defaultdict, namedtuple
 from itertools import product
 
 from gem.node import Memoizer, traversal
@@ -69,9 +69,7 @@ class MonomialSum(object):
         assert len(sum_indices) == len(sum_indices_set)
 
         atomics = tuple(atomics)
-        atomics_set = frozenset(atomics)
-        if len(atomics) != len(atomics_set):
-            raise NotImplementedError("MonomialSum does not support duplicate atomics")
+        atomics_set = frozenset(iteritems(Counter(atomics)))
 
         assert isinstance(rest, Node)
 
