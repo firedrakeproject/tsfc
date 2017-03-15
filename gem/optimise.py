@@ -5,7 +5,7 @@ from __future__ import absolute_import, print_function, division
 from six import iterkeys, iteritems, itervalues
 from six.moves import filter, map, zip
 
-from collections import OrderedDict, defaultdict, namedtuple, deque
+from collections import OrderedDict, defaultdict, namedtuple, deque, Counter
 from functools import reduce, partial
 from itertools import permutations, count, product
 from cached_property import cached_property
@@ -603,6 +603,7 @@ class MonomialSum(object):
     def __init__(self):
         self.monomials = defaultdict(Zero)
         self.ordering = OrderedDict()
+        self.flat_argument_indices = None
 
     @staticmethod
     def sum(*args):
@@ -634,22 +635,80 @@ class MonomialSum(object):
             result.ordering.setdefault(key, (sum_indices, atomics))
         return result
 
-    def argument_indices_extent(self, factor):
-        return numpy.product([i.extent for i in set(factor.free_indices).intersection(self.argument_indices)])
+    def add(self, sum_indices, atomics, rest):
+        """Updates the :py:class:`MonomialSum` adding a new monomial."""
+        sum_indices = tuple(sum_indices)
+        sum_indices_set = frozenset(sum_indices)
+        # Sum indices cannot have duplicates
+        assert len(sum_indices) == len(sum_indices_set)
 
-    def find_optimal_atomics(self):
+        atomics = tuple(atomics)
+        atomics_set = frozenset(iteritems(Counter(atomics)))
+
+        assert isinstance(rest, Node)
+
+        key = (sum_indices_set, atomics_set)
+        self.monomials[key] = Sum(self.monomials[key], rest)
+        self.ordering.setdefault(key, (sum_indices, atomics))
+
+    def argument_indices_extent(self, factor):
+        if self.flat_argument_indices is None:
+            raise AssertionError("flat_argument_indices property not initialised.")
+        return numpy.product([i.extent for i in set(factor.free_indices).intersection(self.flat_argument_indices)])
+
+    def all_sum_indices(self):
+        result = []
+        collected = set()
+        for (sum_indices_set, _), (sum_indices, _) in iteritems(self.ordering):
+            if sum_indices_set not in collected:
+                result.append((sum_indices_set, sum_indices))
+                collected.add(sum_indices_set)
+        return result
+
+    def monomials_for_sum_indices(self, sum_indices):
+        """
+        return list of monomials with sum_indices which matches :
+        """
+
+    def to_expression(self):
+        # No argument factorisation here yet
+        indexsums = []
+        for sum_indices_set, sum_indices in self.all_sum_indices():
+            all_atomics = []
+            all_rest = []
+            for key, (_, atomics) in iteritems(self.ordering):
+                if sum_indices_set == key[0]:
+                    rest = self.monomials[key]
+                    if not sum_indices_set:
+                        indexsums.append(fast_sum_factorise(sum_indices, atomics + (rest,)))
+                        continue
+                    all_atomics.append(atomics)
+                    all_rest.append(rest)
+            if not all_atomics:
+                continue
+            if len(all_atomics) == 1:
+                indexsums.append(fast_sum_factorise(sum_indices, all_atomics[0] + (all_rest[0],)))
+            else:
+                # TODO: potentially need to reassociate here
+                products = [reduce(Product, atomics, rest) for atomics, rest in zip(all_atomics, all_rest)]
+                indexsums.append(IndexSum(reduce(Sum, products, Zero), sum_indices))
+        return reduce(Sum, indexsums, Zero())
+
+
+    def find_optimal_atomics(self, sum_indices):
+        sum_indices_set, _ = sum_indices
         index = count()
         atomic_index = OrderedDict()  # Atomic gem node -> int
         connections = []
         # add connections (list of lists)
-        for (_, atomics) in iterkeys(self.monomials):
-            connection = []
-            for atomic in atomics:
-                if atomic not in atomic_index:
-                    atomic_index[atomic] = next(index)
-                connection.append(atomic_index[atomic])
-            connections.append(tuple(connection))
-        return (atomic_index, connections)
+        for (_sum_indices, atomics) in iterkeys(self.monomials):
+            if _sum_indices == sum_indices_set:
+                connection = []
+                for atomic in atomics:
+                    if atomic not in atomic_index:
+                        atomic_index[atomic] = next(index)
+                    connection.append(atomic_index[atomic])
+                connections.append(tuple(connection))
 
         if len(atomic_index) == 0:
             return ((), ())
@@ -662,7 +721,7 @@ class MonomialSum(object):
         # Objective function
         # Minimise number of factors to pull. If same number, favour factor with larger extent
         big = 10000000  # some arbitrary big number
-        ilp_prob += ilp.lpSum(ilp_var[index] * (big - self.factor_extent(atomic)) for atomic, index in iteritems(atomic_index))
+        ilp_prob += ilp.lpSum(ilp_var[index] * (big - self.argument_indices_extent(atomic)) for atomic, index in iteritems(atomic_index))
 
         # constraints
         for connection in connections:
@@ -672,13 +731,37 @@ class MonomialSum(object):
         if ilp_prob.status != 1:
             raise AssertionError("Something bad happened during ILP")
 
-        optimal_factors = [factor for factor, _index in iteritems(factor_index) if ilp_var[_index].value() == 1]
-        other_factors = [factor for factor, _index in iteritems(factor_index) if ilp_var[_index].value() == 0]
-        # TODO: investigate effects of sorting these two lists of factors
-        optimal_factors = sorted(optimal_factors, key=lambda f: self.factor_extent(f), reverse=True)
-        other_factors = sorted(other_factors, key=lambda f: self.factor_extent(f), reverse=True)
-        # Sequence dictating order of factorisation
-        return (tuple(optimal_factors), tuple(other_factors))
+        optimal_atomics = [atomic for atomic, _index in iteritems(atomic_index) if ilp_var[_index].value() == 1]
+        other_atomics = [atomic for atomic, _index in iteritems(atomic_index) if ilp_var[_index].value() == 0]
+        optimal_atomics = sorted(optimal_atomics, key=lambda x: self.argument_indices_extent(x), reverse=True)
+        other_atomics = sorted(other_atomics, key=lambda x: self.argument_indices_extent(x), reverse=True)
+        return (tuple(optimal_atomics), tuple(other_atomics))
+
+    def factorise_atomic(self, sum_indices, atomic):
+        sum_indices_set, sum_indices = sum_indices
+        factorised_out = []
+        for key, (_, atomics) in iteritems(self.ordering):
+            if sum_indices_set == key[0] and atomic in atomics:
+                factorised_out.append(key)
+        if len(factorised_out) <= 1:
+            return
+        all_atomics = []
+        all_rest = []
+        for key in factorised_out:
+            all_atomics.append([a for a in self.ordering[key][1] if a != atomic])
+            all_rest.append(self.monomials[key])
+            del self.ordering[key]
+            del self.monomials[key]
+        new_atomics = [atomic]
+        new_rest = one
+        products = [reduce(Product, atomics, rest) for atomics, rest in zip(all_atomics, all_rest)]
+        new_node = reduce(Sum, products, Zero())
+        if set(self.flat_argument_indices) & set(new_node.free_indices):
+            new_atomics.append(new_node)
+        else:
+            new_rest = new_node
+        self.add(sum_indices, new_atomics, new_rest)
+        return
 
 
 Monomial = namedtuple('Monomial', ['sum_indices', 'atomics', 'rest'])
@@ -944,6 +1027,9 @@ def build_repr(node, arg_ind):
     return (rep, multiindex)
 
 
+def fast_sum_factorise(sum_indices, factors):
+    return sum_factorise(*delta_elimination(list(reversed(sum_indices)), factors))
+
 def optimise(node, quad_ind, arg_ind):
     flat_argument_indices = tuple([i for indices in arg_ind for i in indices])
     def classify(argument_indices, expression):
@@ -957,8 +1043,17 @@ def optimise(node, quad_ind, arg_ind):
     classifier = partial(classify, set(flat_argument_indices))
     monomial_sum = collect_monomials(node, classifier)
     monomial_sum.flat_argument_indices = flat_argument_indices
-    optimal_atomics = monomial_sum.find_optimal_atomics()
-    return optimal_atomics
+    optimal_atomics = []
+    for sum_indices in monomial_sum.all_sum_indices():
+        optimal_atomics.append((sum_indices, monomial_sum.find_optimal_atomics(sum_indices)[0]))
+
+    for sum_indices, atomics in optimal_atomics:
+        for atomic in atomics:
+            monomial_sum.factorise_atomic(sum_indices, atomic)
+    return monomial_sum
+
+    for atomic in optimal_atomics:
+        monomial_sum.factorise_atomic(atomic)
 
     include_arg = False
     if all([len(set(f.free_indices) & set(quad_ind)) == 0 for f in optimal_arg[0] + optimal_arg[1]]):
