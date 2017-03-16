@@ -2,7 +2,7 @@
 refactorisation."""
 
 from __future__ import absolute_import, print_function, division
-from six import iteritems
+from six import iteritems, itervalues
 from six.moves import intern, map
 
 from collections import Counter, OrderedDict, defaultdict, namedtuple
@@ -15,7 +15,7 @@ from gem.gem import (Node, Zero, Product, Sum, Indexed, ListTensor, one,
                      IndexSum)
 from gem.optimise import (remove_componenttensors, sum_factorise,
                           traverse_product, traverse_sum, unroll_indexsum,
-                          fast_sum_factorise, associate_product)
+                          fast_sum_factorise, associate_product, associate_sum)
 
 
 # Refactorisation labels
@@ -150,8 +150,10 @@ class MonomialSum(object):
                 indexsums.append(fast_sum_factorise(sum_indices, all_atomics[0] + (all_rest[0],)))
             else:
                 products = [associate_product(atomics + (_rest,))[0] for atomics, _rest in zip(all_atomics, all_rest)]
-                indexsums.append(IndexSum(reduce(Sum, products, Zero()), sum_indices))
-        return reduce(Sum, indexsums, Zero())
+                indexsums.append(IndexSum(associate_sum(products)[0], sum_indices))
+                # indexsums.append(IndexSum(reduce(Sum, products, Zero()), sum_indices))
+        return associate_sum(indexsums)[0]
+        # return reduce(Sum, indexsums, Zero())
 
     def find_optimal_atomics(self, sum_indices):
         sum_indices_set, _ = sum_indices
@@ -195,30 +197,50 @@ class MonomialSum(object):
         other_atomics = sorted(other_atomics, key=lambda x: self.argument_indices_extent(x), reverse=True)
         return (tuple(optimal_atomics), tuple(other_atomics))
 
-    def factorise_atomic(self, sum_indices, atomic):
-        sum_indices_set, sum_indices = sum_indices
+    def factorise_atomics(self, optimal_atomics):
+        if not optimal_atomics:
+            return
+        # pick the first atomic
+        (sum_indices_set, sum_indices), atomic = optimal_atomics[0]
         factorised_out = []
-        for key, (_, atomics) in iteritems(self.ordering):
-            if sum_indices_set == key[0] and atomic in atomics:
+        for key, (_, _atomics) in iteritems(self.ordering):
+            if sum_indices_set == key[0] and atomic in _atomics:
                 factorised_out.append(key)
         if len(factorised_out) <= 1:
+            self.factorise_atomics(optimal_atomics[1:])
             return
         all_atomics = []
         all_rest = []
         for key in factorised_out:
-            all_atomics.append([a for a in self.ordering[key][1] if a != atomic])
+            _atomics = list(self.ordering[key][1])
+            _atomics.remove(atomic)
+            all_atomics.append(_atomics)
             all_rest.append(self.monomials[key])
             del self.ordering[key]
             del self.monomials[key]
-        new_atomics = [atomic]
-        new_rest = one
-        products = [associate_product(atomics + [rest])[0] for atomics, rest in zip(all_atomics, all_rest)]
-        new_node = reduce(Sum, products, Zero())
-        if set(self.flat_argument_indices) & set(new_node.free_indices):
-            new_atomics.append(new_node)
+        new_monomial_sum = MonomialSum()
+        new_monomial_sum.flat_argument_indices = self.flat_argument_indices
+        for _atomics, _rest in zip(all_atomics, all_rest):
+            new_monomial_sum.add((), _atomics, _rest)
+        new_optimal_atomics = [((frozenset(), ()), oa) for _, oa in optimal_atomics[1:]]
+        new_monomial_sum.factorise_atomics(new_optimal_atomics)
+        assert len(new_monomial_sum.ordering) != 0
+        if len(new_monomial_sum.ordering) == 1:
+            # result is a product
+            new_atomics = list(itervalues(new_monomial_sum.ordering))[0][1] + (atomic,)
+            new_rest = list(itervalues(new_monomial_sum.monomials))[0]
         else:
-            new_rest = new_node
+            # result is a sum
+            new_node = new_monomial_sum.to_expression()
+            new_atomics = [atomic]
+            new_rest = one
+            if set(self.flat_argument_indices) & set(new_node.free_indices):
+                new_atomics.append(new_node)
+            else:
+                new_rest = new_node
         self.add(sum_indices, new_atomics, new_rest)
+        # factorise the next atomic
+        self.factorise_atomics(optimal_atomics[1:])
         return
 
 

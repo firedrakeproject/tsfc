@@ -287,6 +287,43 @@ def associate_product(factors):
     return product, flops
 
 
+def associate_sum(summands):
+    """Apply associativity rules to construct an operation-minimal summation tree.
+
+    For best performance give factors that have different set of free indices.
+    """
+    # group summands by their free indices
+    groups = OrderedDict()
+    for summand in summands:
+        key = frozenset(summand.free_indices)
+        groups.setdefault(key, []).append(summand)
+    summands = [reduce(Sum, _value, Zero()) for _value in itervalues(groups)]
+
+    if len(summands) > 32:
+        # O(N^3) algorithm
+        raise NotImplementedError("Not expected such a complicated expression!")
+
+    def count(pair):
+        """Operation count to multiply a pair of GEM expressions"""
+        a, b = pair
+        extents = [i.extent for i in set().union(a.free_indices, b.free_indices)]
+        return numpy.prod(extents, dtype=int)
+
+    summands = list(summands)  # copy for in-place modifications
+    flops = 0
+    while len(summands) > 1:
+        # Greedy algorithm: choose a pair of factors that are the
+        # cheapest to multiply.
+        a, b = min(combinations(summands, 2), key=count)
+        flops += count((a, b))
+        # Remove chosen factors, append their product
+        summands.remove(a)
+        summands.remove(b)
+        summands.append(Sum(a, b))
+    sum, = summands
+    return sum, flops
+
+
 @singledispatch
 def _reassociate_product(node, self):
     raise AssertionError("cannot handle type %s" % type(node))
@@ -610,13 +647,17 @@ def optimise(node, quad_ind, arg_ind):
         if n == 0:
             return OTHER
         elif n == 1:
-            return ATOMIC
+            if isinstance(expression, Indexed):
+                return ATOMIC
+            else:
+                return COMPOUND
         else:
             return COMPOUND
     classifier = partial(classify, set(flat_argument_indices))
 
     monomial_sum, = collect_monomials([node], classifier)
     monomial_sum.flat_argument_indices = flat_argument_indices
+
     optimal_atomics = []  # [(sum_indices, optimal_atomics))]
     other_atomics = []  # [(sum_indices, other_atomics))]
     for sum_indices in monomial_sum.all_sum_indices():
