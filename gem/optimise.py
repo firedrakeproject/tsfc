@@ -621,27 +621,12 @@ def optimise(node, quad_ind, arg_ind):
     other_atomics = []  # [(sum_indices, other_atomics))]
     for sum_indices in monomial_sum.all_sum_indices():
         atomics = monomial_sum.find_optimal_atomics(sum_indices)
-        optimal_atomics.append((sum_indices, atomics[0]))
-        other_atomics.append((sum_indices, atomics[1]))
-    # optimal_atomics.extend(other_atomics)  # sequence of atomics to factorise
-    for sum_indices, atomics in optimal_atomics:
-        for atomic in atomics:
-            monomial_sum.factorise_atomic(sum_indices, atomic)
+        optimal_atomics.extend([(sum_indices, _atomic) for _atomic in atomics[0]])
+        other_atomics.extend([(sum_indices, _atomic) for _atomic in atomics[1]])
+    optimal_atomics.extend(other_atomics)  # sequence of atomics to factorise
+    monomial_sum.factorise_atomics(optimal_atomics)
 
     return monomial_sum.to_expression()
-    #
-    # for atomic in optimal_atomics:
-    #     monomial_sum.factorise_atomic(atomic)
-    #
-    # include_arg = False
-    # if all([len(set(f.free_indices) & set(quad_ind)) == 0 for f in optimal_arg[0] + optimal_arg[1]]):
-    #     include_arg = True
-    # else:
-    #     N = len(optimal_arg[0])  # number of factors in the inner most loop
-    #     if N >= max([i.extent for i in lo.arg_ind_flat] + [0]):
-    #         include_arg = True
-    # lo.factorise_arg(optimal_arg[0] + optimal_arg[1], include_arg)
-    # return lo.generate_node()
 
 
 def optimise_expressions(expressions, quadrature_indices, argument_indices):
