@@ -287,6 +287,35 @@ def associate_product(factors):
     return product, flops
 
 
+@singledispatch
+def _reassociate_product(node, self):
+    raise AssertionError("cannot handle type %s" % type(node))
+
+
+_reassociate_product.register(Node)(reuse_if_untouched)
+
+
+@_reassociate_product.register(Product)
+def _reassociate_product_prod(node, self):
+    # collect all factors of product
+    _, factors = traverse_product(node, self.stop_at)
+    factors = list(map(self, factors))
+    return associate_product(factors)[0]
+
+
+def reassociate_product(expressions):
+    """Refactor a Product expression recursively by calling
+    ``associate_product()``
+    :param node: list of expressions
+    :return: list of reassociated product nodes
+    """
+    def stop_at(node):
+        return not isinstance(node, Product)
+    mapper = Memoizer(_reassociate_product)
+    mapper.stop_at = stop_at
+    return list(map(mapper, expressions))
+
+
 def sum_factorise(sum_indices, factors):
     """Optimise a tensor product through sum factorisation.
 
@@ -573,26 +602,33 @@ def fast_sum_factorise(sum_indices, factors):
 
 
 def optimise(node, quad_ind, arg_ind):
+    from gem.refactorise import ATOMIC, COMPOUND, OTHER, collect_monomials
     flat_argument_indices = tuple([i for indices in arg_ind for i in indices])
-    # def classify(argument_indices, expression):
-    #     n = len(argument_indices.intersection(expression.free_indices))
-    #     if n == 0:
-    #         return OTHER
-    #     elif n == 1:
-    #         return ATOMIC
-    #     else:
-    #         return COMPOUND
-    # classifier = partial(classify, set(flat_argument_indices))
-    # monomial_sum = collect_monomials(node, classifier)
-    # monomial_sum.flat_argument_indices = flat_argument_indices
-    # optimal_atomics = []
-    # for sum_indices in monomial_sum.all_sum_indices():
-    #     optimal_atomics.append((sum_indices, monomial_sum.find_optimal_atomics(sum_indices)[0]))
-    #
-    # for sum_indices, atomics in optimal_atomics:
-    #     for atomic in atomics:
-    #         monomial_sum.factorise_atomic(sum_indices, atomic)
-    # return monomial_sum
+
+    def classify(argument_indices, expression):
+        n = len(argument_indices.intersection(expression.free_indices))
+        if n == 0:
+            return OTHER
+        elif n == 1:
+            return ATOMIC
+        else:
+            return COMPOUND
+    classifier = partial(classify, set(flat_argument_indices))
+
+    monomial_sum, = collect_monomials([node], classifier)
+    monomial_sum.flat_argument_indices = flat_argument_indices
+    optimal_atomics = []  # [(sum_indices, optimal_atomics))]
+    other_atomics = []  # [(sum_indices, other_atomics))]
+    for sum_indices in monomial_sum.all_sum_indices():
+        atomics = monomial_sum.find_optimal_atomics(sum_indices)
+        optimal_atomics.append((sum_indices, atomics[0]))
+        other_atomics.append((sum_indices, atomics[1]))
+    # optimal_atomics.extend(other_atomics)  # sequence of atomics to factorise
+    for sum_indices, atomics in optimal_atomics:
+        for atomic in atomics:
+            monomial_sum.factorise_atomic(sum_indices, atomic)
+
+    return monomial_sum.to_expression()
     #
     # for atomic in optimal_atomics:
     #     monomial_sum.factorise_atomic(atomic)

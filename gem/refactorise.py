@@ -6,12 +6,16 @@ from six import iteritems
 from six.moves import intern, map
 
 from collections import Counter, OrderedDict, defaultdict, namedtuple
-from itertools import product
+from itertools import product, count
+
+import numpy
 
 from gem.node import Memoizer, traversal
-from gem.gem import Node, Zero, Product, Sum, Indexed, ListTensor, one
+from gem.gem import (Node, Zero, Product, Sum, Indexed, ListTensor, one,
+                     IndexSum)
 from gem.optimise import (remove_componenttensors, sum_factorise,
-                          traverse_product, traverse_sum, unroll_indexsum)
+                          traverse_product, traverse_sum, unroll_indexsum,
+                          fast_sum_factorise, associate_product)
 
 
 # Refactorisation labels
@@ -111,6 +115,111 @@ class MonomialSum(object):
                 rest = Product(r, rest)
             result.add(sum_indices, atomics, rest)
         return result
+
+    def argument_indices_extent(self, factor):
+        if self.flat_argument_indices is None:
+            raise AssertionError("flat_argument_indices property not initialised.")
+        return numpy.product([i.extent for i in set(factor.free_indices).intersection(self.flat_argument_indices)])
+
+    def all_sum_indices(self):
+        result = []
+        collected = set()
+        for (sum_indices_set, _), (sum_indices, _) in iteritems(self.ordering):
+            if sum_indices_set not in collected:
+                result.append((sum_indices_set, sum_indices))
+                collected.add(sum_indices_set)
+        return result
+
+    def to_expression(self):
+        # No argument factorisation here yet
+        indexsums = []
+        for sum_indices_set, sum_indices in self.all_sum_indices():
+            all_atomics = []
+            all_rest = []
+            for key, (_, atomics) in iteritems(self.ordering):
+                if sum_indices_set == key[0]:
+                    rest = self.monomials[key]
+                    if not sum_indices_set:
+                        indexsums.append(fast_sum_factorise(sum_indices, atomics + (rest,)))
+                        continue
+                    all_atomics.append(atomics)
+                    all_rest.append(rest)
+            if not all_atomics:
+                continue
+            if len(all_atomics) == 1:
+                indexsums.append(fast_sum_factorise(sum_indices, all_atomics[0] + (all_rest[0],)))
+            else:
+                products = [associate_product(atomics + (_rest,))[0] for atomics, _rest in zip(all_atomics, all_rest)]
+                indexsums.append(IndexSum(reduce(Sum, products, Zero()), sum_indices))
+        return reduce(Sum, indexsums, Zero())
+
+    def find_optimal_atomics(self, sum_indices):
+        sum_indices_set, _ = sum_indices
+        index = count()
+        atomic_index = OrderedDict()  # Atomic gem node -> int
+        connections = []
+        # add connections (list of lists)
+        for (_sum_indices, _), (_, atomics) in iteritems(self.ordering):
+            if _sum_indices == sum_indices_set:
+                connection = []
+                for atomic in atomics:
+                    if atomic not in atomic_index:
+                        atomic_index[atomic] = next(index)
+                    connection.append(atomic_index[atomic])
+                connections.append(tuple(connection))
+
+        if len(atomic_index) == 0:
+            return ((), ())
+
+        # set up the ILP
+        import pulp as ilp
+        ilp_prob = ilp.LpProblem('gem factorise', ilp.LpMinimize)
+        ilp_var = ilp.LpVariable.dicts('node', range(len(atomic_index)), 0, 1, ilp.LpBinary)
+
+        # Objective function
+        # Minimise number of factors to pull. If same number, favour factor with larger extent
+        big = 10000000  # some arbitrary big number
+        ilp_prob += ilp.lpSum(ilp_var[index] * (big - self.argument_indices_extent(atomic)) for atomic, index in iteritems(atomic_index))
+
+        # constraints
+        for connection in connections:
+            ilp_prob += ilp.lpSum(ilp_var[index] for index in connection) >= 1
+
+        ilp_prob.solve()
+        if ilp_prob.status != 1:
+            raise AssertionError("Something bad happened during ILP")
+
+        optimal_atomics = [atomic for atomic, _index in iteritems(atomic_index) if ilp_var[_index].value() == 1]
+        other_atomics = [atomic for atomic, _index in iteritems(atomic_index) if ilp_var[_index].value() == 0]
+        optimal_atomics = sorted(optimal_atomics, key=lambda x: self.argument_indices_extent(x), reverse=True)
+        other_atomics = sorted(other_atomics, key=lambda x: self.argument_indices_extent(x), reverse=True)
+        return (tuple(optimal_atomics), tuple(other_atomics))
+
+    def factorise_atomic(self, sum_indices, atomic):
+        sum_indices_set, sum_indices = sum_indices
+        factorised_out = []
+        for key, (_, atomics) in iteritems(self.ordering):
+            if sum_indices_set == key[0] and atomic in atomics:
+                factorised_out.append(key)
+        if len(factorised_out) <= 1:
+            return
+        all_atomics = []
+        all_rest = []
+        for key in factorised_out:
+            all_atomics.append([a for a in self.ordering[key][1] if a != atomic])
+            all_rest.append(self.monomials[key])
+            del self.ordering[key]
+            del self.monomials[key]
+        new_atomics = [atomic]
+        new_rest = one
+        products = [associate_product(atomics + [rest])[0] for atomics, rest in zip(all_atomics, all_rest)]
+        new_node = reduce(Sum, products, Zero())
+        if set(self.flat_argument_indices) & set(new_node.free_indices):
+            new_atomics.append(new_node)
+        else:
+            new_rest = new_node
+        self.add(sum_indices, new_atomics, new_rest)
+        return
 
 
 class FactorisationError(Exception):
