@@ -5,17 +5,17 @@ from __future__ import absolute_import, print_function, division
 from six import itervalues
 from six.moves import filter, map, zip
 
-from collections import OrderedDict, deque
+from collections import OrderedDict
 from functools import reduce
-from itertools import permutations
+from itertools import combinations, permutations
 
 import numpy
 from singledispatch import singledispatch
 
 from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
 from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
-                     Product, Sum, Comparison, Conditional, Index,
-                     VariableIndex, Indexed, FlexiblyIndexed,
+                     Product, Sum, Comparison, Conditional, Division,
+                     Index, VariableIndex, Indexed, FlexiblyIndexed,
                      IndexSum, ComponentTensor, ListTensor, Delta,
                      partial_indexed, one)
 
@@ -230,6 +230,36 @@ def delta_elimination(sum_indices, factors):
     return sum_indices, [e for e in factors if e != one]
 
 
+def associate_product(factors):
+    """Apply associativity rules to construct an operation-minimal product tree.
+
+    For best performance give factors that have different set of free indices.
+    """
+    if len(factors) > 32:
+        # O(N^3) algorithm
+        raise NotImplementedError("Not expected such a complicated expression!")
+
+    def count(pair):
+        """Operation count to multiply a pair of GEM expressions"""
+        a, b = pair
+        extents = [i.extent for i in set().union(a.free_indices, b.free_indices)]
+        return numpy.prod(extents, dtype=int)
+
+    factors = list(factors)  # copy for in-place modifications
+    flops = 0
+    while len(factors) > 1:
+        # Greedy algorithm: choose a pair of factors that are the
+        # cheapest to multiply.
+        a, b = min(combinations(factors, 2), key=count)
+        flops += count((a, b))
+        # Remove chosen factors, append their product
+        factors.remove(a)
+        factors.remove(b)
+        factors.append(Product(a, b))
+    product, = factors
+    return product, flops
+
+
 def sum_factorise(sum_indices, factors):
     """Optimise a tensor product through sum factorisation.
 
@@ -237,6 +267,10 @@ def sum_factorise(sum_indices, factors):
     :arg factors: product factors
     :returns: optimised GEM expression
     """
+    if len(factors) == 0 and len(sum_indices) == 0:
+        # Empty product
+        return one
+
     if len(sum_indices) > 5:
         raise NotImplementedError("Too many indices for sum factorisation!")
 
@@ -260,14 +294,10 @@ def sum_factorise(sum_indices, factors):
             contract = [t for t in terms if sum_index in t.free_indices]
             deferred = [t for t in terms if sum_index not in t.free_indices]
 
-            # A further optimisation opportunity is to consider
-            # various ways of building the product tree.
-            product = reduce(Product, contract)
+            # Optimise associativity
+            product, flops_ = associate_product(contract)
             term = IndexSum(product, (sum_index,))
-            # For the operation count estimation we assume that no
-            # operations were saved with the particular product tree
-            # that we built above.
-            flops += len(contract) * numpy.prod([i.extent for i in product.free_indices], dtype=int)
+            flops += flops_ + numpy.prod([i.extent for i in product.free_indices], dtype=int)
 
             # Replace the contracted terms with the result of the
             # contraction.
@@ -275,14 +305,78 @@ def sum_factorise(sum_indices, factors):
 
         # If some contraction indices were independent, then we may
         # still have several terms at this point.
-        expr = reduce(Product, terms)
-        flops += (len(terms) - 1) * numpy.prod([i.extent for i in expr.free_indices], dtype=int)
+        expr, flops_ = associate_product(terms)
+        flops += flops_
 
         if flops < best_flops:
             expression = expr
             best_flops = flops
 
     return expression
+
+
+def traverse_product(expression, stop_at=None):
+    """Traverses a product tree and collects factors, also descending into
+    tensor contractions (IndexSum).  The nominators of divisions are
+    also broken up, but not the denominators.
+
+    :arg expression: a GEM expression
+    :arg stop_at: Optional predicate on GEM expressions.  If specified
+                  and returns true for some subexpression, that
+                  subexpression is not broken into further factors
+                  even if it is a product-like expression.
+    :returns: (sum_indices, terms)
+              - sum_indices: list of indices to sum over
+              - terms: list of product terms
+    """
+    sum_indices = []
+    terms = []
+
+    stack = [expression]
+    while stack:
+        expr = stack.pop()
+        if stop_at is not None and stop_at(expr):
+            terms.append(expr)
+        elif isinstance(expr, IndexSum):
+            stack.append(expr.children[0])
+            sum_indices.extend(expr.multiindex)
+        elif isinstance(expr, Product):
+            stack.extend(reversed(expr.children))
+        elif isinstance(expr, Division):
+            # Break up products in the dividend, but not in divisor.
+            dividend, divisor = expr.children
+            if dividend == one:
+                terms.append(expr)
+            else:
+                stack.append(Division(one, divisor))
+                stack.append(dividend)
+        else:
+            terms.append(expr)
+
+    return sum_indices, terms
+
+
+def traverse_sum(expression, stop_at=None):
+    """Traverses a summation tree and collects summands.
+
+    :arg expression: a GEM expression
+    :arg stop_at: Optional predicate on GEM expressions.  If specified
+                  and returns true for some subexpression, that
+                  subexpression is not broken into further summands
+                  even if it is an addition.
+    :returns: list of summand expressions
+    """
+    stack = [expression]
+    result = []
+    while stack:
+        expr = stack.pop()
+        if stop_at is not None and stop_at(expr):
+            result.append(expr)
+        elif isinstance(expr, Sum):
+            stack.extend(reversed(expr.children))
+        else:
+            result.append(expr)
+    return result
 
 
 def contraction(expression):
@@ -298,22 +392,8 @@ def contraction(expression):
     # Eliminate annoying ComponentTensors
     expression, = remove_componenttensors([expression])
 
-    # Flatten a product tree
-    sum_indices = []
-    factors = []
-
-    queue = deque([expression])
-    while queue:
-        expr = queue.popleft()
-        if isinstance(expr, IndexSum):
-            queue.append(expr.children[0])
-            sum_indices.extend(expr.multiindex)
-        elif isinstance(expr, Product):
-            queue.extend(expr.children)
-        else:
-            factors.append(expr)
-
-    return sum_factorise(*delta_elimination(sum_indices, factors))
+    # Flatten product tree, eliminate deltas, sum factorise
+    return sum_factorise(*delta_elimination(*traverse_product(expression)))
 
 
 @singledispatch
