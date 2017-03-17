@@ -347,10 +347,11 @@ def reassociate_product(expressions):
     :return: list of reassociated product nodes
     """
     refcount = collect_refcount(expressions)
+
     def stop_at(node):
         if not isinstance(node, Product):
             return True
-        if refcount(node) > 1:
+        if refcount[node] > 1:
             return True
         return False
     mapper = Memoizer(_reassociate_product)
