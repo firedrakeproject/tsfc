@@ -200,6 +200,8 @@ class MonomialSum(object):
     def factorise_atomics(self, optimal_atomics):
         if not optimal_atomics:
             return
+        if len(self.ordering) < 2:
+            return
         # pick the first atomic
         (sum_indices_set, sum_indices), atomic = optimal_atomics[0]
         factorised_out = []
