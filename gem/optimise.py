@@ -13,7 +13,7 @@ import numpy
 from singledispatch import singledispatch
 
 from gem.node import (Memoizer, MemoizerArg, reuse_if_untouched, traversal,
-                      reuse_if_untouched_arg)
+                      reuse_if_untouched_arg, collect_refcount)
 from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
                      Product, Sum, Comparison, Conditional, Division,
                      Index, VariableIndex, Indexed, FlexiblyIndexed,
@@ -346,8 +346,13 @@ def reassociate_product(expressions):
     :param node: list of expressions
     :return: list of reassociated product nodes
     """
+    refcount = collect_refcount(expressions)
     def stop_at(node):
-        return not isinstance(node, Product)
+        if not isinstance(node, Product):
+            return True
+        if refcount(node) > 1:
+            return True
+        return False
     mapper = Memoizer(_reassociate_product)
     mapper.stop_at = stop_at
     return list(map(mapper, expressions))
@@ -667,6 +672,8 @@ def optimise(node, quad_ind, arg_ind):
         optimal_atomics.extend([(sum_indices, _atomic) for _atomic in atomics[0]])
         other_atomics.extend([(sum_indices, _atomic) for _atomic in atomics[1]])
     optimal_atomics.extend(other_atomics)  # sequence of atomics to factorise
+    # This algorithm is O(2^N), where N = len(optimal_atomics)
+    # we could truncate the optimal_atomics list at say 10
     monomial_sum.factorise_atomics(optimal_atomics)
 
     return monomial_sum.to_expression()
