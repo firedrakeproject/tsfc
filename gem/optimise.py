@@ -643,6 +643,8 @@ def optimise(node, quad_ind, arg_ind):
     flat_argument_indices = tuple([i for indices in arg_ind for i in indices])
 
     def classify(argument_indices, expression):
+        if isinstance(expression, Conditional):
+            return ATOMIC
         n = len(argument_indices.intersection(expression.free_indices))
         if n == 0:
             return OTHER
