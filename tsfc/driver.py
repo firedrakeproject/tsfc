@@ -170,7 +170,9 @@ def compile_integral(integral_data, form_data, prefix, parameters,
             config_.update(argument_indices=tuple(foo[ii] for foo, ii in zip(argument_indices, idx)))
             ir = fem.compile_ufl(expr, interior_facet=interior_facet, **config_)
             if parameters["unroll_indexsum"]:
-                ir = opt.unroll_indexsum(ir, max_extent=parameters["unroll_indexsum"])
+                def predicate(index):
+                    return index.extent <= parameters["unroll_indexsum"]
+                ir = opt.unroll_indexsum(ir, predicate=predicate)
             ir = [gem.index_sum(expr, quadrature_multiindex) for expr in ir]
             irs[idx].append(ir)
 
