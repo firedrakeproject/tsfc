@@ -644,9 +644,9 @@ def fast_sum_factorise(sum_indices, factors):
     return sum_factorise(*delta_elimination(list(reversed(sum_indices)), factors))
 
 
-def optimise(node, quad_ind, arg_ind):
+def optimise(node, quadrature_multiindex, argument_multiindices):
     from gem.refactorise import ATOMIC, COMPOUND, OTHER, collect_monomials
-    flat_argument_indices = tuple([i for indices in arg_ind for i in indices])
+    argument_indices = tuple([i for indices in argument_multiindices for i in indices])
 
     def classify(argument_indices, expression):
         if isinstance(expression, Conditional):
@@ -661,10 +661,10 @@ def optimise(node, quad_ind, arg_ind):
                 return COMPOUND
         else:
             return COMPOUND
-    classifier = partial(classify, set(flat_argument_indices))
+    classifier = partial(classify, set(argument_indices))
 
     monomial_sum, = collect_monomials([node], classifier)
-    monomial_sum.flat_argument_indices = flat_argument_indices
+    monomial_sum.argument_indices = argument_indices
 
     optimal_atomics = []  # [(sum_indices, optimal_atomics))]
     other_atomics = []  # [(sum_indices, other_atomics))]

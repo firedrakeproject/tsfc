@@ -117,9 +117,9 @@ class MonomialSum(object):
         return result
 
     def argument_indices_extent(self, factor):
-        if self.flat_argument_indices is None:
-            raise AssertionError("flat_argument_indices property not initialised.")
-        return numpy.product([i.extent for i in set(factor.free_indices).intersection(self.flat_argument_indices)])
+        if self.argument_indices is None:
+            raise AssertionError("argument_indices property not initialised.")
+        return numpy.product([i.extent for i in set(factor.free_indices).intersection(self.argument_indices)])
 
     def all_sum_indices(self):
         result = []
@@ -221,7 +221,7 @@ class MonomialSum(object):
             del self.ordering[key]
             del self.monomials[key]
         new_monomial_sum = MonomialSum()
-        new_monomial_sum.flat_argument_indices = self.flat_argument_indices
+        new_monomial_sum.argument_indices = self.argument_indices
         for _atomics, _rest in zip(all_atomics, all_rest):
             new_monomial_sum.add((), _atomics, _rest)
         new_optimal_atomics = [((frozenset(), ()), oa) for _, oa in optimal_atomics[1:]]
@@ -236,7 +236,7 @@ class MonomialSum(object):
             new_node = new_monomial_sum.to_expression()
             new_atomics = [atomic]
             new_rest = one
-            if set(self.flat_argument_indices) & set(new_node.free_indices):
+            if set(self.argument_indices) & set(new_node.free_indices):
                 new_atomics.append(new_node)
             else:
                 new_rest = new_node
