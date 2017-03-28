@@ -171,10 +171,6 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     # Need optimised roots for COFFEE
     ir = impero_utils.preprocess_gem(ir)
 
-    # Optimisation pass for gem expressions
-    if parameters["optimisation"] == "O2":
-        ir = impero_utils.optimise_gem(ir, quadrature_indices, argument_indices)
-
     # Look for cell orientations in the IR
     if builder.needs_cell_orientations(ir):
         builder.require_cell_orientations()
@@ -309,11 +305,6 @@ def compile_expression_at_points(expression, points, coordinates, parameters=Non
     return_arg = ast.Decl(SCALAR_TYPE, ast.Symbol('A', rank=return_shape))
     return_expr = gem.Indexed(return_var, return_indices)
     ir, = impero_utils.preprocess_gem([ir])
-
-    # Optimisation pass for gem expressions
-    if parameters["optimisation"] == "O2":
-        ir, = impero_utils.optimise_gem([ir], (), ())
-
     impero_c = impero_utils.compile_gem([return_expr], [ir], return_indices)
     point_index, = point_set.indices
     body = generate_coffee(impero_c, {point_index: 'p'}, parameters["precision"])
