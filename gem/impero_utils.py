@@ -41,18 +41,6 @@ def preprocess_gem(expressions):
     return expressions
 
 
-def optimise_gem(expressions, quadrature_indices, argument_indices):
-    """Optimisation pass for gem expressions. Optimisation include:
-    - replace division with multiplication
-    - loop invariant code motion
-    - pre-evaluation
-    """
-    expressions = optimise.replace_division(expressions)
-    expressions = optimise.optimise_expressions(
-        expressions, tuple(quadrature_indices), argument_indices)
-    return expressions
-
-
 def compile_gem(assignments, prefix_ordering, remove_zeros=False):
     """Compiles GEM to Impero.
 

@@ -14,7 +14,8 @@ PARAMETERS = {
     "quadrature_degree": "auto",
 
     # Default mode
-    "mode": "vanilla",
+    # "mode": "vanilla",
+    "mode": "coffee",
 
     # Maximum extent to unroll index sums. Default is 3, so that loops
     # over geometric dimensions are unrolled; this improves assembly
@@ -24,7 +25,6 @@ PARAMETERS = {
 
     # Precision of float printing (number of digits)
     "precision": numpy.finfo(NUMPY_TYPE).precision,
-    "optimisation": "O2"
 }
 
 
