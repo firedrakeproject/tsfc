@@ -25,3 +25,5 @@ def Integrals(expressions, quadrature_multiindex, argument_multiindices, paramet
 
 
 flatten = vanilla.flatten
+
+finalise_options = {'replace_delta': False, 'remove_componenttensors': False}
