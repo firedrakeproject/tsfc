@@ -1,6 +1,6 @@
 from __future__ import absolute_import, print_function, division
 
-from gem.optimise import optimise_expressions
+from gem.optimise import optimise_expressions, replace_division
 from gem.impero_utils import preprocess_gem
 import tsfc.vanilla as vanilla
 
@@ -21,6 +21,7 @@ def Integrals(expressions, quadrature_multiindex, argument_multiindices, paramet
     # Need optimised roots for COFFEE
     expressions = vanilla.Integrals(expressions, quadrature_multiindex, argument_multiindices, parameters)
     expressions = preprocess_gem(expressions)
+    expressions = replace_division(expressions)
     return optimise_expressions(expressions, quadrature_multiindex, argument_multiindices)
 
 

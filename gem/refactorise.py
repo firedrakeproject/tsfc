@@ -224,8 +224,9 @@ class MonomialSum(object):
         new_monomial_sum.argument_indices = self.argument_indices
         for _atomics, _rest in zip(all_atomics, all_rest):
             new_monomial_sum.add((), _atomics, _rest)
-        new_optimal_atomics = [((frozenset(), ()), oa) for _, oa in optimal_atomics[1:]]
-        new_monomial_sum.factorise_atomics(new_optimal_atomics)
+        # new_optimal_atomics = [((frozenset(), ()), oa) for _, oa in optimal_atomics[1:]]
+        new_monomial_sum.optimise()
+        # new_monomial_sum.factorise_atomics(new_optimal_atomics)
         assert len(new_monomial_sum.ordering) != 0
         if len(new_monomial_sum.ordering) == 1:
             # result is a product
@@ -244,6 +245,15 @@ class MonomialSum(object):
         # factorise the next atomic
         self.factorise_atomics(optimal_atomics[1:])
         return
+
+    def optimise(self):
+        optimal_atomics = []  # [(sum_indices, optimal_atomics))]
+        for sum_indices in self.all_sum_indices():
+            atomics = self.find_optimal_atomics(sum_indices)
+            optimal_atomics.extend([(sum_indices, _atomic) for _atomic in atomics[0]])
+        # This algorithm is O(2^N), where N = len(optimal_atomics)
+        # we could truncate the optimal_atomics list at say 10
+        self.factorise_atomics(optimal_atomics)
 
 
 class FactorisationError(Exception):

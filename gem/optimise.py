@@ -665,17 +665,7 @@ def optimise(node, quadrature_multiindex, argument_multiindices):
 
     monomial_sum, = collect_monomials([node], classifier)
     monomial_sum.argument_indices = argument_indices
-
-    optimal_atomics = []  # [(sum_indices, optimal_atomics))]
-    other_atomics = []  # [(sum_indices, other_atomics))]
-    for sum_indices in monomial_sum.all_sum_indices():
-        atomics = monomial_sum.find_optimal_atomics(sum_indices)
-        optimal_atomics.extend([(sum_indices, _atomic) for _atomic in atomics[0]])
-        other_atomics.extend([(sum_indices, _atomic) for _atomic in atomics[1]])
-    optimal_atomics.extend(other_atomics)  # sequence of atomics to factorise
-    # This algorithm is O(2^N), where N = len(optimal_atomics)
-    # we could truncate the optimal_atomics list at say 10
-    monomial_sum.factorise_atomics(optimal_atomics)
+    monomial_sum.optimise()
 
     return monomial_sum.to_expression()
 
