@@ -33,8 +33,8 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'MathFunction', 'MinValue', 'MaxValue', 'Comparison',
            'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
-           'IndexSum', 'ListTensor', 'Delta', 'index_sum', 'Scalar',
-           'partial_indexed', 'reshape', 'view', 'Terminal', 'FlexiblyIndexed']
+           'IndexSum', 'ListTensor', 'Delta', 'index_sum',
+           'partial_indexed', 'reshape', 'view']
 
 
 class NodeMeta(type):
@@ -152,7 +152,7 @@ class Literal(Constant):
     __slots__ = ('array',)
     __front__ = ('array',)
 
-    def __new__(cls, array, name=None):
+    def __new__(cls, array):
         array = asarray(array)
         if (array == 0).all():
             # All zeros, make symbolic zero
@@ -212,18 +212,6 @@ class Sum(Scalar):
         self = super(Sum, cls).__new__(cls)
         self.children = a, b
         return self
-
-    def is_equal(self, other):
-        a, b = self.children
-        c, d = other.children
-        return (a == c and b == d) or (a == d and b == c)
-
-    def get_hash(self):
-        a, b = self.children
-        if hash(a) < hash(b):
-            return hash((Sum, a, b))
-        else:
-            return hash((Sum, b, a))
 
 
 class Product(Scalar):

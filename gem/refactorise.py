@@ -172,6 +172,8 @@ class MonomialSum(object):
 
         if len(atomic_index) == 0:
             return ((), ())
+        if len(atomic_index) == 1:
+            return ((atomic_index.keys()[0], ), ())
 
         # set up the ILP
         import pulp as ilp
@@ -224,9 +226,7 @@ class MonomialSum(object):
         new_monomial_sum.argument_indices = self.argument_indices
         for _atomics, _rest in zip(all_atomics, all_rest):
             new_monomial_sum.add((), _atomics, _rest)
-        # new_optimal_atomics = [((frozenset(), ()), oa) for _, oa in optimal_atomics[1:]]
         new_monomial_sum.optimise()
-        # new_monomial_sum.factorise_atomics(new_optimal_atomics)
         assert len(new_monomial_sum.ordering) != 0
         if len(new_monomial_sum.ordering) == 1:
             # result is a product
