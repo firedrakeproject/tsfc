@@ -336,7 +336,7 @@ def _reassociate_product_prod(node, self):
     # collect all factors of product
     _, factors = traverse_product(node, self.stop_at)
     factors = list(map(self, factors))
-    product, = associate_product(factors)
+    product, _ = associate_product(factors)
     return product
 
 
