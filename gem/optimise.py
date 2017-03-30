@@ -309,7 +309,6 @@ def associate_sum(summands):
         extents = [i.extent for i in set().union(a.free_indices, b.free_indices)]
         return numpy.prod(extents, dtype=int)
 
-    summands = list(summands)  # copy for in-place modifications
     flops = 0
     while len(summands) > 1:
         # Greedy algorithm: choose a pair of factors that are the
@@ -337,7 +336,8 @@ def _reassociate_product_prod(node, self):
     # collect all factors of product
     _, factors = traverse_product(node, self.stop_at)
     factors = list(map(self, factors))
-    return associate_product(factors)[0]
+    product, = associate_product(factors)
+    return product
 
 
 def reassociate_product(expressions):
@@ -636,7 +636,6 @@ def count_flop(node):
     This function assumes that all subnodes that occur more than once induce a
     temporary, and are therefore only computed once.
     """
-    # TODO: Add tests for this function (number still somewhat diffferent from COFFEE visitor)
     return sum(map(count_flop_node, traversal([node])))
 
 
@@ -670,10 +669,17 @@ def optimise(node, quadrature_multiindex, argument_multiindices):
     return monomial_sum.to_expression()
 
 
-def optimise_expressions(expressions, quadrature_indices, argument_indices):
+def optimise_expressions(expressions, quadrature_multiindices, argument_multiindices):
+    """
+    perform loop optimisations on gem DAGs
+    :param expressions: list of gem DAGs
+    :param quadrature_multiindices: quadrature multiindices, tuple of tuples
+    :param argument_multiindices: argument multiindices, tuple of tuples
+    :return: list of optimised gem DAGs
+    """
     if propagate_failure(expressions):
         return expressions
-    return [optimise(node, quadrature_indices, argument_indices) for node in expressions]
+    return [optimise(node, quadrature_multiindices, argument_multiindices) for node in expressions]
 
 
 def propagate_failure(expressions):

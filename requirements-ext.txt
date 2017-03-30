@@ -2,4 +2,3 @@ numpy
 singledispatch
 six
 PuLP
-cached-property

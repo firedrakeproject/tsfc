@@ -117,6 +117,9 @@ class MonomialSum(object):
         return result
 
     def argument_indices_extent(self, factor):
+        """
+        returns the product of extents of argument indices of :param: factor
+        """
         if self.argument_indices is None:
             raise AssertionError("argument_indices property not initialised.")
         return numpy.product([i.extent for i in set(factor.free_indices).intersection(self.argument_indices)])
@@ -131,7 +134,12 @@ class MonomialSum(object):
         return result
 
     def to_expression(self):
-        # No argument factorisation here yet
+        """
+        Convert MonomialSum object to gem node. Use associate_product() and
+        associate_sum() to promote hoisting in subsequent code generation.
+        ordering ensures deterministic code generation.
+        :return: gem node represented by this MonomialSum object.
+        """
         indexsums = []
         for sum_indices_set, sum_indices in self.all_sum_indices():
             all_atomics = []
@@ -173,7 +181,7 @@ class MonomialSum(object):
         if len(atomic_index) == 0:
             return ((), ())
         if len(atomic_index) == 1:
-            return ((atomic_index.keys()[0], ), ())
+            return ((list(atomic_index.keys())[0], ), ())
 
         # set up the ILP
         import pulp as ilp
