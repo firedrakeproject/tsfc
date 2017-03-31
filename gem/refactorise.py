@@ -2,7 +2,7 @@
 refactorisation."""
 
 from __future__ import absolute_import, print_function, division
-from six import iteritems, itervalues
+from six import iteritems, itervalues, iterkeys
 from six.moves import intern, map
 
 from collections import Counter, OrderedDict, defaultdict, namedtuple
@@ -154,8 +154,7 @@ class MonomialSum(object):
 
         # Form IndexSum's from each monomial group
         for (_, sum_indices), monomials in iteritems(monomial_group):
-            all_atomics = [m[0] for m in monomials]
-            all_rest = [m[1] for m in monomials]
+            all_atomics, all_rest = zip(*monomials)
             if len(all_atomics) == 1:
                 # Just one term, add to indexsums directly
                 indexsums.append(fast_sum_factorise(sum_indices, all_atomics[0] + (all_rest[0],)))
@@ -166,8 +165,7 @@ class MonomialSum(object):
 
         return associate_sum(indexsums)[0]
 
-    def find_optimal_atomics(self, sum_indices):
-        sum_indices_set, _ = sum_indices
+    def find_optimal_atomics(self, sum_indices_set):
         index = count()
         atomic_index = OrderedDict()  # Atomic gem node -> int
         connections = []
@@ -204,10 +202,14 @@ class MonomialSum(object):
         if ilp_prob.status != 1:
             raise AssertionError("Something bad happened during ILP")
 
-        optimal_atomics = [atomic for atomic, _index in iteritems(atomic_index) if ilp_var[_index].value() == 1]
-        other_atomics = [atomic for atomic, _index in iteritems(atomic_index) if ilp_var[_index].value() == 0]
-        optimal_atomics = sorted(optimal_atomics, key=lambda x: self.argument_indices_extent(x), reverse=True)
-        other_atomics = sorted(other_atomics, key=lambda x: self.argument_indices_extent(x), reverse=True)
+        from six.moves import filter, filterfalse
+
+        def optimal(atomic):
+            return ilp_var[atomic_index[atomic]].value() == 1
+
+        optimal_atomics = filter(optimal, iterkeys(atomic_index))
+        other_atomics = filterfalse(optimal, iterkeys(atomic_index))
+
         return (tuple(optimal_atomics), tuple(other_atomics))
 
     def factorise_atomics(self, optimal_atomics):
@@ -215,7 +217,7 @@ class MonomialSum(object):
         Group and factorise monomials based on a list of atomics. Create new monomials for
         each group and optimise them recursively.
         :param optimal_atomics: list of tuples of optimal atomics and their sum indices
-        :return: new MonomialSum object with atomics factorised.
+        :return: new MonomialSum object with atomics factorised, or self if no changes are made
         """
         if not optimal_atomics:
             return self
@@ -235,7 +237,7 @@ class MonomialSum(object):
                 # Add monomials that do no have argument factors to new MonomialSum
                 new_monomial_sum.add(_sum_indices, _atomics, self.monomials[key])
         # We should not drop monomials
-        assert sum([len(x) for x in itervalues(factor_group)]) + len(new_monomial_sum.ordering) == len(self.ordering)
+        assert sum(map(len, itervalues(factor_group))) + len(new_monomial_sum.ordering) == len(self.ordering)
 
         for ((sum_indices_set, sum_indices), oa), keys in iteritems(factor_group):
             if len(keys) == 1:
@@ -261,9 +263,9 @@ class MonomialSum(object):
             assert len(sub_monomial_sum.ordering) != 0
             if len(sub_monomial_sum.ordering) == 1:
                 # result is a product, add to new MonomialSum directly
-                (_, new_atomics), = list(itervalues(sub_monomial_sum.ordering))
+                (_, new_atomics), = itervalues(sub_monomial_sum.ordering)
                 new_atomics += (oa,)
-                new_rest, = list(itervalues(sub_monomial_sum.monomials))
+                new_rest, = itervalues(sub_monomial_sum.monomials)
             else:
                 # result is a sum, need to form new node
                 new_node = sub_monomial_sum.to_expression()
@@ -277,13 +279,14 @@ class MonomialSum(object):
         return new_monomial_sum
 
     def optimise(self):
-        optimal_atomics = []  # [(sum_indices, optimal_atomics))]
-        for sum_indices in self.unique_sum_indices():
-            atomics = self.find_optimal_atomics(sum_indices)
-            optimal_atomics.extend([(sum_indices, _atomic) for _atomic in atomics[0]])
+        all_optimal_atomics = []  # [((sum_indices_set, sum_indces), optimal_atomics))]
+        for sum_indices_set, sum_indices in self.unique_sum_indices():
+            # throw away other atomics here
+            optimal_atomics, _ = self.find_optimal_atomics(sum_indices_set)
+            all_optimal_atomics.extend([((sum_indices_set, sum_indices), _atomic) for _atomic in optimal_atomics])
         # This algorithm is O(N!), where N = len(optimal_atomics)
         # we could truncate the optimal_atomics list at say 10
-        return self.factorise_atomics(optimal_atomics)
+        return self.factorise_atomics(all_optimal_atomics)
 
 
 class FactorisationError(Exception):
