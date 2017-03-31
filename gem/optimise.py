@@ -6,13 +6,13 @@ from six import itervalues
 from six.moves import filter, map, zip
 
 from collections import OrderedDict
-from functools import reduce, partial
+from functools import reduce
 from itertools import combinations, permutations
 
 import numpy
 from singledispatch import singledispatch
 
-from gem.node import (Memoizer, MemoizerArg, reuse_if_untouched, traversal,
+from gem.node import (Memoizer, MemoizerArg, reuse_if_untouched,
                       reuse_if_untouched_arg, collect_refcount)
 from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
                      Product, Sum, Comparison, Conditional, Division,
@@ -593,52 +593,3 @@ def aggressive_unroll(expression):
 
 def fast_sum_factorise(sum_indices, factors):
     return sum_factorise(*delta_elimination(list(reversed(sum_indices)), factors))
-
-
-def optimise(node, quadrature_multiindex, argument_multiindices):
-    from gem.refactorise import ATOMIC, COMPOUND, OTHER, collect_monomials
-    argument_indices = tuple([i for indices in argument_multiindices for i in indices])
-
-    def classify(argument_indices, expression):
-        if isinstance(expression, Conditional):
-            return ATOMIC
-        n = len(argument_indices.intersection(expression.free_indices))
-        if n == 0:
-            return OTHER
-        elif n == 1:
-            if isinstance(expression, Indexed):
-                return ATOMIC
-            else:
-                return COMPOUND
-        else:
-            return COMPOUND
-    classifier = partial(classify, set(argument_indices))
-
-    monomial_sum, = collect_monomials([node], classifier)
-    monomial_sum.argument_indices = argument_indices
-    monomial_sum = monomial_sum.optimise()
-
-    return monomial_sum.to_expression()
-
-
-def optimise_expressions(expressions, quadrature_multiindices, argument_multiindices):
-    """
-    perform loop optimisations on gem DAGs
-    :param expressions: list of gem DAGs
-    :param quadrature_multiindices: quadrature multiindices, tuple of tuples
-    :param argument_multiindices: argument multiindices, tuple of tuples
-    :return: list of optimised gem DAGs
-    """
-    if propagate_failure(expressions):
-        return expressions
-    return [optimise(node, quadrature_multiindices, argument_multiindices) for node in expressions]
-
-
-def propagate_failure(expressions):
-    """
-    Check if any gem nodes is Failure. In that case there is no need for subsequent optimisation.
-    """
-    for n in traversal(expressions):
-        if isinstance(n, Failure):
-            return True
-    return False
