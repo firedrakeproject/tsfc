@@ -3,7 +3,7 @@ refactorisation."""
 
 from __future__ import absolute_import, print_function, division
 from six import iteritems, itervalues, iterkeys
-from six.moves import intern, map
+from six.moves import intern, map, filter, filterfalse
 
 from collections import Counter, OrderedDict, defaultdict, namedtuple
 from itertools import product, count
@@ -201,8 +201,6 @@ class MonomialSum(object):
         ilp_prob.solve()
         if ilp_prob.status != 1:
             raise AssertionError("Something bad happened during ILP")
-
-        from six.moves import filter, filterfalse
 
         def optimal(atomic):
             return ilp_var[atomic_index[atomic]].value() == 1

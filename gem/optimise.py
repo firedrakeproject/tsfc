@@ -18,8 +18,7 @@ from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
                      Product, Sum, Comparison, Conditional, Division,
                      Index, VariableIndex, Indexed, FlexiblyIndexed,
                      IndexSum, ComponentTensor, ListTensor, Delta,
-                     partial_indexed, one, MathFunction, LogicalAnd,
-                     LogicalNot, LogicalOr, Constant, Variable, Power)
+                     partial_indexed, one)
 
 
 @singledispatch
@@ -590,51 +589,6 @@ def aggressive_unroll(expression):
     expression, = unroll_indexsum((expression,), predicate=lambda index: True)
     expression, = remove_componenttensors((expression,))
     return expression
-
-
-@singledispatch
-def count_flop_node(node):
-    """Count number of flops at a particular gem node, without recursing
-    into childrens"""
-    raise AssertionError("cannot handle type %s" % type(node))
-
-
-@count_flop_node.register(Constant)
-@count_flop_node.register(Terminal)
-@count_flop_node.register(Indexed)
-@count_flop_node.register(Variable)
-@count_flop_node.register(ListTensor)
-@count_flop_node.register(FlexiblyIndexed)
-@count_flop_node.register(LogicalNot)
-@count_flop_node.register(LogicalAnd)
-@count_flop_node.register(LogicalOr)
-@count_flop_node.register(Conditional)
-def count_flop_node_zero(node):
-    return 0
-
-
-@count_flop_node.register(Power)
-@count_flop_node.register(Comparison)
-@count_flop_node.register(Sum)
-@count_flop_node.register(Product)
-@count_flop_node.register(Division)
-@count_flop_node.register(MathFunction)
-def count_flop_node_single(node):
-    return numpy.prod([idx.extent for idx in node.free_indices])
-
-
-@count_flop_node.register(IndexSum)
-def count_flop_node_index_sum(node):
-    return numpy.prod([idx.extent for idx in node.multiindex + node.free_indices])
-
-
-def count_flop(node):
-    """
-    Count the total floating point operations required to compute a gem node.
-    This function assumes that all subnodes that occur more than once induce a
-    temporary, and are therefore only computed once.
-    """
-    return sum(map(count_flop_node, traversal([node])))
 
 
 def fast_sum_factorise(sum_indices, factors):
