@@ -208,51 +208,70 @@ class MonomialSum(object):
         return (tuple(optimal_atomics), tuple(other_atomics))
 
     def factorise_atomics(self, optimal_atomics):
+        """
+        Group and factorise monomials based on a list of atomics. Create new monomials for
+        each group and optimise them recursively.
+        :param optimal_atomics: list of tuples of optimal atomics and their sum indices
+        :return: new MonomialSum object with atomics factorised.
+        """
         if not optimal_atomics:
-            return
+            return self
         if len(self.ordering) < 2:
-            return
-        # pick the first atomic
-        (sum_indices_set, sum_indices), atomic = optimal_atomics[0]
-        factorised_out = []
-        for key, (_, _atomics) in iteritems(self.ordering):
-            if sum_indices_set == key[0] and atomic in _atomics:
-                factorised_out.append(key)
-        if len(factorised_out) <= 1:
-            self.factorise_atomics(optimal_atomics[1:])
-            return
-        all_atomics = []
-        all_rest = []
-        for key in factorised_out:
-            _atomics = list(self.ordering[key][1])
-            _atomics.remove(atomic)
-            all_atomics.append(_atomics)
-            all_rest.append(self.monomials[key])
-            del self.ordering[key]
-            del self.monomials[key]
+            return self
         new_monomial_sum = MonomialSum()
         new_monomial_sum.argument_indices = self.argument_indices
-        for _atomics, _rest in zip(all_atomics, all_rest):
-            new_monomial_sum.add((), _atomics, _rest)
-        new_monomial_sum.optimise()
-        assert len(new_monomial_sum.ordering) != 0
-        if len(new_monomial_sum.ordering) == 1:
-            # result is a product
-            new_atomics = list(itervalues(new_monomial_sum.ordering))[0][1] + (atomic,)
-            new_rest = list(itervalues(new_monomial_sum.monomials))[0]
-        else:
-            # result is a sum
-            new_node = new_monomial_sum.to_expression()
-            new_atomics = [atomic]
-            new_rest = one
-            if set(self.argument_indices) & set(new_node.free_indices):
-                new_atomics.append(new_node)
+        # Group monomials according to each optimal atomic
+        factor_group = OrderedDict()
+        for key, (_sum_indices, _atomics) in iteritems(self.ordering):
+            for (sum_indices_set, sum_indices), oa in optimal_atomics:
+                if key[0] == sum_indices_set and oa in _atomics:
+                    # Add monomial key to the list of corresponding optimal atomic
+                    factor_group.setdefault(((sum_indices_set, sum_indices), oa), []).append(key)
+                    break
             else:
-                new_rest = new_node
-        self.add(sum_indices, new_atomics, new_rest)
-        # factorise the next atomic
-        self.factorise_atomics(optimal_atomics[1:])
-        return
+                # Add monomials that do no have argument factors to new MonomialSum
+                new_monomial_sum.add(_sum_indices, _atomics, self.monomials[key])
+        # We should not drop monomials
+        assert sum([len(x) for x in itervalues(factor_group)]) + len(new_monomial_sum.ordering) == len(self.ordering)
+
+        for ((sum_indices_set, sum_indices), oa), keys in iteritems(factor_group):
+            if len(keys) == 1:
+                # Just one monomials with this atomic, add to new MonomialSum straightaway
+                _, _atomics = self.ordering[keys[0]]
+                _rest = self.monomials[keys[0]]
+                new_monomial_sum.add(sum_indices, _atomics, _rest)
+                continue
+            all_atomics = []  # collect all atomics from monomials
+            all_rest = []  # collect all rest from monomials
+            for key in keys:
+                _, _atomics = self.ordering[key]
+                _atomics = list(_atomics)
+                _atomics.remove(oa)  # remove common factor
+                all_atomics.append(_atomics)
+                all_rest.append(self.monomials[key])
+            # Create new MonomialSum for the factorised out terms
+            sub_monomial_sum = MonomialSum()
+            sub_monomial_sum.argument_indices = self.argument_indices
+            for _atomics, _rest in zip(all_atomics, all_rest):
+                sub_monomial_sum.add((), _atomics, _rest)
+            sub_monomial_sum = sub_monomial_sum.optimise()
+            assert len(sub_monomial_sum.ordering) != 0
+            if len(sub_monomial_sum.ordering) == 1:
+                # result is a product, add to new MonomialSum directly
+                (_, new_atomics), = list(itervalues(sub_monomial_sum.ordering))
+                new_atomics += (oa,)
+                new_rest, = list(itervalues(sub_monomial_sum.monomials))
+            else:
+                # result is a sum, need to form new node
+                new_node = sub_monomial_sum.to_expression()
+                new_atomics = [oa]
+                new_rest = one
+                if set(self.argument_indices) & set(new_node.free_indices):
+                    new_atomics.append(new_node)
+                else:
+                    new_rest = new_node
+            new_monomial_sum.add(sum_indices, new_atomics, new_rest)
+        return new_monomial_sum
 
     def optimise(self):
         optimal_atomics = []  # [(sum_indices, optimal_atomics))]
@@ -261,7 +280,7 @@ class MonomialSum(object):
             optimal_atomics.extend([(sum_indices, _atomic) for _atomic in atomics[0]])
         # This algorithm is O(2^N), where N = len(optimal_atomics)
         # we could truncate the optimal_atomics list at say 10
-        self.factorise_atomics(optimal_atomics)
+        return self.factorise_atomics(optimal_atomics)
 
 
 class FactorisationError(Exception):

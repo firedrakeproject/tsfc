@@ -664,7 +664,7 @@ def optimise(node, quadrature_multiindex, argument_multiindices):
 
     monomial_sum, = collect_monomials([node], classifier)
     monomial_sum.argument_indices = argument_indices
-    monomial_sum.optimise()
+    monomial_sum = monomial_sum.optimise()
 
     return monomial_sum.to_expression()
 
