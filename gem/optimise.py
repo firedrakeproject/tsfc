@@ -289,8 +289,6 @@ def associate_product(factors):
 
 def associate_sum(summands):
     """Apply associativity rules to construct an operation-minimal summation tree.
-
-    For best performance give factors that have different set of free indices.
     """
     # group summands by their free indices
     groups = OrderedDict()
@@ -304,7 +302,7 @@ def associate_sum(summands):
         raise NotImplementedError("Not expected such a complicated expression!")
 
     def count(pair):
-        """Operation count to multiply a pair of GEM expressions"""
+        """Operation count to add a pair of GEM expressions"""
         a, b = pair
         extents = [i.extent for i in set().union(a.free_indices, b.free_indices)]
         return numpy.prod(extents, dtype=int)
@@ -312,7 +310,7 @@ def associate_sum(summands):
     flops = 0
     while len(summands) > 1:
         # Greedy algorithm: choose a pair of factors that are the
-        # cheapest to multiply.
+        # cheapest to add.
         a, b = min(combinations(summands, 2), key=count)
         flops += count((a, b))
         # Remove chosen factors, append their product

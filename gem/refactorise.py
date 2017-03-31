@@ -118,20 +118,21 @@ class MonomialSum(object):
 
     def argument_indices_extent(self, factor):
         """
-        returns the product of extents of argument indices of :param: factor
+        Returns the product of extents of argument indices of :param: factor
         """
         if self.argument_indices is None:
             raise AssertionError("argument_indices property not initialised.")
         return numpy.product([i.extent for i in set(factor.free_indices).intersection(self.argument_indices)])
 
-    def all_sum_indices(self):
-        result = []
-        collected = set()
+    def unique_sum_indices(self):
+        """generator of unique sum indices, together with their original
+        ordering of this MonomialSum
+        """
+        seen = set()
         for (sum_indices_set, _), (sum_indices, _) in iteritems(self.ordering):
-            if sum_indices_set not in collected:
-                result.append((sum_indices_set, sum_indices))
-                collected.add(sum_indices_set)
-        return result
+            if sum_indices_set not in seen:
+                seen.add(sum_indices_set)
+                yield (sum_indices_set, sum_indices)
 
     def to_expression(self):
         """
@@ -140,28 +141,30 @@ class MonomialSum(object):
         ordering ensures deterministic code generation.
         :return: gem node represented by this MonomialSum object.
         """
-        indexsums = []
-        for sum_indices_set, sum_indices in self.all_sum_indices():
-            all_atomics = []
-            all_rest = []
-            for key, (_, atomics) in iteritems(self.ordering):
-                if sum_indices_set == key[0]:
-                    rest = self.monomials[key]
-                    if not sum_indices_set:
-                        indexsums.append(fast_sum_factorise(sum_indices, atomics + (rest,)))
-                        continue
-                    all_atomics.append(atomics)
-                    all_rest.append(rest)
-            if not all_atomics:
-                continue
+        indexsums = []  # The result is summation of indexsums
+        monomial_group = OrderedDict()  # (sum_indices_set, sum_indices) -> [(atomics, rest)]
+        # Group monomials according to their sum indices
+        for key, (sum_indices, atomics) in iteritems(self.ordering):
+            sum_indices_set, _ = key
+            rest = self.monomials[key]
+            if not sum_indices_set:
+                indexsums.append(fast_sum_factorise(sum_indices, atomics + (rest,)))
+            else:
+                monomial_group.setdefault((sum_indices_set, sum_indices), []).append((atomics, rest))
+
+        # Form IndexSum's from each monomial group
+        for (_, sum_indices), monomials in iteritems(monomial_group):
+            all_atomics = [m[0] for m in monomials]
+            all_rest = [m[1] for m in monomials]
             if len(all_atomics) == 1:
+                # Just one term, add to indexsums directly
                 indexsums.append(fast_sum_factorise(sum_indices, all_atomics[0] + (all_rest[0],)))
             else:
+                # Form products for each monomial
                 products = [associate_product(atomics + (_rest,))[0] for atomics, _rest in zip(all_atomics, all_rest)]
                 indexsums.append(IndexSum(associate_sum(products)[0], sum_indices))
-                # indexsums.append(IndexSum(reduce(Sum, products, Zero()), sum_indices))
+
         return associate_sum(indexsums)[0]
-        # return reduce(Sum, indexsums, Zero())
 
     def find_optimal_atomics(self, sum_indices):
         sum_indices_set, _ = sum_indices
@@ -275,10 +278,10 @@ class MonomialSum(object):
 
     def optimise(self):
         optimal_atomics = []  # [(sum_indices, optimal_atomics))]
-        for sum_indices in self.all_sum_indices():
+        for sum_indices in self.unique_sum_indices():
             atomics = self.find_optimal_atomics(sum_indices)
             optimal_atomics.extend([(sum_indices, _atomic) for _atomic in atomics[0]])
-        # This algorithm is O(2^N), where N = len(optimal_atomics)
+        # This algorithm is O(N!), where N = len(optimal_atomics)
         # we could truncate the optimal_atomics list at say 10
         return self.factorise_atomics(optimal_atomics)
 
