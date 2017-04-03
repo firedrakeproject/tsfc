@@ -1,20 +1,24 @@
 from __future__ import absolute_import, print_function, division
 
+import numpy
 from functools import partial
 from itertools import count
 from six import iteritems, iterkeys, itervalues
 from six.moves import filter, filterfalse
 from collections import OrderedDict
+from singledispatch import singledispatch
 from gem.optimise import (replace_division, fast_sum_factorise,
                           associate_product, associate_sum)
 from gem.refactorise import MonomialSum
 from gem.impero_utils import preprocess_gem
-from gem.gem import (Conditional, Indexed, Failure, IndexSum, one)
 from gem.node import traversal
+from gem.gem import (Terminal, Product, Sum, Comparison, Conditional,
+                     Division, Indexed, FlexiblyIndexed, IndexSum, ListTensor,
+                     MathFunction, LogicalAnd, LogicalNot, LogicalOr,
+                     Constant, Variable, Power, Failure, one)
+
 
 import tsfc.vanilla as vanilla
-
-import numpy
 
 flatten = vanilla.flatten
 
@@ -261,3 +265,48 @@ def optimise_monomial_sum(monomial_sum, argument_indices):
     # This algorithm is O(N!), where N = len(optimal_atomics)
     # we could truncate the optimal_atomics list at say 10
     return factorise_atomics(monomial_sum, all_optimal_atomics, argument_indices)
+
+
+@singledispatch
+def count_flop_node(node):
+    """Count number of flops at a particular gem node, without recursing
+    into childrens"""
+    raise AssertionError("cannot handle type %s" % type(node))
+
+
+@count_flop_node.register(Constant)
+@count_flop_node.register(Terminal)
+@count_flop_node.register(Indexed)
+@count_flop_node.register(Variable)
+@count_flop_node.register(ListTensor)
+@count_flop_node.register(FlexiblyIndexed)
+@count_flop_node.register(LogicalNot)
+@count_flop_node.register(LogicalAnd)
+@count_flop_node.register(LogicalOr)
+@count_flop_node.register(Conditional)
+def count_flop_node_zero(node):
+    return 0
+
+
+@count_flop_node.register(Power)
+@count_flop_node.register(Comparison)
+@count_flop_node.register(Sum)
+@count_flop_node.register(Product)
+@count_flop_node.register(Division)
+@count_flop_node.register(MathFunction)
+def count_flop_node_single(node):
+    return numpy.prod([idx.extent for idx in node.free_indices])
+
+
+@count_flop_node.register(IndexSum)
+def count_flop_node_index_sum(node):
+    return numpy.prod([idx.extent for idx in node.multiindex + node.free_indices])
+
+
+def count_flop(node):
+    """
+    Count the total floating point operations required to compute a gem node.
+    This function assumes that all subnodes that occur more than once induce a
+    temporary, and are therefore only computed once.
+    """
+    return sum(map(count_flop_node, traversal([node])))

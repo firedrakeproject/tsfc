@@ -4,8 +4,7 @@ import pytest
 
 from gem.gem import Index, Indexed, Product, Variable, Division, Literal, Sum
 from gem.optimise import replace_division, reassociate_product
-from gem.utils import count_flop
-from tsfc.coffee_mode import optimise
+from tsfc.coffee_mode import optimise, count_flop
 
 
 def test_replace_div():
