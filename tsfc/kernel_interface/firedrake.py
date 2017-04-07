@@ -26,7 +26,8 @@ ExpressionKernel = namedtuple('ExpressionKernel', ['ast', 'oriented', 'coefficie
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
                  "domain_number",
-                 "coefficient_numbers", "__weakref__")
+                 "coefficient_numbers", "__weakref__", "_irs", "_return_variables",
+                 "_quadrature_indices", "_argument_indices")
     """A compiled Kernel object.
 
     :kwarg ast: The COFFEE ast for the kernel.
@@ -165,15 +166,15 @@ class KernelBuilder(KernelBuilderBase):
         elif integral_type == 'interior_facet_horiz':
             self._facet_number = {'+': 1, '-': 0}
 
-    def set_arguments(self, arguments, multiindices):
+    def set_arguments(self, arguments, indices):
         """Process arguments.
 
         :arg arguments: :class:`ufl.Argument`s
-        :arg multiindices: GEM argument multiindices
+        :arg indices: GEM argument indices
         :returns: GEM expression representing the return variable
         """
         self.local_tensor, expressions = prepare_arguments(
-            arguments, multiindices, interior_facet=self.interior_facet)
+            arguments, indices, interior_facet=self.interior_facet)
         return expressions
 
     def set_coordinates(self, coefficient):

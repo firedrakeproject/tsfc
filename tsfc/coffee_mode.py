@@ -5,18 +5,17 @@ from functools import partial
 from itertools import count
 from six import iteritems, iterkeys, itervalues
 from six.moves import filter, filterfalse
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from singledispatch import singledispatch
 from gem.optimise import (replace_division, fast_sum_factorise,
-                          associate_product, associate_sum)
-from gem.refactorise import MonomialSum
+                          associate_product, associate_sum, traverse_product, traverse_sum)
+from gem.refactorise import MonomialSum, ATOMIC, COMPOUND, OTHER, collect_monomials
 from gem.impero_utils import preprocess_gem
-from gem.node import traversal
+from gem.node import traversal, Memoizer
 from gem.gem import (Terminal, Product, Sum, Comparison, Conditional,
                      Division, Indexed, FlexiblyIndexed, IndexSum, ListTensor,
                      MathFunction, LogicalAnd, LogicalNot, LogicalOr,
                      Constant, Variable, Power, Failure, one)
-
 
 import tsfc.vanilla as vanilla
 
@@ -46,28 +45,13 @@ def Integrals(expressions, quadrature_multiindex, argument_multiindices, paramet
 
 
 def optimise(node, quadrature_multiindex, argument_multiindices):
-    from gem.refactorise import ATOMIC, COMPOUND, OTHER, collect_monomials
     argument_indices = tuple([i for indices in argument_multiindices for i in indices])
-
-    def classify(argument_indices, expression):
-        if isinstance(expression, Conditional):
-            return ATOMIC
-        n = len(argument_indices.intersection(expression.free_indices))
-        if n == 0:
-            return OTHER
-        elif n == 1:
-            if isinstance(expression, Indexed):
-                return ATOMIC
-            else:
-                return COMPOUND
-        else:
-            return COMPOUND
-    classifier = partial(classify, set(argument_indices))
-
-    monomial_sum, = collect_monomials([node], classifier)
-    monomial_sum = optimise_monomial_sum(monomial_sum, argument_indices)
-
-    return monomial_sum_to_expression(monomial_sum)
+    sharing_graph = dict()
+    print('Building sharing graph...')
+    sharing_graph = create_sharing_graph(node, sharing_graph, 0, None, set(argument_indices))
+    print('Finished building sharing graph')
+    node = find_optimal_expansion_levels(node, sharing_graph, set(argument_indices))
+    return node
 
 
 def optimise_expressions(expressions, quadrature_multiindices, argument_multiindices):
@@ -310,3 +294,110 @@ def count_flop(node):
     temporary, and are therefore only computed once.
     """
     return sum(map(count_flop_node, traversal([node])))
+
+
+def _substitute_node(node, self):
+    try:
+        return self.replace[node]
+    except KeyError:
+        new_children = list(map(self, node.children))
+        if all(nc == c for nc, c in zip(new_children, node.children)):
+            return node
+        else:
+            return node.reconstruct(*new_children)
+
+def substitute_node(nodes, replace):
+    mapper = Memoizer(_substitute_node)
+    mapper.replace = replace
+    return list(map(mapper, nodes))
+
+
+def expand_node(node, argument_indices, levels, start, end):
+    def classify(argument_indices, atomic_set, expression):
+        if isinstance(expression, Conditional):
+            return ATOMIC
+        n = len(argument_indices.intersection(expression.free_indices))
+        if n == 0:
+            return OTHER
+        elif n == 1 and isinstance(expression, Indexed):
+            # Terminal
+            return ATOMIC
+        elif isinstance(expression, Sum) and expression in atomic_set:
+            return ATOMIC
+        else:
+            return COMPOUND
+
+    classifier = partial(classify, set(argument_indices), set(levels[end]))
+    start_nodes_ms = collect_monomials(levels[start], classifier)
+    start_nodes_ms = [optimise_monomial_sum(ms, argument_indices) for ms in start_nodes_ms]
+    new_start_nodes = map(monomial_sum_to_expression, start_nodes_ms)
+    # substitute node with new start nodes as terminal node
+    substituted_node, = substitute_node([node], dict(zip(levels[start], new_start_nodes)))
+    # Atomic sets are new start nodes plus previous terminal node
+    classifier = partial(classify, set(argument_indices), set(new_start_nodes + levels[end]))
+    monomialsum, = collect_monomials([node], classifier)
+    return monomialsum
+
+
+def create_sharing_graph(node, node_level_parents, current_level, parent, argument_indices):
+    if not argument_indices.intersection(set(node.free_indices)):
+        return node_level_parents
+
+    new_level = current_level
+    if isinstance(node, (Sum, Indexed, IndexSum)):
+        if node not in node_level_parents:
+            # This node is not seen before
+            if parent:
+                parents = [parent]
+            else:
+                parents = []
+        else:
+            old_level, parents = node_level_parents[node]
+            # Take the maximum depth
+            new_level = max(old_level, current_level)
+            if parent and parent not in parents:
+                parents.append(parent)
+        node_level_parents[node] = (new_level, parents)
+        if isinstance(node, Sum):
+            terms = traverse_sum(node)
+        elif isinstance(node, IndexSum):
+            terms = traverse_sum(node.children[0])
+        else:
+            terms = []
+        for term in terms:
+            # For Sum node, children are at same level
+            node_level_parents = create_sharing_graph(term, node_level_parents, current_level, node, argument_indices)
+    elif (isinstance(node, Product)):
+        _, terms = traverse_product(node, None)
+        for term in terms:
+            node_level_parents = create_sharing_graph(term  , node_level_parents, current_level + 1, parent, argument_indices)
+    else:
+        raise AssertionError("Don't know how to do this yet!")
+
+    return node_level_parents
+
+def find_optimal_expansion_levels(root, node_level_parents, argument_indices):
+    if not node_level_parents:
+        return root
+    levels = defaultdict()
+    for node, (level, parents) in iteritems(node_level_parents):
+        levels.setdefault(level, []).append(node)
+    min_level, max_level = min(iterkeys(levels)), max(iterkeys(levels))
+    best_flops = int(count_flop(root))
+    best_node = root
+    best_level = (min_level, min_level)
+    print('original flops: {:,}'.format(best_flops))
+    print('min level: {0}, max level: {1}'.format(min_level, max_level))
+    for start in range(min_level, max_level+1):
+        for end in range(start+1, max_level+1):
+            current_node_ms = expand_node(root, argument_indices, levels, start, end)
+            current_node_ms = optimise_monomial_sum(current_node_ms, argument_indices)
+            current_node = monomial_sum_to_expression(current_node_ms)
+            current_flops = int(count_flop(current_node))
+            print('start: {0}, end: {1}, currentflops: {2:,}'.format(start, end, current_flops))
+            if current_flops < best_flops:
+                best_flops = current_flops
+                best_node = current_node
+                best_level = (start, end)
+    print('best flops: {0:,}, best level: {1} -> {2},'.format(best_flops, *best_level))
+    return best_node
