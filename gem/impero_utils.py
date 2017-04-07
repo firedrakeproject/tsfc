@@ -7,7 +7,7 @@ C code or a COFFEE AST.
 """
 
 from __future__ import absolute_import, print_function, division
-from six.moves import zip
+from six.moves import filter
 
 import collections
 import itertools
@@ -34,30 +34,31 @@ class NoopError(Exception):
     pass
 
 
-def preprocess_gem(expressions):
+def preprocess_gem(expressions, replace_delta=True, remove_componenttensors=True):
     """Lower GEM nodes that cannot be translated to C directly."""
-    expressions = optimise.replace_delta(expressions)
-    expressions = optimise.remove_componenttensors(expressions)
+    if replace_delta:
+        expressions = optimise.replace_delta(expressions)
+    if remove_componenttensors:
+        expressions = optimise.remove_componenttensors(expressions)
     return expressions
 
 
-def compile_gem(return_variables, expressions, prefix_ordering, remove_zeros=False):
+def compile_gem(assignments, prefix_ordering, remove_zeros=False):
     """Compiles GEM to Impero.
 
-    :arg return_variables: return variables for each root (type: GEM expressions)
-    :arg expressions: multi-root expression DAG (type: GEM expressions)
+    :arg assignments: list of (return variable, expression DAG root) pairs
     :arg prefix_ordering: outermost loop indices
     :arg remove_zeros: remove zero assignment to return variables
     """
     # Remove zeros
     if remove_zeros:
-        rv = []
-        es = []
-        for var, expr in zip(return_variables, expressions):
-            if not isinstance(expr, gem.Zero):
-                rv.append(var)
-                es.append(expr)
-        return_variables, expressions = rv, es
+        def nonzero(assignment):
+            variable, expression = assignment
+            return not isinstance(expression, gem.Zero)
+        assignments = list(filter(nonzero, assignments))
+
+    # Just the expressions
+    expressions = [expression for variable, expression in assignments]
 
     # Collect indices in a deterministic order
     indices = OrderedSet()
@@ -79,7 +80,7 @@ def compile_gem(return_variables, expressions, prefix_ordering, remove_zeros=Fal
     get_indices = lambda expr: apply_ordering(expr.free_indices)
 
     # Build operation ordering
-    ops = scheduling.emit_operations(list(zip(return_variables, expressions)), get_indices)
+    ops = scheduling.emit_operations(assignments, get_indices)
 
     # Empty kernel
     if len(ops) == 0:

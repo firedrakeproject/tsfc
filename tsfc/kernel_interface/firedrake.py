@@ -166,15 +166,15 @@ class KernelBuilder(KernelBuilderBase):
         elif integral_type == 'interior_facet_horiz':
             self._facet_number = {'+': 1, '-': 0}
 
-    def set_arguments(self, arguments, indices):
+    def set_arguments(self, arguments, multiindices):
         """Process arguments.
 
         :arg arguments: :class:`ufl.Argument`s
-        :arg indices: GEM argument indices
+        :arg multiindices: GEM argument multiindices
         :returns: GEM expression representing the return variable
         """
         local_tensor, expressions = prepare_arguments(
-            arguments, indices, interior_facet=self.interior_facet, name="A{}".format(self.argument_counter))
+            arguments, multiindices, interior_facet=self.interior_facet, name="A{}".format(self.argument_counter))
         self.argument_counter += 1
         self.local_tensors.append(local_tensor)
         return expressions
