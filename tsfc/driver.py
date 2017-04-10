@@ -95,7 +95,7 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     argument_multiindices = tuple(tuple(create_element(elem).get_indices()
                                         for elem in ufl_utils.unmix_element(arg.ufl_element()))
                                   for arg in arguments)
-    argument_indices = tuple(chain(*argument_multiindices))
+    argument_indices = tuple(chain(*chain(*argument_multiindices)))
     quadrature_indices = []
 
     # Dict mapping domains to index in original_form.ufl_domains()
@@ -164,12 +164,13 @@ def compile_integral(integral_data, form_data, prefix, parameters,
         config.update(quadrature_rule=quad_rule)
         for idx, expr in ufl_utils.split_expression(integrand, arguments):
             config_ = config.copy()
-            config_.update(argument_multiindices=tuple(foo[ii] for foo, ii in zip(argument_multiindices, idx)))
+            subblock_argument_multiindices = tuple(foo[ii] for foo, ii in zip(argument_multiindices, idx))
+            config_.update(argument_multiindices=subblock_argument_multiindices)
             expressions = fem.compile_ufl(integrand,
                                           interior_facet=interior_facet,
                                           **config_)
             reps = mode.Integrals(expressions, quadrature_multiindex,
-                                  argument_multiindices, params)
+                                  subblock_argument_multiindices, params)
             for var, rep in zip(return_variables, reps):
                 mode_irs[idx].setdefault(mode, collections.OrderedDict()).setdefault(var, []).append(rep)
 
