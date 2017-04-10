@@ -355,6 +355,8 @@ def lower_integral_type(fiat_cell, integral_type):
         integration_dim = dim
     elif integral_type in ['exterior_facet', 'interior_facet']:
         integration_dim = dim - 1
+    elif integral_type == 'vertex':
+        integration_dim = 0
     else:
         # Extrusion case
         basedim, extrdim = dim
@@ -381,6 +383,8 @@ def pick_mode(mode):
     "Return one of the specialized optimisation modules from a mode string."
     if mode == "vanilla":
         import tsfc.vanilla as m
+    elif mode == "spectral":
+        import tsfc.spectral as m
     else:
         raise ValueError("Unknown mode: {}".format(mode))
     return m
