@@ -226,8 +226,7 @@ def delta_elimination(sum_indices, factors):
                        for f in factors if isinstance(f, Delta)
                        for index in (f.i, f.j) if index in sum_indices]
 
-    # Drop ones
-    return sum_indices, [e for e in factors if e != one]
+    return sum_indices, factors
 
 
 def associate_product(factors):
