@@ -5,23 +5,22 @@ import itertools
 from functools import partial
 from six import iteritems, iterkeys, itervalues
 from six.moves import filter, filterfalse
+
 from collections import OrderedDict, defaultdict, Counter
-from singledispatch import singledispatch
-from gem.optimise import (replace_division, fast_sum_factorise,
-                          associate_product, associate_sum, traverse_product, traverse_sum)
-from gem.refactorise import MonomialSum, ATOMIC, COMPOUND, OTHER, collect_monomials
-from gem.impero_utils import preprocess_gem
+from gem.optimise import (replace_division, associate_sum, associate_product,
+                          unroll_indexsum, replace_delta, traverse_product,
+                          remove_componenttensors, traverse_sum)
+from gem.refactorise import (MonomialSum, ATOMIC, COMPOUND, OTHER,
+                             collect_monomials)
 from gem.node import traversal, Memoizer
-from gem.gem import (Terminal, Product, Sum, Comparison, Conditional,
-                     Division, Indexed, FlexiblyIndexed, IndexSum, ListTensor,
-                     MathFunction, LogicalAnd, LogicalNot, LogicalOr,
-                     Constant, Variable, Power, Failure, one)
+from gem.gem import (Product, Sum, Comparison, Conditional, Division, Indexed,
+                     IndexSum, MathFunction, Power, Failure, one, index_sum)
 
 import tsfc.vanilla as vanilla
 
 flatten = vanilla.flatten
 
-finalise_options = {'replace_delta': False, 'remove_componenttensors': False}
+finalise_options = dict(replace_delta=False, remove_componenttensors=False)
 
 
 def Integrals(expressions, quadrature_multiindex, argument_multiindices, parameters):
@@ -37,108 +36,141 @@ def Integrals(expressions, quadrature_multiindex, argument_multiindices, paramet
 
     :returns: list of integral representations
     """
-    # Need optimised roots for COFFEE
-    expressions = vanilla.Integrals(expressions, quadrature_multiindex, argument_multiindices, parameters)
-    expressions = preprocess_gem(expressions)
+    # Unroll
+    max_extent = parameters["unroll_indexsum"]
+    if max_extent:
+        def predicate(index):
+            return index.extent <= max_extent
+        expressions = unroll_indexsum(expressions, predicate=predicate)
+    # Choose GEM expression as the integral representation
+    expressions = [index_sum(e, quadrature_multiindex) for e in expressions]
+    expressions = replace_delta(expressions)
+    expressions = remove_componenttensors(expressions)
     expressions = replace_division(expressions)
     return optimise_expressions(expressions, quadrature_multiindex, argument_multiindices)
 
 
 def optimise(node, quadrature_multiindex, argument_multiindices):
+    """Optimise a GEM expression through factorisation.
+
+    :arg node: GEM expression
+    :arg quadrature_multiindex: quadrature multiindex (tuple)
+    :arg argument_multiindices: tuple of argument multiindices,
+                                one multiindex for each argument
+
+    :returns: factorised GEM expression
+    """
     argument_indices = tuple([i for indices in argument_multiindices for i in indices])
     print('Building sharing graph...')
     sharing_graph = build_sharing_graph(node, {}, set(), set(argument_indices))
     print('Finished building sharing graph')
-    # return _test(node, sharing_graph, argument_indices)
     levels, start, end = find_optimal_expansion_levels(node, sharing_graph, set(argument_indices))
     expanded_node_ms = expand_node(node, argument_indices, levels, start, end)
     expanded_node_ms = optimise_monomial_sum(expanded_node_ms, argument_indices)
     return monomial_sum_to_expression(expanded_node_ms)
 
 
-def optimise_expressions(expressions, quadrature_multiindices, argument_multiindices):
-    """
-    perform loop optimisations on gem DAGs
-    :param expressions: list of gem DAGs
-    :param quadrature_multiindices: quadrature multiindices, tuple of tuples
-    :param argument_multiindices: argument multiindices, tuple of tuples
-    :return: list of optimised gem DAGs
-    """
-    if propagate_failure(expressions):
-        return expressions
-    return [optimise(node, quadrature_multiindices, argument_multiindices) for node in expressions]
+def optimise_expressions(expressions, quadrature_multiindex, argument_multiindices):
+    """Perform loop optimisations on GEM DAGs
 
+    :arg expressions: list of GEM DAGs
+    :arg quadrature_multiindex: quadrature multiindex (tuple)
+    :arg argument_multiindices: tuple of argument multiindices,
+                                one multiindex for each argumen
 
-def propagate_failure(expressions):
+    :returns: list of optimised GEM DAGs
     """
-    Check if any gem nodes is Failure. In that case there is no need for subsequent optimisation.
-    """
+    # Propagate Failure nodes
     for n in traversal(expressions):
         if isinstance(n, Failure):
-            return True
-    return False
+            return expressions
+    return [optimise(node, quadrature_multiindex, argument_multiindices) for node in expressions]
 
 
 def index_extent(factor, argument_indices):
-    """Compute the product of the indices of factor that appear in argument
-    indices"""
+    """Compute the product of the extents of argument indices of a GEM expression
+
+    :arg factor: GEM expression
+    :arg argument_indices: set of argument indices
+
+    :returns: product of extents of argument indices
+    """
     return numpy.product([i.extent for i in set(factor.free_indices).intersection(argument_indices)])
 
 
 def unique_sum_indices(monomial_sum):
-    """Returnes a generator of unique sum indices, together with their original
-    ordering of :param: monomial_sum
+    """Create a generator of unique sum indices of monomials in a monomial sum.
+
+    :arg monomial_sum: :class:`MonomialSum` object
+
+    :returns: a generator of unique sum indices
     """
     seen = set()
-    for (sum_indices_set, _), (sum_indices, _) in iteritems(monomial_sum.ordering):
-        if sum_indices_set not in seen:
-            seen.add(sum_indices_set)
-            yield (sum_indices_set, sum_indices)
+    for monomial in monomial_sum:
+        fs = frozenset(monomial.sum_indices)
+        if fs not in seen:
+            seen.add(fs)
+            yield monomial.sum_indices
 
 
 def monomial_sum_to_expression(monomial_sum):
-    """
-    Convert MonomialSum object to gem node. Use associate_product() and
-    associate_sum() to promote hoisting in subsequent code generation.
-    ordering ensures deterministic code generation.
-    :return: gem node represented by :param: monomial_sum
+    """Convert a monomial sum to a GEM expression. Uses associate_product() and
+    associate_sum() to promote hoisting in the subsequent code generation.
+
+    :arg monomial_sum: :class:`MonomialSum` object
+
+    :returns: GEM expression
     """
     indexsums = []  # The result is summation of indexsums
-    monomial_group = OrderedDict()  # (sum_indices_set, sum_indices) -> [(atomics, rest)]
+    sum_indices_set_map = {}  # fronzenset(sum_indices) -> sum_indices
+    monomial_groups = OrderedDict()  # frozonset(sum_indices) -> [(atomics, rest)]
     # Group monomials according to their sum indices
-    for key, (sum_indices, atomics) in iteritems(monomial_sum.ordering):
-        sum_indices_set, _ = key
-        rest = monomial_sum.monomials[key]
-        if not sum_indices_set:
-            indexsums.append(fast_sum_factorise(sum_indices, atomics + (rest,)))
+    for monomial in monomial_sum:
+        if not monomial.sum_indices:
+            # IndexSum(reduce(Product, atomics, rest), sum_indices)
+            product, _ = associate_product(monomial.atomics + (monomial.rest,))
+            indexsums.append(product)
         else:
-            monomial_group.setdefault((sum_indices_set, sum_indices), []).append((atomics, rest))
+            fs = frozenset(monomial.sum_indices)
+            sum_indices_set_map.setdefault(fs, monomial.sum_indices)
+            monomial_groups.setdefault(fs, []).append((monomial.atomics, monomial.rest))
 
-    # Form IndexSum's from each monomial group
-    for (_, sum_indices), monomials in iteritems(monomial_group):
-        all_atomics, all_rest = zip(*monomials)
+    # Create IndexSum's from each monomial group
+    for sum_indices_set, list_atomics_rest in iteritems(monomial_groups):
+        sum_indices = sum_indices_set_map[sum_indices_set]
+        all_atomics, all_rest = zip(*list_atomics_rest)
         if len(all_atomics) == 1:
             # Just one term, add to indexsums directly
-            indexsums.append(fast_sum_factorise(sum_indices, all_atomics[0] + (all_rest[0],)))
+            atomics, = all_atomics
+            rest, = all_rest
+            product, _ = associate_product(atomics + (rest,))
+            indexsums.append(IndexSum(product, sum_indices))
         else:
-            # Form products for each monomial
-            products = [associate_product(atomics + (_rest,))[0] for atomics, _rest in zip(all_atomics, all_rest)]
+            # Create one product for each monomial
+            products = [associate_product(atomics + (rest,))[0] for atomics, rest in zip(all_atomics, all_rest)]
             indexsums.append(IndexSum(associate_sum(products)[0], sum_indices))
 
     return associate_sum(indexsums)[0]
 
 
 def find_optimal_atomics(monomial_sum, sum_indices_set, argument_indices):
-    """Find list of optimal atomics which when factorised gives least number of
-    terms in the indexed sum"""
-    index = itertools.count()
-    atomic_index = OrderedDict()  # Atomic gem node -> int
+    """Find optimal atomic common subexpressions, which produce least number of
+    terms in the resultant IndexSum when factorised.
+
+    :arg monomial_sum: A :class:`MonomialSum` object
+    :arg sum_indices_set: frozenset of sum indices to match the monomials
+    :arg argument_indices: tuple of argument indices
+
+    :returns: list of atomic GEM expressions
+    """
+    index = itertools.count()  # counter for variables used in ILP
+    atomic_index = OrderedDict()  # Atomic GEM node -> int
     connections = []
-    # add connections (list of lists)
-    for (_sum_indices, _), (_, atomics) in iteritems(monomial_sum.ordering):
-        if _sum_indices == sum_indices_set:
+    # add connections (list of tuples, items in each tuple form a product)
+    for monomial in monomial_sum:
+        if frozenset(monomial.sum_indices) == sum_indices_set:
             connection = []
-            for atomic in atomics:
+            for atomic in monomial.atomics:
                 if atomic not in atomic_index:
                     atomic_index[atomic] = next(index)
                 connection.append(atomic_index[atomic])
@@ -147,7 +179,7 @@ def find_optimal_atomics(monomial_sum, sum_indices_set, argument_indices):
     if len(atomic_index) == 0:
         return ((), ())
     if len(atomic_index) == 1:
-        return ((list(atomic_index.keys())[0], ), ())
+        return ((next(iterkeys(atomic_index)), ), ())
 
     # set up the ILP
     import pulp as ilp
@@ -156,7 +188,7 @@ def find_optimal_atomics(monomial_sum, sum_indices_set, argument_indices):
 
     # Objective function
     # Minimise number of factors to pull. If same number, favour factor with larger extent
-    big = 10000000  # some arbitrary big number
+    big = 1e20  # some arbitrary big number
     ilp_prob += ilp.lpSum(ilp_var[index] * (big - index_extent(atomic, argument_indices)) for atomic, index in iteritems(atomic_index))
 
     # constraints
@@ -165,7 +197,7 @@ def find_optimal_atomics(monomial_sum, sum_indices_set, argument_indices):
 
     ilp_prob.solve()
     if ilp_prob.status != 1:
-        raise AssertionError("Something bad happened during ILP")
+        raise RuntimeError("Something bad happened during ILP")
 
     def optimal(atomic):
         return ilp_var[atomic_index[atomic]].value() == 1
@@ -177,60 +209,63 @@ def find_optimal_atomics(monomial_sum, sum_indices_set, argument_indices):
 
 
 def factorise_atomics(monomial_sum, optimal_atomics, argument_indices):
-    """
-    Group and factorise monomials based on a list of atomics. Create new
-    monomials for each group and optimise them recursively.
-    :param optimal_atomics: list of tuples of optimal atomics and their sum indices
-    :return: new MonomialSum object with atomics factorised, or the original
-     object if no changes are made
+    """Group and factorise monomials using a list of atomics as common
+    subexpressions. Create new monomials for each group and optimise them recursively.
+
+    :arg monomial_sum: a :class:`MonomialSum` object
+    :arg optimal_atomics: list of tuples of atomics to be used as common subexpression
+                          and the frozenset of their sum indices
+    :arg argument_indices: tuple of argument indices
+
+    :returns: a factorised :class:`MonomialSum` object, or the original object
+    if no changes are made
     """
     if not optimal_atomics:
         return monomial_sum
     if len(monomial_sum.ordering) < 2:
         return monomial_sum
     new_monomial_sum = MonomialSum()
-    # Group monomials according to each optimal atomic
+    # Group monomials with respect to each optimal atomic
     factor_group = OrderedDict()
-    for key, (_sum_indices, _atomics) in iteritems(monomial_sum.ordering):
-        for (sum_indices_set, sum_indices), oa in optimal_atomics:
-            if key[0] == sum_indices_set and oa in _atomics:
-                # Add monomial key to the list of corresponding optimal atomic
-                factor_group.setdefault(((sum_indices_set, sum_indices), oa), []).append(key)
+    for monomial in monomial_sum:
+        for sum_indices, oa in optimal_atomics:
+            if frozenset(monomial.sum_indices) == frozenset(sum_indices) and oa in monomial.atomics:
+                # Add monomial to the list of corresponding optimal atomic
+                factor_group.setdefault((sum_indices, oa), []).append(monomial)
                 break
         else:
             # Add monomials that do no have argument factors to new MonomialSum
-            new_monomial_sum.add(_sum_indices, _atomics, monomial_sum.monomials[key])
+            new_monomial_sum.add(monomial.sum_indices, monomial.atomics, monomial.rest)
     # We should not drop monomials
-    assert sum(map(len, itervalues(factor_group))) + len(new_monomial_sum.ordering) == len(monomial_sum.ordering)
+    assert sum(map(len, itervalues(factor_group))) + len(list(new_monomial_sum)) == len(list(monomial_sum))
 
-    for ((sum_indices_set, sum_indices), oa), keys in iteritems(factor_group):
-        if len(keys) == 1:
-            # Just one monomials with this atomic, add to new MonomialSum straightaway
-            _, _atomics = monomial_sum.ordering[keys[0]]
-            _rest = monomial_sum.monomials[keys[0]]
-            new_monomial_sum.add(sum_indices, _atomics, _rest)
+    for (sum_indices, oa), monomials in iteritems(factor_group):
+        if len(monomials) == 1:
+            # Just one monomial with this group, add to new MonomialSum straightaway
+            monomial, = monomials
+            new_monomial_sum.add(monomial.sum_indices, monomial.atomics, monomial.rest)
             continue
         all_atomics = []  # collect all atomics from monomials
         all_rest = []  # collect all rest from monomials
-        for key in keys:
-            _, _atomics = monomial_sum.ordering[key]
-            _atomics = list(_atomics)
+        for monomial in monomials:
+            _atomics = list(monomial.atomics)
             _atomics.remove(oa)  # remove common factor
             all_atomics.append(_atomics)
-            all_rest.append(monomial_sum.monomials[key])
+            all_rest.append(monomial.rest)
         # Create new MonomialSum for the factorised out terms
         sub_monomial_sum = MonomialSum()
         for _atomics, _rest in zip(all_atomics, all_rest):
             sub_monomial_sum.add((), _atomics, _rest)
         sub_monomial_sum = optimise_monomial_sum(sub_monomial_sum, argument_indices)
-        assert len(sub_monomial_sum.ordering) != 0
-        if len(sub_monomial_sum.ordering) == 1:
+        assert len(list(sub_monomial_sum)) > 0
+        if len(list(sub_monomial_sum)) == 1:
             # result is a product, add to new MonomialSum directly
-            (_, new_atomics), = itervalues(sub_monomial_sum.ordering)
-            new_atomics += (oa,)
-            new_rest, = itervalues(sub_monomial_sum.monomials)
+            sub_monomial, = sub_monomial_sum
+            new_atomics = sub_monomial.atomics
+            new_atomics += (oa,)  # add back common factor
+            new_rest = sub_monomial.rest
         else:
-            # result is a sum, need to form new node
+            # result is a sum, we need to create new node
             new_node = monomial_sum_to_expression(sub_monomial_sum)
             new_atomics = [oa]
             new_rest = one
@@ -243,57 +278,49 @@ def factorise_atomics(monomial_sum, optimal_atomics, argument_indices):
 
 
 def optimise_monomial_sum(monomial_sum, argument_indices):
-    all_optimal_atomics = []  # [((sum_indices_set, sum_indces), optimal_atomics))]
-    for sum_indices_set, sum_indices in unique_sum_indices(monomial_sum):
+    """Choose optimal common atomic subexpressions and factorise a
+    :class:`MonomialSum` object.
+
+    :arg monomial_sum: a :class:`MonomialSum` object
+    :arg argument_indices: tuple of argument indices
+
+    :returns: factorised `MonomialSum` object
+    """
+    all_optimal_atomics = []  # [(sum_indces, optimal_atomics)]
+    for sum_indices in unique_sum_indices(monomial_sum):
         # throw away other atomics here
-        optimal_atomics, _ = find_optimal_atomics(monomial_sum, sum_indices_set, argument_indices)
-        all_optimal_atomics.extend([((sum_indices_set, sum_indices), _atomic) for _atomic in optimal_atomics])
+        optimal_atomics, _ = find_optimal_atomics(monomial_sum, frozenset(sum_indices), argument_indices)
+        all_optimal_atomics.extend([(sum_indices, atomic) for atomic in optimal_atomics])
     # This algorithm is O(N!), where N = len(optimal_atomics)
     # we could truncate the optimal_atomics list at say 10
     return factorise_atomics(monomial_sum, all_optimal_atomics, argument_indices)
 
 
-@singledispatch
 def count_flop_node(node):
-    """Count number of flops at a particular gem node, without recursing
-    into childrens"""
-    raise AssertionError("cannot handle type %s" % type(node))
+    """Count number of FLOPs at a particular GEM node, without recursing
+    into childrens
 
+    :arg node: GEM expression
 
-@count_flop_node.register(Constant)
-@count_flop_node.register(Terminal)
-@count_flop_node.register(Indexed)
-@count_flop_node.register(Variable)
-@count_flop_node.register(ListTensor)
-@count_flop_node.register(FlexiblyIndexed)
-@count_flop_node.register(LogicalNot)
-@count_flop_node.register(LogicalAnd)
-@count_flop_node.register(LogicalOr)
-@count_flop_node.register(Conditional)
-def count_flop_node_zero(node):
-    return 0
-
-
-@count_flop_node.register(Power)
-@count_flop_node.register(Comparison)
-@count_flop_node.register(Sum)
-@count_flop_node.register(Product)
-@count_flop_node.register(Division)
-@count_flop_node.register(MathFunction)
-def count_flop_node_single(node):
-    return numpy.prod([idx.extent for idx in node.free_indices])
-
-
-@count_flop_node.register(IndexSum)
-def count_flop_node_index_sum(node):
-    return numpy.prod([idx.extent for idx in node.multiindex + node.free_indices])
+    :returns: number of FLOPs to compute this node, assuming the children have
+              been computed already
+    """
+    if isinstance(node, (Sum, Product, Division, MathFunction, Comparison, Power)):
+        return numpy.prod([idx.extent for idx in node.free_indices])
+    elif isinstance(node, IndexSum):
+        return numpy.prod([idx.extent for idx in node.multiindex + node.free_indices])
+    else:
+        return 0
 
 
 def count_flop(node):
-    """
-    Count the total floating point operations required to compute a gem node.
+    """Count the total floating point operations required to compute a GEM node.
     This function assumes that all subnodes that occur more than once induce a
     temporary, and are therefore only computed once.
+
+    :arg node: GEM expression
+
+    :returns: total number of FLOPs to compute the GEM expression
     """
     return sum(map(count_flop_node, traversal([node])))
 
@@ -348,7 +375,7 @@ def expand_node(node, argument_indices, levels, start, end):
 def build_sharing_graph(node, sharing_graph, seen, argument_indices):
     """ Create sharing graph of Sum and Indexed nodes based on their levels of
     nesting from root node.
-    sharing_graph: node -> [dependencies]
+    sharing_graph: node -> [products]
     """
     # Do not need to revisit nodes
     if node in seen:
@@ -363,18 +390,18 @@ def build_sharing_graph(node, sharing_graph, seen, argument_indices):
         sums = traverse_sum(node)
         for s in sums:
             _, products = traverse_product(s)
-            dependency = frozenset([p for p in products if argument_indices.intersection(p.free_indices)])
-            sharing_graph.setdefault(node, []).append(dependency)
-            for child in dependency:
+            product = frozenset([p for p in products if argument_indices.intersection(p.free_indices)])
+            sharing_graph.setdefault(node, []).append(product)
+            for child in product:
                 sharing_graph = build_sharing_graph(child, sharing_graph, seen, argument_indices)
     elif isinstance(node, Product):
         _, products = traverse_product(node)
-        dependency = frozenset([p for p in products if argument_indices.intersection(p.free_indices)])
-        sharing_graph.setdefault(node, []).append(dependency)
-        for child in dependency:
+        product = frozenset([p for p in products if argument_indices.intersection(p.free_indices)])
+        sharing_graph.setdefault(node, []).append(product)
+        for child in product:
             sharing_graph = build_sharing_graph(child, sharing_graph, seen, argument_indices)
     elif isinstance(node, IndexSum):
-        sharing_graph[node] = list(node.children)
+        sharing_graph[node] = [frozenset(node.children)]
         sharing_graph = build_sharing_graph(node.children[0], sharing_graph, seen, argument_indices)
     else:
         raise NotImplementedError("Don't know how to do this yet.")
@@ -392,9 +419,10 @@ def find_optimal_expansion_levels(root, sharing_graph, argument_indices):
             if old_level >= current_level:
                 return node_level
         node_level[node] = current_level
-        for dependencies in sharing_graph[node]:
-            for child in dependencies:
-                node_level = assign_level(child, node_level, sharing_graph, current_level+1)
+        if node in sharing_graph:
+            for product in sharing_graph[node]:
+                for child in product:
+                    node_level = assign_level(child, node_level, sharing_graph, current_level+1)
         return node_level
     node_level = {}
     node_level = assign_level(root, node_level, sharing_graph, 0)
@@ -423,19 +451,20 @@ def find_optimal_expansion_levels(root, sharing_graph, argument_indices):
     min_parent_level = {}
     for l in range(max_level, min_level-1, -1):
         for node in levels[l]:
-            for product in sharing_graph[node]:
-                for child in product:
-                    min_parent_level[child] = l
+            if node in sharing_graph:
+                for product in sharing_graph[node]:
+                    for child in product:
+                        min_parent_level[child] = l
     min_parent_level[root] = -1
     best_cost = 0
-    best_start, best_end = 0, 0
+    best_start, best_end = min_level, max_level
     for start in range(min_level, max_level):
         for end in range(start+1, max_level + 1):
             new_sharing_graph = {}  # hold modified dependencies
             total_cost, outer_cost = 0, 0
             for node, products in iteritems(sharing_graph):
                 new_sharing_graph[node] = list(products)
-            for l in range(end-2, start-1, -1):
+            for l in range(end-1, start-1, -1):
                 for node in levels[l]:
                     all_factors = []
                     for product in new_sharing_graph[node]:
@@ -468,12 +497,6 @@ def find_optimal_expansion_levels(root, sharing_graph, argument_indices):
                 best_cost = total_cost
     print('best cost: {0:,}, best levels: {1} -> {2},'.format(best_cost, best_start, best_end))
     return levels, best_start, best_end
-
-
-
-
-
-
 
 
 
