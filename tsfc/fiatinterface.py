@@ -231,7 +231,7 @@ def _(element, vector_is_mixed):
                                 create_element(B, vector_is_mixed))
 
 
-@convert.register(ufl.BrokenElement)  # noqa
+@convert.register(ufl.BrokenElement) # noqa
 def _(element, vector_is_mixed):
     return supported_elements[element.family()](create_element(element._element,
                                                                vector_is_mixed))
