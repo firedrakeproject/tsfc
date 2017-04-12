@@ -1,11 +1,11 @@
 from __future__ import absolute_import, print_function, division
 
 import numpy
+import itertools
 from functools import partial
-from itertools import count
 from six import iteritems, iterkeys, itervalues
 from six.moves import filter, filterfalse
-from collections import OrderedDict, defaultdict
+from collections import OrderedDict, defaultdict, Counter
 from singledispatch import singledispatch
 from gem.optimise import (replace_division, fast_sum_factorise,
                           associate_product, associate_sum, traverse_product, traverse_sum)
@@ -46,12 +46,14 @@ def Integrals(expressions, quadrature_multiindex, argument_multiindices, paramet
 
 def optimise(node, quadrature_multiindex, argument_multiindices):
     argument_indices = tuple([i for indices in argument_multiindices for i in indices])
-    sharing_graph = dict()
     print('Building sharing graph...')
-    sharing_graph = create_sharing_graph(node, sharing_graph, 0, None, set(argument_indices))
+    sharing_graph = build_sharing_graph(node, {}, set(), set(argument_indices))
     print('Finished building sharing graph')
-    node = find_optimal_expansion_levels(node, sharing_graph, set(argument_indices))
-    return node
+    # return _test(node, sharing_graph, argument_indices)
+    levels, start, end = find_optimal_expansion_levels(node, sharing_graph, set(argument_indices))
+    expanded_node_ms = expand_node(node, argument_indices, levels, start, end)
+    expanded_node_ms = optimise_monomial_sum(expanded_node_ms, argument_indices)
+    return monomial_sum_to_expression(expanded_node_ms)
 
 
 def optimise_expressions(expressions, quadrature_multiindices, argument_multiindices):
@@ -129,7 +131,7 @@ def monomial_sum_to_expression(monomial_sum):
 def find_optimal_atomics(monomial_sum, sum_indices_set, argument_indices):
     """Find list of optimal atomics which when factorised gives least number of
     terms in the indexed sum"""
-    index = count()
+    index = itertools.count()
     atomic_index = OrderedDict()  # Atomic gem node -> int
     connections = []
     # add connections (list of lists)
@@ -326,57 +328,240 @@ def expand_node(node, argument_indices, levels, start, end):
             return ATOMIC
         else:
             return COMPOUND
-
-    classifier = partial(classify, set(argument_indices), set(levels[end]))
+    max_level = max(iterkeys(levels))
+    atomic_set = set()
+    for l in range(end, max_level+1):
+        atomic_set.update(set(levels[l]))
+    classifier = partial(classify, set(argument_indices), atomic_set)
     start_nodes_ms = collect_monomials(levels[start], classifier)
     start_nodes_ms = [optimise_monomial_sum(ms, argument_indices) for ms in start_nodes_ms]
     new_start_nodes = map(monomial_sum_to_expression, start_nodes_ms)
     # substitute node with new start nodes as terminal node
     substituted_node, = substitute_node([node], dict(zip(levels[start], new_start_nodes)))
     # Atomic sets are new start nodes plus previous terminal node
-    classifier = partial(classify, set(argument_indices), set(new_start_nodes + levels[end]))
+    atomic_set.update(set(new_start_nodes))
+    classifier = partial(classify, set(argument_indices), atomic_set)
     monomialsum, = collect_monomials([node], classifier)
     return monomialsum
 
 
-def create_sharing_graph(node, node_level_parents, current_level, parent, argument_indices):
+def build_sharing_graph(node, sharing_graph, seen, argument_indices):
+    """ Create sharing graph of Sum and Indexed nodes based on their levels of
+    nesting from root node.
+    sharing_graph: node -> [dependencies]
+    """
+    # Do not need to revisit nodes
+    if node in seen:
+        return sharing_graph
+    # Do not need to look into constants
     if not argument_indices.intersection(set(node.free_indices)):
-        return node_level_parents
-
-    new_level = current_level
-    if isinstance(node, (Sum, Indexed, IndexSum)):
-        if node not in node_level_parents:
-            # This node is not seen before
-            if parent:
-                parents = [parent]
-            else:
-                parents = []
-        else:
-            old_level, parents = node_level_parents[node]
-            # Take the maximum depth
-            new_level = max(old_level, current_level)
-            if parent and parent not in parents:
-                parents.append(parent)
-        node_level_parents[node] = (new_level, parents)
-        if isinstance(node, Sum):
-            terms = traverse_sum(node)
-        elif isinstance(node, IndexSum):
-            terms = traverse_sum(node.children[0])
-        else:
-            terms = []
-        for term in terms:
-            # For Sum node, children are at same level
-            node_level_parents = create_sharing_graph(term, node_level_parents, current_level, node, argument_indices)
-    elif (isinstance(node, Product)):
-        _, terms = traverse_product(node, None)
-        for term in terms:
-            node_level_parents = create_sharing_graph(term  , node_level_parents, current_level + 1, parent, argument_indices)
+        return sharing_graph
+    if isinstance(node, Indexed):
+        # Terminal node
+        sharing_graph[node] = []
+    elif isinstance(node, Sum):
+        sums = traverse_sum(node)
+        for s in sums:
+            _, products = traverse_product(s)
+            dependency = frozenset([p for p in products if argument_indices.intersection(p.free_indices)])
+            sharing_graph.setdefault(node, []).append(dependency)
+            for child in dependency:
+                sharing_graph = build_sharing_graph(child, sharing_graph, seen, argument_indices)
+    elif isinstance(node, Product):
+        _, products = traverse_product(node)
+        dependency = frozenset([p for p in products if argument_indices.intersection(p.free_indices)])
+        sharing_graph.setdefault(node, []).append(dependency)
+        for child in dependency:
+            sharing_graph = build_sharing_graph(child, sharing_graph, seen, argument_indices)
+    elif isinstance(node, IndexSum):
+        sharing_graph[node] = list(node.children)
+        sharing_graph = build_sharing_graph(node.children[0], sharing_graph, seen, argument_indices)
     else:
-        raise AssertionError("Don't know how to do this yet!")
+        raise NotImplementedError("Don't know how to do this yet.")
 
-    return node_level_parents
+    seen.add(node)
+    return sharing_graph
 
-def find_optimal_expansion_levels(root, node_level_parents, argument_indices):
+
+def find_optimal_expansion_levels(root, sharing_graph, argument_indices):
+    def extents(indices):
+        return numpy.prod([i.extent for i in indices])
+    def assign_level(node, node_level, sharing_graph, current_level):
+        if node in node_level:
+            old_level = node_level[node]
+            if old_level >= current_level:
+                return node_level
+        node_level[node] = current_level
+        for dependencies in sharing_graph[node]:
+            for child in dependencies:
+                node_level = assign_level(child, node_level, sharing_graph, current_level+1)
+        return node_level
+    node_level = {}
+    node_level = assign_level(root, node_level, sharing_graph, 0)
+    levels = {}
+    for node, level in iteritems(node_level):
+        levels.setdefault(level, []).append(node)
+    min_level, max_level = min(iterkeys(levels)), max(iterkeys(levels))
+    node_cost = {}
+    for node in iterkeys(sharing_graph):
+        # Aij*Aik*z + Bij*Bik*z ...
+        cost = 0
+        products = sharing_graph[node]
+        for product in products:
+            # Number of multiplications
+            niter = extents(set().union(*[f.free_indices for f in product]).intersection(argument_indices))
+            cost += len(product) * niter
+        # Number of additions
+        cost += extents(argument_indices.intersection(node.free_indices)) * (len(products) - 1)
+        node_cost[node] = cost
+    level_cost = {}
+    for l in range(min_level, max_level):
+        cost = 0
+        for node in levels[l]:
+            cost += node_cost[node]
+        level_cost[l] = cost
+    min_parent_level = {}
+    for l in range(max_level, min_level-1, -1):
+        for node in levels[l]:
+            for product in sharing_graph[node]:
+                for child in product:
+                    min_parent_level[child] = l
+    min_parent_level[root] = -1
+    best_cost = 0
+    best_start, best_end = 0, 0
+    for start in range(min_level, max_level):
+        for end in range(start+1, max_level + 1):
+            new_sharing_graph = {}  # hold modified dependencies
+            total_cost, outer_cost = 0, 0
+            for node, products in iteritems(sharing_graph):
+                new_sharing_graph[node] = list(products)
+            for l in range(end-2, start-1, -1):
+                for node in levels[l]:
+                    all_factors = []
+                    for product in new_sharing_graph[node]:
+                        # product is a tuple, (b1, b2) means b1*b2*z, (b1,) means b1*z
+                        all_sub_factors = list(itertools.product(*[new_sharing_graph[child]
+                                if node_level[child] < end else [frozenset([child])] for child in product]))
+                        # this gives ((c1,), (c2,)), we want (c1, c2)
+                        all_sub_factors = list(map(lambda x:frozenset.union(*x), all_sub_factors))
+                        all_factors.extend(all_sub_factors)
+                    unique_factors = list(set(all_factors))
+                    outer_cost += len(all_factors) - len(unique_factors)
+                    new_sharing_graph[node] = unique_factors
+            # temporaries at start level
+            inner_cost = 0
+            for node in levels[start]:
+                products = new_sharing_graph[node]
+                for product in products:
+                    niter = extents(set().union(*[f.free_indices for f in product]).intersection(argument_indices))
+                    inner_cost += len(product) * niter
+                inner_cost += extents(argument_indices.intersection(node.free_indices)) * (len(products) - 1)
+            for l in range(start, end):
+                for node in levels[l]:
+                    if min_parent_level[node] >= start-1:
+                        total_cost -= node_cost[node]
+            total_cost += inner_cost + outer_cost
+            print('start: {0}, end:{1}, flops:{2}'.format(start, end, total_cost))
+            if total_cost < best_cost:
+                best_start = start
+                best_end = end
+                best_cost = total_cost
+    print('best cost: {0:,}, best levels: {1} -> {2},'.format(best_cost, best_start, best_end))
+    return levels, best_start, best_end
+
+
+
+
+
+
+
+
+
+def find_optimal_expansion_levels_old(sharing_graph, argument_indices):
+    def extents(indices):
+        return numpy.prod([i.extent for i in indices])
+    dependencies = {}  # node -> [children]
+    levels = {}
+    min_parent_level = {}  # node -> minimum level of parents of node
+    for node, (level, parents) in iteritems(sharing_graph):
+        levels.setdefault(level, []).append(node)
+        for parent in parents:
+            dependencies.setdefault(parent, []).append(node)
+        min_parent_level[node] = min(map(lambda p: sharing_graph[p][0], parents) or [0])
+
+    min_level, max_level = min(iterkeys(levels)), max(iterkeys(levels))
+    level_flops = {}
+    for l in range(min_level, max_level):
+        flops = 0
+        for node in levels[l]:
+            if isinstance(node, Sum):
+                cost = 2 * len(dependencies[node]) - 1
+                flops += extents(node.free_indices) * cost
+            if isinstance(node, IndexSum):
+                flops += extents(node.children[0].free_indices) * 2
+        level_flops[l] = flops
+        print('level {0}, flops {1}'.format(l, flops))
+
+    best_flops = 1e20
+    best_level = max_level
+    for end in range(min_level + 1, max_level):
+        new_dependencies = {}  # hold modified dependencies
+        for node, parents in iteritems(dependencies):
+            new_dependencies[node] = list(parents)
+        # pre-start flops
+        post_end_flops = 0
+        outer_flops = 0
+        for l in range(end, max_level):
+            post_end_flops += level_flops[l]
+        for start in range(end - 1, min_level - 1, -1):
+            inner_flops = 0
+            for node in levels[end]:
+                if isinstance(node, Indexed):
+                    continue
+                all_factors = Counter()
+                for child in new_dependencies[node]:
+                    child_level, _ = sharing_graph[child]
+                    if child_level <= end and isinstance(child, Sum):
+                        # child need to be inlined
+                        for child_child in new_dependencies[child]:
+                            # Outer loop costs (hoisted)
+                            # 1 product in the linear loop outside of child argument indices
+                            outer_flops += extents(set(node.free_indices).difference(argument_indices))
+                            all_factors[child_child] += 1
+                    else:
+                        # child should be kept as ATOMIC
+                        all_factors[child] += 1
+                unique_factors = list(all_factors)
+                # Additions in outer loop
+                for factor in unique_factors:
+                    niter = extents(set(node.free_indices).difference(argument_indices))
+                    outer_flops += (all_factors[factor] - 1) * niter
+                # Inner loop costs, N multiplications and N-1 additions
+                inner_flops += (2 * len(unique_factors) - 1) * extents(node.free_indices)
+                # Update dependencies
+                new_dependencies[node] = unique_factors
+            for l in range(max_level, end, -1):
+                for node in levels[l]:
+                    if min_parent_level[node] < start and isinstance(node, Sum):
+                        inner_flops += (len(new_dependencies[node]) * 2 - 1) * extents(node.free_indices)
+            # pre-start cost
+            pre_start_flops = 0
+            for l in range(min_level, start):
+                pre_start_flops += level_flops[l]
+
+            total_flops = pre_start_flops + inner_flops + outer_flops + post_end_flops
+            print('start: {0}, end:{1}, flops:{2}'.format(start, end, total_flops))
+            if total_flops < best_flops:
+                best_flops = total_flops
+                best_start = start
+                best_end = end
+    print('best flops: {0:,}, best level: {1} -> {2},'.format(best_flops, best_start, best_end))
+    return levels, best_start, best_end
+
+
+
+
+def _test(root, node_level_parents, argument_indices):
     if not node_level_parents:
         return root
     levels = defaultdict()
