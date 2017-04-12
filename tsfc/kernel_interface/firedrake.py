@@ -155,15 +155,15 @@ class KernelBuilder(KernelBuilderBase):
         # Facet number
         if integral_type in ['exterior_facet', 'exterior_facet_vert']:
             facet = gem.Variable('facet', (1,))
-            self._facet_number = {None: gem.VariableIndex(gem.Indexed(facet, (0,)))}
+            self._entity_number = {None: gem.VariableIndex(gem.Indexed(facet, (0,)))}
         elif integral_type in ['interior_facet', 'interior_facet_vert']:
             facet = gem.Variable('facet', (2,))
-            self._facet_number = {
+            self._entity_number = {
                 '+': gem.VariableIndex(gem.Indexed(facet, (0,))),
                 '-': gem.VariableIndex(gem.Indexed(facet, (1,)))
             }
         elif integral_type == 'interior_facet_horiz':
-            self._facet_number = {'+': 1, '-': 0}
+            self._entity_number = {'+': 1, '-': 0}
 
     def set_arguments(self, arguments, multiindices):
         """Process arguments.
@@ -242,6 +242,14 @@ class KernelBuilder(KernelBuilderBase):
 
         self.kernel.ast = KernelBuilderBase.construct_kernel(self, name, args, body)
         return self.kernel
+
+    def construct_empty_kernel(self, name):
+        """Return None, since Firedrake needs no empty kernels.
+
+        :arg name: function name
+        :returns: None
+        """
+        return None
 
 
 def prepare_coefficient(coefficient, name, interior_facet=False):

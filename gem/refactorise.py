@@ -9,7 +9,7 @@ from collections import Counter, OrderedDict, defaultdict, namedtuple
 from itertools import product
 
 from gem.node import Memoizer, traversal
-from gem.gem import (Node, Zero, Product, Sum, Indexed, ListTensor, one)
+from gem.gem import Node, Zero, Product, Sum, Indexed, ListTensor, one
 from gem.optimise import (remove_componenttensors, sum_factorise,
                           traverse_product, traverse_sum, unroll_indexsum)
 

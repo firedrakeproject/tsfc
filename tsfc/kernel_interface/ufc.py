@@ -38,12 +38,14 @@ class KernelBuilder(KernelBuilderBase):
             self._cell_orientations = (gem.Variable("cell_orientation", ()),)
 
         if integral_type == "exterior_facet":
-            self._facet_number = {None: gem.VariableIndex(gem.Variable("facet", ()))}
+            self._entity_number = {None: gem.VariableIndex(gem.Variable("facet", ()))}
         elif integral_type == "interior_facet":
-            self._facet_number = {
+            self._entity_number = {
                 '+': gem.VariableIndex(gem.Variable("facet_0", ())),
                 '-': gem.VariableIndex(gem.Variable("facet_1", ()))
             }
+        elif integral_type == "vertex":
+            self._entity_number = {None: gem.VariableIndex(gem.Variable("vertex", ()))}
 
     def set_arguments(self, arguments, multiindices):
         """Process arguments.
@@ -97,25 +99,27 @@ class KernelBuilder(KernelBuilderBase):
             self.coefficient_map.update(zip(coeffs, expressions))
 
     def construct_kernel(self, name, body):
-        """Construct a fully built :class:`Kernel`.
+        """Construct a fully built kernel function.
 
         This function contains the logic for building the argument
         list for assembly kernels.
 
         :arg name: function name
         :arg body: function body (:class:`coffee.Block` node)
-        :returns: :class:`Kernel` object
+        :returns: a COFFEE function definition object
         """
         args = [self.local_tensor]
         args.extend(self.coefficient_args)
         args.extend(self.coordinates_args)
 
-        # Facet number(s)
+        # Facet and vertex number(s)
         if self.integral_type == "exterior_facet":
             args.append(coffee.Decl("std::size_t", coffee.Symbol("facet")))
         elif self.integral_type == "interior_facet":
             args.append(coffee.Decl("std::size_t", coffee.Symbol("facet_0")))
             args.append(coffee.Decl("std::size_t", coffee.Symbol("facet_1")))
+        elif self.integral_type == "vertex":
+            args.append(coffee.Decl("std::size_t", coffee.Symbol("vertex")))
 
         # Cell orientation(s)
         if self.interior_facet:
@@ -125,6 +129,17 @@ class KernelBuilder(KernelBuilderBase):
             args.append(coffee.Decl("int", coffee.Symbol("cell_orientation")))
 
         return KernelBuilderBase.construct_kernel(self, name, args, body)
+
+    def construct_empty_kernel(self, name):
+        """Construct an empty kernel function.
+
+        Kernel will just zero the return buffer and do nothing else.
+
+        :arg name: function name
+        :returns: a COFFEE function definition object
+        """
+        body = coffee.Block([])  # empty block
+        return self.construct_kernel(name, body)
 
     @staticmethod
     def require_cell_orientations():

@@ -252,8 +252,7 @@ def delta_elimination(sum_indices, factors):
                        for f in factors if isinstance(f, Delta)
                        for index in (f.i, f.j) if index in sum_indices]
 
-    # Drop ones
-    return sum_indices, [e for e in factors if e != one]
+    return sum_indices, factors
 
 
 def associate_product(factors):
@@ -316,8 +315,8 @@ def associate_sum(summands):
         summands.remove(a)
         summands.remove(b)
         summands.append(Sum(a, b))
-    sum, = summands
-    return sum, flops
+    _sum, = summands
+    return _sum, flops
 
 
 @singledispatch
@@ -338,13 +337,15 @@ def _reassociate_product_prod(node, self):
 
 
 def reassociate_product(expressions):
-    """Refactor a Product expression recursively by calling
-    ``associate_product()``
-    :param node: list of expressions
-    :return: list of reassociated product nodes
+    """Refactor a Product expression recursively by calling associate_product().
+
+    :arg expressions: list of GEM expressions
+
+    :returns: list of GEM expressions with Product nodes reassociated
     """
     refcount = collect_refcount(expressions)
 
+    # Do not break down common subexpression
     def stop_at(node):
         if not isinstance(node, Product):
             return True
@@ -589,7 +590,3 @@ def aggressive_unroll(expression):
     expression, = unroll_indexsum((expression,), predicate=lambda index: True)
     expression, = remove_componenttensors((expression,))
     return expression
-
-
-def fast_sum_factorise(sum_indices, factors):
-    return sum_factorise(*delta_elimination(list(reversed(sum_indices)), factors))
