@@ -12,7 +12,9 @@ from gem.refactorise import (MonomialSum, ATOMIC, COMPOUND, OTHER,
                              collect_monomials)
 from gem.node import traversal
 from gem.gem import (Product, Sum, Comparison, Conditional, Division, Indexed,
-                     IndexSum, MathFunction, Power, Failure, one, index_sum)
+                     IndexSum, MathFunction, Power, Failure, one, index_sum,
+                     Terminal, ListTensor, FlexiblyIndexed, LogicalAnd,
+                     LogicalNot, LogicalOr)
 
 
 import tsfc.vanilla as vanilla
@@ -318,8 +320,10 @@ def count_flop_node(node):
         return numpy.prod([idx.extent for idx in node.free_indices])
     elif isinstance(node, IndexSum):
         return numpy.prod([idx.extent for idx in node.multiindex + node.free_indices])
-    else:
+    elif isinstance(node, (Terminal, Indexed, ListTensor, FlexiblyIndexed, LogicalOr, LogicalNot, LogicalAnd, Conditional)):
         return 0
+    else:
+        raise NotImplementedError("Do not know how to count flops of type {0}".format(type(node)))
 
 
 def count_flop(node):
