@@ -51,36 +51,6 @@ def Integrals(expressions, quadrature_multiindex, argument_multiindices, paramet
     return optimise_expressions(expressions, quadrature_multiindex, argument_multiindices)
 
 
-def optimise(node, quadrature_multiindex, argument_multiindices):
-    """Optimise a GEM expression through factorisation.
-
-    :arg node: GEM expression
-    :arg quadrature_multiindex: quadrature multiindex (tuple)
-    :arg argument_multiindices: tuple of argument multiindices,
-                                one multiindex for each argument
-
-    :returns: factorised GEM expression
-    """
-    argument_indices = tuple([i for indices in argument_multiindices for i in indices])
-
-    def classify(argument_indices, expression):
-        n = len(argument_indices.intersection(expression.free_indices))
-        if n == 0:
-            return OTHER
-        elif n == 1:
-            if isinstance(expression, (Indexed, Conditional)):
-                return ATOMIC
-            else:
-                return COMPOUND
-        else:
-            return COMPOUND
-    # Apply argument factorisation unconditionally
-    classifier = partial(classify, set(argument_indices))
-    monomial_sum, = collect_monomials([node], classifier)
-    monomial_sum = optimise_monomial_sum(monomial_sum, argument_indices)
-    return monomial_sum_to_expression(monomial_sum)
-
-
 def optimise_expressions(expressions, quadrature_multiindex, argument_multiindices):
     """Perform loop optimisations on GEM DAGs
 
@@ -95,7 +65,25 @@ def optimise_expressions(expressions, quadrature_multiindex, argument_multiindic
     for n in traversal(expressions):
         if isinstance(n, Failure):
             return expressions
-    return [optimise(node, quadrature_multiindex, argument_multiindices) for node in expressions]
+
+    def classify(argument_indices, expression):
+        n = len(argument_indices.intersection(expression.free_indices))
+        if n == 0:
+            return OTHER
+        elif n == 1:
+            if isinstance(expression, (Indexed, Conditional)):
+                return ATOMIC
+            else:
+                return COMPOUND
+        else:
+            return COMPOUND
+
+    argument_indices = tuple([i for indices in argument_multiindices for i in indices])
+    # Apply argument factorisation unconditionally
+    classifier = partial(classify, set(argument_indices))
+    monomial_sums = collect_monomials(expressions, classifier)
+    monomial_sums = [optimise_monomial_sum(ms, argument_indices) for ms in monomial_sums]
+    return list(map(monomial_sum_to_expression, monomial_sums))
 
 
 def index_extent(factor, argument_indices):
@@ -158,10 +146,10 @@ def monomial_sum_to_expression(monomial_sum):
             indexsums.append(IndexSum(product, sum_indices))
         else:
             # Create one product for each monomial
-            products = [associate_product(atomics + (rest,))[0] for atomics, rest in zip(all_atomics, all_rest)]
-            indexsums.append(IndexSum(associate_sum(products)[0], sum_indices))
+            products = [associate_product(atomics + (rest,)).expression for atomics, rest in zip(all_atomics, all_rest)]
+            indexsums.append(IndexSum(associate_sum(products).expression, sum_indices))
 
-    return associate_sum(indexsums)[0]
+    return associate_sum(indexsums).expression
 
 
 def find_optimal_atomics(monomial_sum, sum_indices_set, argument_indices):
@@ -248,7 +236,7 @@ def factorise_atomics(monomial_sum, optimal_atomics, argument_indices):
             # Add monomials that do no have argument factors to new MonomialSum
             new_monomial_sum.add(monomial.sum_indices, monomial.atomics, monomial.rest)
     # We should not drop monomials
-    assert sum(map(len, itervalues(factor_group))) + len(list(new_monomial_sum)) == len(list(monomial_sum))
+    assert sum(map(len, itervalues(factor_group))) + len(new_monomial_sum) == len(monomial_sum)
 
     for (sum_indices, oa), monomials in iteritems(factor_group):
         if len(monomials) == 1:
@@ -268,8 +256,8 @@ def factorise_atomics(monomial_sum, optimal_atomics, argument_indices):
         for _atomics, _rest in zip(all_atomics, all_rest):
             sub_monomial_sum.add((), _atomics, _rest)
         sub_monomial_sum = optimise_monomial_sum(sub_monomial_sum, argument_indices)
-        assert len(list(sub_monomial_sum)) > 0
-        if len(list(sub_monomial_sum)) == 1:
+        assert len(sub_monomial_sum) > 0
+        if len(sub_monomial_sum) == 1:
             # result is a product, add to new MonomialSum directly
             sub_monomial, = sub_monomial_sum
             new_atomics = sub_monomial.atomics
@@ -307,32 +295,23 @@ def optimise_monomial_sum(monomial_sum, argument_indices):
     return factorise_atomics(monomial_sum, all_optimal_atomics, argument_indices)
 
 
-def count_flop_node(node):
-    """Count number of FLOPs at a particular GEM node, without recursing
-    into childrens
-
-    :arg node: GEM expression
-
-    :returns: number of FLOPs to compute this node, assuming the children have
-              been computed already
-    """
-    if isinstance(node, (Sum, Product, Division, MathFunction, Comparison, Power)):
-        return numpy.prod([idx.extent for idx in node.free_indices])
-    elif isinstance(node, IndexSum):
-        return numpy.prod([idx.extent for idx in node.multiindex + node.free_indices])
-    elif isinstance(node, (Terminal, Indexed, ListTensor, FlexiblyIndexed, LogicalOr, LogicalNot, LogicalAnd, Conditional)):
-        return 0
-    else:
-        raise NotImplementedError("Do not know how to count flops of type {0}".format(type(node)))
-
-
-def count_flop(node):
+def count_flop(expression):
     """Count the total floating point operations required to compute a GEM node.
     This function assumes that all subnodes that occur more than once induce a
     temporary, and are therefore only computed once.
 
-    :arg node: GEM expression
+    :arg expression: GEM expression
 
     :returns: total number of FLOPs to compute the GEM expression
     """
-    return sum(map(count_flop_node, traversal([node])))
+    flop = 0
+    for node in traversal([expression]):
+        if isinstance(node, (Sum, Product, Division, MathFunction, Comparison, Power)):
+            flop += numpy.prod([idx.extent for idx in node.free_indices])
+        elif isinstance(node, IndexSum):
+            flop += numpy.prod([idx.extent for idx in node.multiindex + node.free_indices])
+        elif isinstance(node, (Terminal, Indexed, ListTensor, FlexiblyIndexed, LogicalOr, LogicalNot, LogicalAnd, Conditional)):
+            pass
+        else:
+            raise NotImplementedError("Do not know how to count flops of type {0}".format(type(node)))
+    return flop

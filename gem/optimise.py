@@ -5,7 +5,7 @@ from __future__ import absolute_import, print_function, division
 from six import itervalues
 from six.moves import filter, map, zip
 
-from collections import OrderedDict
+from collections import OrderedDict, namedtuple
 from functools import reduce
 from itertools import combinations, permutations
 
@@ -255,47 +255,34 @@ def delta_elimination(sum_indices, factors):
     return sum_indices, factors
 
 
-def associate_product(factors):
-    """Apply associativity rules to construct an operation-minimal product tree.
+ExpressionAndFlopCount = namedtuple('ExpressionAndFlopCount', ['expression', 'flops'])
 
-    For best performance give factors that have different set of free indices.
+
+def associate_operation(operands, type):
+    """Apply associativity rules to associative operations (e.g. summation and
+    product) to construct an operation-minimal operation tree.
+
+    :arg operands: list of operands
+    :arg type: GEM class which is associative, e.g. Sum, Product
+
+    :returns: named tuple ExpressionAndFlopCount, with expression holds the
+              resultant expression, and flops holds its number of flops
     """
-    if len(factors) > 32:
-        # O(N^3) algorithm
-        raise NotImplementedError("Not expected such a complicated expression!")
-
-    def count(pair):
-        """Operation count to multiply a pair of GEM expressions"""
-        a, b = pair
-        extents = [i.extent for i in set().union(a.free_indices, b.free_indices)]
-        return numpy.prod(extents, dtype=int)
-
-    factors = list(factors)  # copy for in-place modifications
-    flops = 0
-    while len(factors) > 1:
-        # Greedy algorithm: choose a pair of factors that are the
-        # cheapest to multiply.
-        a, b = min(combinations(factors, 2), key=count)
-        flops += count((a, b))
-        # Remove chosen factors, append their product
-        factors.remove(a)
-        factors.remove(b)
-        factors.append(Product(a, b))
-    product, = factors
-    return product, flops
-
-
-def associate_sum(summands):
-    """Apply associativity rules to construct an operation-minimal summation tree.
-    """
-    # group summands by their free indices
+    # group operands by their free indices
+    if type == Sum:
+        base = Zero()
+    elif type == Product:
+        base = one
+    else:
+        raise AssertionError(
+            "Unknown associative operation type {0}!".format(type))
     groups = OrderedDict()
-    for summand in summands:
-        key = frozenset(summand.free_indices)
-        groups.setdefault(key, []).append(summand)
-    summands = [reduce(Sum, _value, Zero()) for _value in itervalues(groups)]
+    for operand in operands:
+        key = frozenset(operand.free_indices)
+        groups.setdefault(key, []).append(operand)
+    operands = [reduce(type, _value, base) for _value in itervalues(groups)]
 
-    if len(summands) > 32:
+    if len(operands) > 32:
         # O(N^3) algorithm
         raise NotImplementedError("Not expected such a complicated expression!")
 
@@ -306,17 +293,25 @@ def associate_sum(summands):
         return numpy.prod(extents, dtype=int)
 
     flops = 0
-    while len(summands) > 1:
-        # Greedy algorithm: choose a pair of factors that are the
-        # cheapest to add.
-        a, b = min(combinations(summands, 2), key=count)
+    while len(operands) > 1:
+        # Greedy algorithm: choose a pair of operands that are the
+        # cheapest to do.
+        a, b = min(combinations(operands, 2), key=count)
         flops += count((a, b))
         # Remove chosen factors, append their product
-        summands.remove(a)
-        summands.remove(b)
-        summands.append(Sum(a, b))
-    _sum, = summands
-    return _sum, flops
+        operands.remove(a)
+        operands.remove(b)
+        operands.append(type(a, b))
+    node, = operands
+    return ExpressionAndFlopCount(node, flops)
+
+
+def associate_product(factors):
+    return associate_operation(factors, Product)
+
+
+def associate_sum(summands):
+    return associate_operation(summands, Sum)
 
 
 @singledispatch
