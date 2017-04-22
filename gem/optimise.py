@@ -258,36 +258,36 @@ def delta_elimination(sum_indices, factors):
 ExpressionAndFlopCount = namedtuple('ExpressionAndFlopCount', ['expression', 'flops'])
 
 
-def associate_operation(operands, type):
+def associate_operation(operands, gem_type):
     """Apply associativity rules to associative operations (e.g. summation and
     product) to construct an operation-minimal operation tree.
 
     :arg operands: list of operands
-    :arg type: GEM class which is associative, e.g. Sum, Product
+    :arg gem_type: GEM class which is associative, e.g. Sum, Product
 
     :returns: named tuple ExpressionAndFlopCount, with expression holds the
               resultant expression, and flops holds its number of flops
     """
     # group operands by their free indices
-    if type == Sum:
+    if gem_type == Sum:
         base = Zero()
-    elif type == Product:
+    elif gem_type == Product:
         base = one
     else:
         raise AssertionError(
-            "Unknown associative operation type {0}!".format(type))
+            "Unknown associative operation type {0}!".format(gem_type))
     groups = OrderedDict()
     for operand in operands:
         key = frozenset(operand.free_indices)
         groups.setdefault(key, []).append(operand)
-    operands = [reduce(type, _value, base) for _value in itervalues(groups)]
+    operands = [reduce(gem_type, _value, base) for _value in itervalues(groups)]
 
     if len(operands) > 32:
         # O(N^3) algorithm
         raise NotImplementedError("Not expected such a complicated expression!")
 
     def count(pair):
-        """Operation count to add a pair of GEM expressions"""
+        """Operation count to operate on a pair of GEM expressions"""
         a, b = pair
         extents = [i.extent for i in set().union(a.free_indices, b.free_indices)]
         return numpy.prod(extents, dtype=int)
@@ -301,7 +301,7 @@ def associate_operation(operands, type):
         # Remove chosen factors, append their product
         operands.remove(a)
         operands.remove(b)
-        operands.append(type(a, b))
+        operands.append(gem_type(a, b))
     node, = operands
     return ExpressionAndFlopCount(node, flops)
 

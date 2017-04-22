@@ -82,7 +82,7 @@ def test_loop_optimise():
 
     # Test Bj*Ek + Bj*Fk => Bj*(Ek + Fk)
     expr = Sum(Product(Bj, Ek), Product(Bj, Fk))
-    result, = optimise_expressions([expr], ((i,),), ((j,), (k,)))
+    result, = optimise_expressions([expr], ((j,), (k,)))
     assert count_flop(result) == 110
 
     # Test that all common factors from optimal factors are applied
@@ -90,7 +90,7 @@ def test_loop_optimise():
     # Bj*(Ek + Fk + Gk) + Cj*(Ek+Fk)
     expr = Sum(Sum(Sum(Sum(Product(Bj, Ek), Product(Bj, Fk)), Product(Bj, Gk)),
                    Product(Cj, Ek)), Product(Cj, Fk))
-    result, = optimise_expressions([expr], ((i,),), ((j,), (k,)))
+    result, = optimise_expressions([expr], ((j,), (k,)))
     assert count_flop(result) == 320
 
     # Test that consts are factorised
@@ -101,7 +101,7 @@ def test_loop_optimise():
     expr = Sum(Sum(Sum(Product(Z, Product(A1i, Product(Bj, Ek))),
                        Product(Z, Product(A2i, Product(Bj, Ek)))),
                    Product(A3i, Product(Bj, Ek))), Product(Z, Product(A1i, Bj)))
-    result, = optimise_expressions([expr], ((i,),), ((j,), (k,)))
+    result, = optimise_expressions([expr], ((j,), (k,)))
     assert count_flop(result) == 2480
 
 
