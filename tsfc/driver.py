@@ -9,6 +9,7 @@ import time
 from functools import reduce
 from itertools import chain
 
+import ufl
 from ufl.algorithms import extract_arguments, extract_coefficients
 from ufl.algorithms.analysis import has_type
 from ufl.classes import Form, CellVolume, Argument, FunctionSpace
@@ -49,10 +50,9 @@ def compile_form(form, prefix="form", parameters=None):
     kernels = []
     for integral_data in fd.integral_data:
         start = time.time()
-        try:
-            kernels.append(compile_integral(integral_data, fd, prefix, parameters))
-        except impero_utils.NoopError:
-            pass
+        kernel = compile_integral(integral_data, fd, prefix, parameters)
+        if kernel is not None:
+            kernels.append(kernel)
         logger.info(GREEN % "compile_integral finished in %g seconds.", time.time() - start)
 
     logger.info(GREEN % "TSFC finished in %g seconds.", time.time() - cpu_time)
@@ -88,6 +88,7 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     mesh = integral_data.domain
     cell = integral_data.domain.ufl_cell()
     arguments = form_data.preprocessed_form.arguments()
+    kernel_name = "%s_%s_integral_%s" % (prefix, integral_type, integral_data.subdomain_id)
 
     fiat_cell = as_fiat_cell(cell)
     integration_dim, entity_ids = lower_integral_type(fiat_cell, integral_type)
@@ -141,6 +142,7 @@ def compile_integral(integral_data, form_data, prefix, parameters,
         mode = pick_mode(params["mode"])
 
         integrand = ufl_utils.replace_coordinates(integral.integrand(), coordinates)
+        integrand = ufl.replace(integrand, form_data.function_replace_map)
         integrand = ufl_utils.split_coefficients(integrand, builder.coefficient_split)
 
         # Check if the integral has a quad degree attached, otherwise use
@@ -192,15 +194,19 @@ def compile_integral(integral_data, form_data, prefix, parameters,
                            for idx in sorted(mode_irs)
                            for mode in iterkeys(mode_irs[idx])]))
     expressions = impero_utils.preprocess_gem(expressions, **options)
+    assignments = list(zip(return_variables, expressions))
 
     # Look for cell orientations in the IR
     if builder.needs_cell_orientations(expressions):
         builder.require_cell_orientations()
 
-    assignments = list(zip(return_variables, expressions))
-    impero_c = impero_utils.compile_gem(assignments,
-                                        tuple(quadrature_indices) + argument_indices,
-                                        remove_zeros=True)
+    # Construct ImperoC
+    index_ordering = tuple(quadrature_indices) + argument_indices
+    try:
+        impero_c = impero_utils.compile_gem(assignments, index_ordering, remove_zeros=True)
+    except impero_utils.NoopError:
+        # No operations, construct empty kernel
+        return builder.construct_empty_kernel(kernel_name)
 
     # Generate COFFEE
     index_names = []
@@ -213,9 +219,9 @@ def compile_integral(integral_data, form_data, prefix, parameters,
         for i, quadrature_index in enumerate(quadrature_indices):
             index_names.append((quadrature_index, 'ip_%d' % i))
 
+    # Construct kernel
     body = generate_coffee(impero_c, index_names, parameters["precision"], expressions, argument_indices)
 
-    kernel_name = "%s_%s_integral_%s" % (prefix, integral_type, integral_data.subdomain_id)
     temp = builder.construct_kernel(kernel_name, body)
     temp._ir = expressions
     temp._argument_ordering = argument_indices
@@ -351,6 +357,9 @@ def lower_integral_type(fiat_cell, integral_type):
     :arg fiat_cell: FIAT reference cell
     :arg integral_type: integral type (string)
     """
+    vert_facet_types = ['exterior_facet_vert', 'interior_facet_vert']
+    horiz_facet_types = ['exterior_facet_bottom', 'exterior_facet_top', 'interior_facet_horiz']
+
     dim = fiat_cell.get_dimension()
     if integral_type == 'cell':
         integration_dim = dim
@@ -358,17 +367,17 @@ def lower_integral_type(fiat_cell, integral_type):
         integration_dim = dim - 1
     elif integral_type == 'vertex':
         integration_dim = 0
-    else:
+    elif integral_type in vert_facet_types + horiz_facet_types:
         # Extrusion case
         basedim, extrdim = dim
         assert extrdim == 1
 
-        if integral_type in ['exterior_facet_vert', 'interior_facet_vert']:
+        if integral_type in vert_facet_types:
             integration_dim = (basedim - 1, 1)
-        elif integral_type in ['exterior_facet_bottom', 'exterior_facet_top', 'interior_facet_horiz']:
+        elif integral_type in horiz_facet_types:
             integration_dim = (basedim, 0)
-        else:
-            raise NotImplementedError("integral type %s not supported" % integral_type)
+    else:
+        raise NotImplementedError("integral type %s not supported" % integral_type)
 
     if integral_type == 'exterior_facet_bottom':
         entity_ids = [0]

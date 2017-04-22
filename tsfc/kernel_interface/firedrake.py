@@ -198,7 +198,7 @@ class KernelBuilder(KernelBuilderBase):
         # of reduced_coefficients the integral requires.
         for i in range(len(integral_data.enabled_coefficients)):
             if integral_data.enabled_coefficients[i]:
-                coefficient = form_data.reduced_coefficients[i]
+                coefficient = form_data.function_replace_map[form_data.reduced_coefficients[i]]
                 if type(coefficient.ufl_element()) == ufl_MixedElement:
                     split = [Coefficient(FunctionSpace(coefficient.ufl_domain(), element))
                              for element in coefficient.ufl_element().sub_elements()]
@@ -245,6 +245,14 @@ class KernelBuilder(KernelBuilderBase):
 
         self.kernel.ast = KernelBuilderBase.construct_kernel(self, name, args, body)
         return self.kernel
+
+    def construct_empty_kernel(self, name):
+        """Return None, since Firedrake needs no empty kernels.
+
+        :arg name: function name
+        :returns: None
+        """
+        return None
 
 
 def prepare_coefficient(coefficient, name, interior_facet=False):

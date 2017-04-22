@@ -286,12 +286,12 @@ class MathFunction(Scalar):
     __slots__ = ('name', 'children')
     __front__ = ('name',)
 
-    def __init__(self, name, argument):
+    def __init__(self, name, *args):
         assert isinstance(name, str)
-        assert not argument.shape
+        assert all(arg.shape == () for arg in args)
 
         self.name = name
-        self.children = argument,
+        self.children = args
 
 
 class MinValue(Scalar):
