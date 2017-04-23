@@ -96,19 +96,17 @@ def index_extent(factor, argument_indices):
     return numpy.product([i.extent for i in set(factor.free_indices).intersection(argument_indices)])
 
 
-def unique_sum_indices(monomial_sum):
-    """Create a generator of unique sum indices of monomials in a monomial sum.
-
+def group_monomials(monomial_sum):
+    """Group monomials in a monomial sum into sepearate monomial sums by their
+       sum indices
     :arg monomial_sum: :class:`MonomialSum` object
-
-    :returns: a generator of unique sum indices
+    :return: OrderedDict which maps fronzenset of sum indices to monomial sum
     """
-    seen = set()
+    groups = OrderedDict()
     for monomial in monomial_sum:
-        fs = frozenset(monomial.sum_indices)
-        if fs not in seen:
-            seen.add(fs)
-            yield monomial.sum_indices
+        key = frozenset(monomial.sum_indices)
+        groups.setdefault(key, MonomialSum()).add(*monomial)
+    return groups
 
 
 def monomial_sum_to_expression(monomial_sum):
@@ -120,33 +118,15 @@ def monomial_sum_to_expression(monomial_sum):
     :returns: GEM expression
     """
     indexsums = []  # The result is summation of indexsums
-    sum_indices_set_map = {}  # fronzenset(sum_indices) -> sum_indices
-    monomial_groups = OrderedDict()  # frozonset(sum_indices) -> [(atomics, rest)]
     # Group monomials according to their sum indices
-    for monomial in monomial_sum:
-        if not monomial.sum_indices:
-            # IndexSum(reduce(Product, atomics, rest), sum_indices)
-            product, _ = associate_product(monomial.atomics + (monomial.rest,))
-            indexsums.append(product)
-        else:
-            fs = frozenset(monomial.sum_indices)
-            sum_indices_set_map.setdefault(fs, monomial.sum_indices)
-            monomial_groups.setdefault(fs, []).append((monomial.atomics, monomial.rest))
-
+    groups = group_monomials(monomial_sum)
     # Create IndexSum's from each monomial group
-    for sum_indices_set, list_atomics_rest in iteritems(monomial_groups):
-        sum_indices = sum_indices_set_map[sum_indices_set]
-        all_atomics, all_rest = zip(*list_atomics_rest)
-        if len(all_atomics) == 1:
-            # Just one term, add to indexsums directly
-            atomics, = all_atomics
-            rest, = all_rest
-            product, _ = associate_product(atomics + (rest,))
-            indexsums.append(IndexSum(product, sum_indices))
-        else:
-            # Create one product for each monomial
-            products = [associate_product(atomics + (rest,)).expression for atomics, rest in zip(all_atomics, all_rest)]
-            indexsums.append(IndexSum(associate_sum(products).expression, sum_indices))
+    for ms in itervalues(groups):
+        # Pick sum indices from the first monomial
+        sum_indices = next(iter(ms)).sum_indices
+        # Create one product for each monomial
+        products = [associate_product(monomial.atomics + (monomial.rest,)).expression for monomial in ms]
+        indexsums.append(IndexSum(associate_sum(products).expression, sum_indices))
 
     return associate_sum(indexsums).expression
 
@@ -204,15 +184,13 @@ def find_optimal_atomics(monomial_sum, argument_indices):
     return tuple(optimal_atomics)
 
 
-def factorise_atomics(monomial_sum, sum_indices_frozen_set, optimal_atomics, argument_indices):
+def factorise_atomics(monomial_sum, optimal_atomics, argument_indices):
     """Group and factorise monomials using a list of atomics as common
     subexpressions. Create new monomials for each group and optimise them recursively.
 
     :arg monomial_sum: a :class:`MonomialSum` object, all of its monomials should
                        have the same sum indices
-    :arg sum_indices_frozen_set: frozen set of sum indices of the monomials in monomial_sum
     :arg optimal_atomics: list of tuples of atomics to be used as common subexpression
-                          and the frozenset of their sum indices
     :arg argument_indices: tuple of argument indices
 
     :returns: a factorised :class:`MonomialSum` object, or the original object
@@ -271,7 +249,9 @@ def factorise_atomics(monomial_sum, sum_indices_frozen_set, optimal_atomics, arg
                 new_atomics.append(new_node)
             else:
                 new_rest = new_node
-        new_monomial_sum.add(tuple(sum_indices_frozen_set), new_atomics, new_rest)
+        # Pick sum indices from the first monomial
+        sum_indices = monomials[0].sum_indices
+        new_monomial_sum.add(sum_indices, new_atomics, new_rest)
     return new_monomial_sum
 
 
@@ -285,21 +265,15 @@ def optimise_monomial_sum(monomial_sum, argument_indices):
     :returns: factorised `MonomialSum` object
     """
     # Group monomials by their sum indices
-    groups = OrderedDict()
-    for monomial in monomial_sum:
-        key = frozenset(monomial.sum_indices)
-        groups.setdefault(key, MonomialSum()).add(*monomial)
-
-    new_monomial_sum = MonomialSum()
-    for sum_indices_frozen_set, group_monomial_sum in iteritems(groups):
+    groups = group_monomials(monomial_sum)
+    new_monomial_sums = []
+    for ms in itervalues(groups):
         # Get the optimal atomics to factorise
-        optimal_atomics = find_optimal_atomics(group_monomial_sum, argument_indices)
+        optimal_atomics = find_optimal_atomics(ms, argument_indices)
         # Factorise with the optimal atomics and collect the results
-        for monomial in factorise_atomics(group_monomial_sum, sum_indices_frozen_set,
-                                          optimal_atomics, argument_indices):
-            new_monomial_sum.add(*monomial)
+        new_monomial_sums.append(factorise_atomics(ms, optimal_atomics, argument_indices))
 
-    return new_monomial_sum
+    return MonomialSum.sum(*new_monomial_sums)
 
 
 def count_flop(expression):
