@@ -192,7 +192,10 @@ def factorise_atomics(monomial_sum, optimal_atomics, argument_indices):
             return monomial_sum
         else:
             # input is list of monomials
-            return reduce(lambda (m1, m2): m1.add(*m2), monomial_sum)
+            new_monomial_sum = MonomialSum()
+            for m in monomial_sum:
+                new_monomial_sum.add(*m)
+            return new_monomial_sum
     new_monomial_sum = MonomialSum()
     # Group monomials with respect to each optimal atomic
     factor_group = OrderedDict()
