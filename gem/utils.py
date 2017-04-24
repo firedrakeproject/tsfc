@@ -1,4 +1,5 @@
 from __future__ import absolute_import, print_function, division
+from six import viewitems
 
 import collections
 
@@ -56,6 +57,22 @@ class OrderedSet(collections.MutableSet):
         if value in self._set:
             self._list.remove(value)
             self._set.discard(value)
+
+
+def groupby(iterable, key=None):
+    """Groups objects by their keys.
+
+    :arg iterable: an iterable
+    :arg key: key function
+
+    :returns: list of (group key, list of group members) pairs
+    """
+    if key is None:
+        key = lambda x: x
+    groups = collections.OrderedDict()
+    for elem in iterable:
+        groups.setdefault(key(elem), []).append(elem)
+    return viewitems(groups)
 
 
 def make_proxy_class(name, cls):
