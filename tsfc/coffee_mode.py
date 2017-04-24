@@ -7,8 +7,7 @@ from six import iteritems, iterkeys, itervalues
 from six.moves import filter
 from collections import OrderedDict
 from gem.optimise import (replace_division, make_sum, make_product,
-                          unroll_indexsum, replace_delta, group_by,
-                          remove_componenttensors)
+                          unroll_indexsum, replace_delta, remove_componenttensors)
 from gem.refactorise import (MonomialSum, ATOMIC, COMPOUND, OTHER,
                              collect_monomials)
 from gem.node import traversal
@@ -16,6 +15,7 @@ from gem.gem import (Product, Sum, Comparison, Conditional, Division, Indexed,
                      IndexSum, MathFunction, Power, Failure, one, index_sum,
                      Terminal, ListTensor, FlexiblyIndexed, LogicalAnd,
                      LogicalNot, LogicalOr)
+from gem.utils import groupby
 
 
 import tsfc.vanilla as vanilla
@@ -106,10 +106,9 @@ def monomial_sum_to_expression(monomial_sum):
     """
     indexsums = []  # The result is summation of indexsums
     # Group monomials according to their sum indices
-    key_func = lambda m: frozenset(m.sum_indices)
-    groups = group_by(key_func, monomial_sum)
+    groups = groupby(monomial_sum, key=lambda m: frozenset(m.sum_indices))
     # Create IndexSum's from each monomial group
-    for monomials in itervalues(groups):
+    for _, monomials in groups:
         # Pick sum indices from the first monomial
         sum_indices = monomials[0].sum_indices
         # Create one product for each monomial
@@ -261,10 +260,9 @@ def optimise_monomial_sum(monomial_sum, argument_indices):
     :returns: factorised `MonomialSum` object
     """
     # Group monomials by their sum indices
-    key_func = lambda m: frozenset(m.sum_indices)
-    groups = group_by(key_func, monomial_sum)
+    groups = groupby(monomial_sum, key=lambda m: frozenset(m.sum_indices))
     new_monomial_sums = []
-    for monomials in itervalues(groups):
+    for _, monomials in groups:
         # Get the optimal atomics to factorise
         optimal_atomics = find_optimal_atomics(monomials, argument_indices)
         # Factorise with the optimal atomics and collect the results

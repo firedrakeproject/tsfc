@@ -2,10 +2,9 @@
 expressions."""
 
 from __future__ import absolute_import, print_function, division
-from six import itervalues
 from six.moves import filter, map, zip
 
-from collections import OrderedDict, namedtuple
+from collections import namedtuple
 from functools import reduce
 from itertools import combinations, permutations
 
@@ -19,6 +18,7 @@ from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
                      Index, VariableIndex, Indexed, FlexiblyIndexed,
                      IndexSum, ComponentTensor, ListTensor, Delta,
                      partial_indexed, one)
+from gem.utils import groupby
 
 
 @singledispatch
@@ -345,8 +345,8 @@ def sum_factorise(sum_indices, factors):
         raise NotImplementedError("Too many indices for sum factorisation!")
 
     # Form groups by free indices
-    groups = group_by(lambda f: f.free_indices, factors)
-    groups = [reduce(Product, terms) for terms in itervalues(groups)]
+    groups = groupby(factors, key=lambda f: f.free_indices)
+    groups = [reduce(Product, terms) for _, terms in groups]
 
     # Sum factorisation
     expression = None
@@ -391,8 +391,8 @@ def make_sum(summands):
     :param summands: A iterable collection of summands
     :return: Sum expression which represents summation of summands
     """
-    groups = group_by(lambda f: f.free_indices, summands)
-    summands = [reduce(Sum, terms) for terms in itervalues(groups)]
+    groups = groupby(summands, key=lambda f: f.free_indices)
+    summands = [reduce(Sum, terms) for _, terms in groups]
     return associate(Sum, summands).expression
 
 
