@@ -186,10 +186,13 @@ def factorise_atomics(monomial_sum, optimal_atomics, argument_indices):
     :returns: a factorised :class:`MonomialSum` object, or the original object
     if no changes are made
     """
-    if not optimal_atomics:
-        return monomial_sum
-    if len(monomial_sum) < 2:
-        return monomial_sum
+    if not optimal_atomics or len(monomial_sum) < 2:
+        # Nothing to do
+        if isinstance(monomial_sum, MonomialSum):
+            return monomial_sum
+        else:
+            # input is list of monomials
+            return reduce(lambda (m1, m2): m1.add(*m2), monomial_sum)
     new_monomial_sum = MonomialSum()
     # Group monomials with respect to each optimal atomic
     factor_group = OrderedDict()
