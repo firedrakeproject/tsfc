@@ -35,6 +35,8 @@ literal_rounding.register(Node)(reuse_if_untouched)
 
 @literal_rounding.register(Literal)
 def literal_rounding_literal(node, self):
+    if not node.shape:
+        return node  # skip scalars
     table = node.array
     epsilon = self.epsilon
     # Mimic the rounding applied at COFFEE formatting, which in turn
