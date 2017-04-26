@@ -300,7 +300,7 @@ def sum_factorise(sum_indices, factors):
         # Empty product
         return one
 
-    if len(sum_indices) > 5:
+    if len(sum_indices) > 6:
         raise NotImplementedError("Too many indices for sum factorisation!")
 
     # Form groups by free indices
