@@ -269,13 +269,16 @@ class Power(Scalar):
         assert not base.shape
         assert not exponent.shape
 
-        # Zero folding
+        # Constant folding
         if isinstance(base, Zero):
             if isinstance(exponent, Zero):
                 raise ValueError("cannot solve 0^0")
             return Zero()
         elif isinstance(exponent, Zero):
             return one
+
+        if isinstance(base, Constant) and isinstance(exponent, Constant):
+            return Literal(base.value ** exponent.value)
 
         self = super(Power, cls).__new__(cls)
         self.children = base, exponent
