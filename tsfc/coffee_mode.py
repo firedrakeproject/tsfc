@@ -8,8 +8,7 @@ from six.moves import filter
 from collections import OrderedDict
 from gem.optimise import (replace_division, make_sum, make_product,
                           unroll_indexsum, replace_delta, remove_componenttensors)
-from gem.refactorise import (MonomialSum, ATOMIC, COMPOUND, OTHER,
-                             collect_monomials)
+from gem.refactorise import (Monomial, ATOMIC, COMPOUND, OTHER, collect_monomials)
 from gem.node import traversal
 from gem.gem import (Product, Sum, Comparison, Conditional, Division, Indexed,
                      IndexSum, MathFunction, Power, Failure, one, index_sum,
@@ -82,8 +81,7 @@ def optimise_expressions(expressions, argument_multiindices):
     # Apply argument factorisation unconditionally
     classifier = partial(classify, set(argument_indices))
     monomial_sums = collect_monomials(expressions, classifier)
-    monomial_sums = [optimise_monomial_sum(ms, argument_indices) for ms in monomial_sums]
-    return list(map(monomial_sum_to_expression, monomial_sums))
+    return [optimise_monomial_sum(ms, argument_indices) for ms in monomial_sums]
 
 
 def index_extent(factor, argument_indices):
@@ -100,7 +98,8 @@ def index_extent(factor, argument_indices):
 def monomial_sum_to_expression(monomial_sum):
     """Convert a monomial sum to a GEM expression.
 
-    :arg monomial_sum: :class:`MonomialSum` object
+    :arg monomial_sum: :class:`MonomialSum` object, or an iterable of
+                       :class:`Monomail`s
 
     :returns: GEM expression
     """
@@ -117,13 +116,12 @@ def monomial_sum_to_expression(monomial_sum):
     return make_sum(indexsums)
 
 
-def find_optimal_atomics(monomial_sum, argument_indices):
+def find_optimal_atomics(monomials, argument_indices):
     """Find optimal atomic common subexpressions, which produce least number of
     terms in the resultant IndexSum when factorised.
 
-    :arg monomial_sum: A :class:`MonomialSum` object, or a iterable collection
-                       of :class:`Monomial`s, all of the monomials should have
-                       the same sum indices
+    :arg monomials: An iterable of :class:`Monomial`s, all of which should have
+                    the same sum indices
     :arg argument_indices: tuple of argument indices
 
     :returns: list of atomic GEM expressions
@@ -132,7 +130,7 @@ def find_optimal_atomics(monomial_sum, argument_indices):
     atomic_index = OrderedDict()  # Atomic GEM node -> int
     connections = []
     # add connections (list of tuples, items in each tuple form a product)
-    for monomial in monomial_sum:
+    for monomial in monomials:
         connection = []
         for atomic in monomial.atomics:
             if atomic not in atomic_index:
@@ -172,31 +170,20 @@ def find_optimal_atomics(monomial_sum, argument_indices):
     return tuple(optimal_atomics)
 
 
-def factorise_atomics(monomial_sum, optimal_atomics, argument_indices):
+def factorise_atomics(monomials, optimal_atomics, argument_indices):
     """Group and factorise monomials using a list of atomics as common
     subexpressions. Create new monomials for each group and optimise them recursively.
 
-    :arg monomial_sum: A :class:`MonomialSum` object, or a iterable collection
-                       of monomials, all of the monomials should have the
-                       same sum indices
+    :arg monomials: an iterable of :class:`Monomial`s, all of which should have
+                    the same sum indices
     :arg optimal_atomics: list of tuples of atomics to be used as common subexpression
     :arg argument_indices: tuple of argument indices
 
-    :returns: a factorised :class:`MonomialSum` object, or the original object
-    if no changes are made. If original input is an iterable of :class`Monomial`s,
-    convert it to a :class:`MonomialSum` object.
+    :returns: an iterable of factorised :class:`Monomials`s, or the original
+              input if no changes are made.
     """
-    #TODO: decide on input/output choice, iterable of monomials or MonomialSum
-    if not optimal_atomics or len(monomial_sum) < 2:
-        # Nothing to do
-        if isinstance(monomial_sum, MonomialSum):
-            return monomial_sum
-        else:
-            # input is list of monomials
-            new_monomial_sum = MonomialSum()
-            for m in monomial_sum:
-                new_monomial_sum.add(*m)
-            return new_monomial_sum
+    if not optimal_atomics or len(monomials) < 2:
+        return monomials
 
     # Group monomials with respect to each optimal atomic
     def group_key(monomial):
@@ -204,65 +191,70 @@ def factorise_atomics(monomial_sum, optimal_atomics, argument_indices):
             if oa in monomial.atomics:
                 return oa
         assert False, "Expect at least one optimal atomic per monomial."
-    factor_group = groupby(monomial_sum, key=group_key)
+    factor_group = groupby(monomials, key=group_key)
 
     # We should not drop monomials
-    assert sum(len(ms) for _, ms in factor_group) == len(monomial_sum)
+    assert sum(len(ms) for _, ms in factor_group) == len(monomials)
 
-    sum_indices = next(iter(monomial_sum)).sum_indices
-    new_monomial_sum = MonomialSum()
+    sum_indices = next(iter(monomials)).sum_indices
+    new_monomials = []
     for oa, monomials in factor_group:
         # Create new MonomialSum for the factorised out terms
-        sub_monomial_sum = MonomialSum()
+        sub_monomials = []
         for monomial in monomials:
             atomics = list(monomial.atomics)
             atomics.remove(oa)  # remove common factor
-            sub_monomial_sum.add((), atomics, monomial.rest)
-        sub_monomial_sum = optimise_monomials(sub_monomial_sum, argument_indices)
-        assert len(sub_monomial_sum) > 0
-        if len(sub_monomial_sum) == 1:
+            sub_monomials.append(Monomial((), tuple(atomics), monomial.rest))
+        sub_monomials = optimise_monomials(sub_monomials, argument_indices)
+        assert len(sub_monomials) > 0
+        if len(sub_monomials) == 1:
             # result is a product, add back the common atomics then add to
             # new MonomialSum directly
-            sub_monomial, = sub_monomial_sum
-            new_monomial_sum.add(sum_indices, sub_monomial.atomics + (oa,), sub_monomial.rest)
+            sub_monomial, = sub_monomials
+            new_monomials.append(
+                Monomial(sum_indices, sub_monomial.atomics + (oa,), sub_monomial.rest))
         else:
             # result is a sum, we need to create a new node
-            node = monomial_sum_to_expression(sub_monomial_sum)
+            node = monomial_sum_to_expression(sub_monomials)
             if set(argument_indices) & set(node.free_indices):
-                new_monomial_sum.add(sum_indices, (oa, node), one)
+                new_monomials.append(Monomial(sum_indices, (oa, node), one))
             else:
-                new_monomial_sum.add(sum_indices, (oa, ), node)
-    return new_monomial_sum
+                new_monomials.append(Monomial(sum_indices, (oa, ), node))
+    return new_monomials
 
 
 def optimise_monomial_sum(monomial_sum, argument_indices):
     """Choose optimal common atomic subexpressions and factorise a
-    :class:`MonomialSum` object.
+    :class:`MonomialSum` object to create a GEM expression.
 
     :arg monomial_sum: a :class:`MonomialSum` object
     :arg argument_indices: tuple of argument indices
 
-    :returns: factorised `MonomialSum` object
+    :returns: factorised GEM expression
     """
     # Group monomials by their sum indices
     groups = groupby(monomial_sum, key=lambda m: frozenset(m.sum_indices))
-    new_monomial_sums = []
+    new_monomials = []
     for _, monomials in groups:
-        new_monomial_sums.append(optimise_monomials(monomials, argument_indices))
-
-    return MonomialSum.sum(*new_monomial_sums)
+        new_monomials.extend(optimise_monomials(monomials, argument_indices))
+    return monomial_sum_to_expression(new_monomials)
 
 
 def optimise_monomials(monomials, argument_indices):
     """Choose optimal common atomic subexpressions and factorise an iterable
     of monomials.
 
-    :arg monomials: an iterable of monomials, all of which should have the same
-    sum indices
+    :arg monomials: an iterable of :class:`Monomial`s, all of which should have
+                    the same sum indices
     :arg argument_indices: tuple of argument indices
 
-    :returns: factorised `MonomialSum` object
+    :returns: an iterable of factorised :class:`Monomials`s
     """
+    # Check all monomials have same sum indices
+    sum_indices_frozen_set = frozenset(next(iter(monomials)).sum_indices)
+    if any([frozenset(m.sum_indices) != sum_indices_frozen_set for m in monomials]):
+        assert False, "All monomials required to have same sum indices for factorisation"
+
     # Get the optimal atomics to factorise
     optimal_atomics = find_optimal_atomics(monomials, argument_indices)
     # Factorise with the optimal atomics and collect the results
