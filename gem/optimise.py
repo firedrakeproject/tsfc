@@ -384,11 +384,10 @@ def sum_factorise(sum_indices, factors):
 
 
 def make_sum(summands):
-    """
-    Create a Sum from collection of summands. The summands are grouped by their
-    free indices first. Associativity rule is applied to construct an
+    """Create a Sum from collection of summands. The summands are grouped by
+    their free indices first. Associativity rule is applied to construct an
     operation-minimal summation tree.
-    :param summands: A iterable collection of summands
+    :arg summands: A iterable collection of summands
     :return: Sum expression which represents summation of summands
     """
     groups = groupby(summands, key=lambda f: f.free_indices)
@@ -397,6 +396,14 @@ def make_sum(summands):
 
 
 def make_product(factors, sum_indices=()):
+    """Create a Product from collection of factors. Calls sum_factorise to
+    group factors based on their free indices and apply associativity rule to
+    construct an operation-minimal product tree.
+
+    :arg factors: A iterable collection of factors
+    :arg sum_indices: sum indices of the product
+    :return: Product expression which represents product of factors
+    """
     return sum_factorise(sum_indices, factors)
 
 

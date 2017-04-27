@@ -8,7 +8,7 @@ from six.moves import filter
 from collections import OrderedDict
 from gem.optimise import (replace_division, make_sum, make_product,
                           unroll_indexsum, replace_delta, remove_componenttensors)
-from gem.refactorise import (Monomial, ATOMIC, COMPOUND, OTHER, collect_monomials)
+from gem.refactorise import Monomial, ATOMIC, COMPOUND, OTHER, collect_monomials
 from gem.node import traversal
 from gem.gem import (Product, Sum, Comparison, Conditional, Division, Indexed,
                      IndexSum, MathFunction, Power, Failure, one, index_sum,
@@ -98,8 +98,7 @@ def index_extent(factor, argument_indices):
 def monomial_sum_to_expression(monomial_sum):
     """Convert a monomial sum to a GEM expression.
 
-    :arg monomial_sum: :class:`MonomialSum` object, or an iterable of
-                       :class:`Monomail`s
+    :arg monomial_sum: an iterable of :class:`Monomial`s
 
     :returns: GEM expression
     """
@@ -251,9 +250,8 @@ def optimise_monomials(monomials, argument_indices):
     :returns: an iterable of factorised :class:`Monomials`s
     """
     # Check all monomials have same sum indices
-    sum_indices_frozen_set = frozenset(next(iter(monomials)).sum_indices)
-    if any([frozenset(m.sum_indices) != sum_indices_frozen_set for m in monomials]):
-        assert False, "All monomials required to have same sum indices for factorisation"
+    assert len(set(frozenset(m.sum_indices) for m in monomials)) <= 1,\
+        "All monomials required to have same sum indices for factorisation"
 
     # Get the optimal atomics to factorise
     optimal_atomics = find_optimal_atomics(monomials, argument_indices)
