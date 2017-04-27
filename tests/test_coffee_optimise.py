@@ -94,15 +94,16 @@ def test_loop_optimise():
     assert count_flop(result) == 320
 
     # Test that consts are factorised
-    # Z*A1i*Bj*Ek + Z*A2i*Bj*Ek + A3i*Bj*Ek + Z*A1i*Bj =>
-    # Bj*(Ek*(Z*A1i + Z*A2i) + A3i) + Z*A1i)
+    # Z*A1i*Bj*Ek + Z*A2i*Bj*Ek + A3i*Bj*Ek + Z*A1i*Bj*Fk =>
+    # Bj*(Ek*(Z*A1i + Z*A2i) + A3i) + Z*A1i*Fk)
     # Note, constant factorisation (Z in this case) not implemented yet
 
     expr = Sum(Sum(Sum(Product(Z, Product(A1i, Product(Bj, Ek))),
                        Product(Z, Product(A2i, Product(Bj, Ek)))),
-                   Product(A3i, Product(Bj, Ek))), Product(Z, Product(A1i, Bj)))
+                   Product(A3i, Product(Bj, Ek))),
+               Product(Z, Product(A1i, Product(Bj, Fk))))
     result, = optimise_expressions([expr], ((j,), (k,)))
-    assert count_flop(result) == 2480
+    assert count_flop(result) == 2680
 
 
 if __name__ == "__main__":
