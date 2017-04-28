@@ -5,15 +5,12 @@ import itertools
 from functools import partial
 from six import iteritems, iterkeys
 from six.moves import filter
-from collections import OrderedDict
+from collections import defaultdict
 from gem.optimise import (replace_division, make_sum, make_product,
                           unroll_indexsum, replace_delta, remove_componenttensors)
 from gem.refactorise import Monomial, ATOMIC, COMPOUND, OTHER, collect_monomials
 from gem.node import traversal
-from gem.gem import (Product, Sum, Comparison, Conditional, Division, Indexed,
-                     IndexSum, MathFunction, Power, Failure, one, index_sum,
-                     Terminal, ListTensor, FlexiblyIndexed, LogicalAnd,
-                     LogicalNot, LogicalOr)
+from gem.gem import Conditional, Indexed, IndexSum, Failure, one, index_sum
 from gem.utils import groupby
 
 
@@ -60,7 +57,7 @@ def optimise_expressions(expressions, argument_multiindices):
 
     :returns: list of optimised GEM DAGs
     """
-    # Propagate Failure nodes
+    # No optimisation for Failure node
     for n in traversal(expressions):
         if isinstance(n, Failure):
             return expressions
@@ -107,9 +104,7 @@ def monomial_sum_to_expression(monomial_sum):
     groups = groupby(monomial_sum, key=lambda m: frozenset(m.sum_indices))
     # Create IndexSum's from each monomial group
     for _, monomials in groups:
-        # Pick sum indices from the first monomial
         sum_indices = monomials[0].sum_indices
-        # Create one product for each monomial
         products = [make_product(monomial.atomics + (monomial.rest,)) for monomial in monomials]
         indexsums.append(IndexSum(make_sum(products), sum_indices))
     return make_sum(indexsums)
@@ -125,23 +120,14 @@ def find_optimal_atomics(monomials, argument_indices):
 
     :returns: list of atomic GEM expressions
     """
-    index = itertools.count()  # counter for variables used in ILP
-    atomic_index = OrderedDict()  # Atomic GEM node -> int
+    atomic_index = defaultdict(partial(next, itertools.count()))  # atomic -> int
     connections = []
     # add connections (list of tuples, items in each tuple form a product)
     for monomial in monomials:
-        connection = []
-        for atomic in monomial.atomics:
-            if atomic not in atomic_index:
-                atomic_index[atomic] = next(index)
-            connection.append(atomic_index[atomic])
-        connections.append(tuple(connection))
+        connections.append(tuple(map(lambda a: atomic_index[a], monomial.atomics)))
 
-    if len(atomic_index) == 0:
-        return ()
-    if len(atomic_index) == 1:
-        optimal_atomics, = iterkeys(atomic_index)
-        return (optimal_atomics, )
+    if len(atomic_index) <= 1:
+        return tuple(iterkeys(atomic_index))  # also includes the case of no atomics
 
     # set up the ILP
     import pulp as ilp
@@ -150,8 +136,8 @@ def find_optimal_atomics(monomials, argument_indices):
 
     # Objective function
     # Minimise number of factors to pull. If same number, favour factor with larger extent
-    big = 1e20  # some arbitrary big number
-    ilp_prob += ilp.lpSum(ilp_var[index] * (big - index_extent(atomic, argument_indices))
+    penalty = 2 * max(index_extent(atomic, argument_indices) for atomic in iterkeys(atomic_index)) * len(atomic_index)
+    ilp_prob += ilp.lpSum(ilp_var[index] * (penalty - index_extent(atomic, argument_indices))
                           for atomic, index in iteritems(atomic_index))
 
     # constraints
@@ -165,8 +151,7 @@ def find_optimal_atomics(monomials, argument_indices):
     def optimal(atomic):
         return ilp_var[atomic_index[atomic]].value() == 1
 
-    optimal_atomics = filter(optimal, iterkeys(atomic_index))
-    return tuple(optimal_atomics)
+    return tuple(sorted(filter(optimal, iterkeys(atomic_index)), key=atomic_index.get))
 
 
 def factorise_atomics(monomials, optimal_atomics, argument_indices):
@@ -178,8 +163,7 @@ def factorise_atomics(monomials, optimal_atomics, argument_indices):
     :arg optimal_atomics: list of tuples of atomics to be used as common subexpression
     :arg argument_indices: tuple of argument indices
 
-    :returns: an iterable of factorised :class:`Monomials`s, or the original
-              input if no changes are made.
+    :returns: an iterable of factorised :class:`Monomials`s
     """
     if not optimal_atomics or len(monomials) < 2:
         return monomials
@@ -204,17 +188,24 @@ def factorise_atomics(monomials, optimal_atomics, argument_indices):
             atomics = list(monomial.atomics)
             atomics.remove(oa)  # remove common factor
             sub_monomials.append(Monomial((), tuple(atomics), monomial.rest))
+        # Continue to factorise the remaining expression
         sub_monomials = optimise_monomials(sub_monomials, argument_indices)
-        assert len(sub_monomials) > 0
         if len(sub_monomials) == 1:
-            # result is a product, add back the common atomics then add to
-            # new MonomialSum directly
+            # Factorised part is a product, we add back the common atomics then
+            # add to new MonomialSum directly rather than forming a product node
+            # Retaining the monomial structure enables applying associativity
+            # when forming GEM nodes later.
             sub_monomial, = sub_monomials
             new_monomials.append(
-                Monomial(sum_indices, sub_monomial.atomics + (oa,), sub_monomial.rest))
+                Monomial(sum_indices, (oa,) + sub_monomial.atomics, sub_monomial.rest))
         else:
-            # result is a sum, we need to create a new node
+            # Factorised part is a summation, we need to create a new GEM node
+            # and multiply with the common factor
             node = monomial_sum_to_expression(sub_monomials)
+            # If the free indices of the new node intersect with argument indices,
+            # add to the new monomial as `atomic`, otherwise add as `rest`.
+            # Note: we might want to continue to factorise with the new atomics
+            # by running optimise_monoials twice.
             if set(argument_indices) & set(node.free_indices):
                 new_monomials.append(Monomial(sum_indices, (oa, node), one))
             else:
@@ -231,7 +222,6 @@ def optimise_monomial_sum(monomial_sum, argument_indices):
 
     :returns: factorised GEM expression
     """
-    # Group monomials by their sum indices
     groups = groupby(monomial_sum, key=lambda m: frozenset(m.sum_indices))
     new_monomials = []
     for _, monomials in groups:
@@ -249,34 +239,8 @@ def optimise_monomials(monomials, argument_indices):
 
     :returns: an iterable of factorised :class:`Monomials`s
     """
-    # Check all monomials have same sum indices
     assert len(set(frozenset(m.sum_indices) for m in monomials)) <= 1,\
         "All monomials required to have same sum indices for factorisation"
 
-    # Get the optimal atomics to factorise
     optimal_atomics = find_optimal_atomics(monomials, argument_indices)
-    # Factorise with the optimal atomics and collect the results
     return factorise_atomics(monomials, optimal_atomics, argument_indices)
-
-
-def count_flop(expression):
-    """Count the total floating point operations required to compute a GEM node.
-    This function assumes that all subnodes that occur more than once induce a
-    temporary, and are therefore only computed once.
-
-    :arg expression: GEM expression
-
-    :returns: total number of FLOPs to compute the GEM expression
-    """
-    flop = 0
-    for node in traversal([expression]):
-        if isinstance(node, (Sum, Product, Division, MathFunction, Comparison, Power)):
-            flop += numpy.prod([idx.extent for idx in node.free_indices])
-        elif isinstance(node, IndexSum):
-            flop += numpy.prod([idx.extent for idx in node.multiindex + node.free_indices])
-        elif isinstance(node, (Terminal, Indexed, ListTensor, FlexiblyIndexed,
-                               LogicalOr, LogicalNot, LogicalAnd, Conditional)):
-            pass
-        else:
-            raise NotImplementedError("Do not know how to count flops of type {0}".format(type(node)))
-    return flop

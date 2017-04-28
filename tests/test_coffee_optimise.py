@@ -3,8 +3,8 @@ from __future__ import absolute_import, print_function, division
 import pytest
 
 from gem.gem import Index, Indexed, Product, Variable, Division, Literal, Sum
-from gem.optimise import replace_division, reassociate_product
-from tsfc.coffee_mode import optimise_expressions, count_flop
+from gem.optimise import replace_division
+from tsfc.coffee_mode import optimise_expressions
 
 
 def test_replace_div():
@@ -13,43 +13,10 @@ def test_replace_div():
     B = Variable('B', (6,))
     Bi = Indexed(B, (i,))
     d = Division(Bi, A)
-    result = replace_division([d])[0]
+    result, = replace_division([d])
+    expected = Product(Bi, Division(Literal(1.0), A))
 
-    assert isinstance(result, Product)
-    assert isinstance(result.children[1], Division)
-
-
-def test_reassociate_product():
-    """Test recursive reassociation of products according to the rank of the
-    factors. For example: ::
-
-        C[i,j]*(D[i,j,k] + Q[i,j]*t*P[i])*A*B[i]
-
-    becomes: ::
-
-        (D[i,j,k] + Q[i,j]*(t*P[i]))*(C[i,j]*(A*B[i]))
-
-    """
-    i = Index()
-    j = Index()
-    k = Index()
-    A = Variable('A', ())
-    Bi = Indexed(Variable('B', (6,)), (i,))
-    Cij = Indexed(Variable('C', (6, 6)), (i, j))
-    Dijk = Indexed(Variable('D', (6, 6, 6)), (i, j, k))
-    Pi = Indexed(Variable('P', (6,)), (i,))
-    Qij = Indexed(Variable('Q', (6, 6)), (i, j))
-    t = Literal(8)
-    p = Product(Product(Product(Cij, Sum(Dijk, Product(Product(Qij, t), Pi))), A), Bi)
-    result = reassociate_product([p])[0]
-    # D[i,j,k] + t*P[i]*Q[i,j]
-    assert isinstance(result.children[0], Sum)
-    # C[i,j]
-    assert result.children[1].children[0] == Cij
-    # A * B[i]
-    assert result.children[1].children[1] == Product(A, Bi)
-    # t * P[i]
-    assert result.children[0].children[1].children[1] == Product(t, Pi)
+    assert result == expected
 
 
 def test_loop_optimise():
@@ -80,30 +47,31 @@ def test_loop_optimise():
 
     Z = Variable('z', ())
 
-    # Test Bj*Ek + Bj*Fk => Bj*(Ek + Fk)
+    # Bj*Ek + Bj*Fk => (Ek + Fk)*Bj
     expr = Sum(Product(Bj, Ek), Product(Bj, Fk))
     result, = optimise_expressions([expr], ((j,), (k,)))
-    assert count_flop(result) == 110
+    expected = Product(Sum(Ek, Fk), Bj)
+    assert result == expected
 
-    # Test that all common factors from optimal factors are applied
     # Bj*Ek + Bj*Fk + Bj*Gk + Cj*Ek + Cj*Fk =>
-    # Bj*(Ek + Fk + Gk) + Cj*(Ek+Fk)
+    # (Ek + Fk + Gk)*Bj + (Ek+Fk)*Cj
     expr = Sum(Sum(Sum(Sum(Product(Bj, Ek), Product(Bj, Fk)), Product(Bj, Gk)),
                    Product(Cj, Ek)), Product(Cj, Fk))
     result, = optimise_expressions([expr], ((j,), (k,)))
-    assert count_flop(result) == 320
+    expected = Sum(Product(Sum(Sum(Ek, Fk), Gk), Bj), Product(Sum(Ek, Fk), Cj))
+    assert result == expected
 
-    # Test that consts are factorised
     # Z*A1i*Bj*Ek + Z*A2i*Bj*Ek + A3i*Bj*Ek + Z*A1i*Bj*Fk =>
     # Bj*(Ek*(Z*A1i + Z*A2i) + A3i) + Z*A1i*Fk)
-    # Note, constant factorisation (Z in this case) not implemented yet
 
     expr = Sum(Sum(Sum(Product(Z, Product(A1i, Product(Bj, Ek))),
                        Product(Z, Product(A2i, Product(Bj, Ek)))),
                    Product(A3i, Product(Bj, Ek))),
                Product(Z, Product(A1i, Product(Bj, Fk))))
     result, = optimise_expressions([expr], ((j,), (k,)))
-    assert count_flop(result) == 2680
+    expected = Product(Sum(Product(Ek, Sum(Sum(Product(Z, A1i), Product(Z, A2i)), A3i)),
+                           Product(Fk, Product(Z, A1i))), Bj)
+    assert result == expected
 
 
 if __name__ == "__main__":

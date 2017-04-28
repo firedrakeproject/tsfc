@@ -12,7 +12,7 @@ import numpy
 from singledispatch import singledispatch
 
 from gem.node import (Memoizer, MemoizerArg, reuse_if_untouched,
-                      reuse_if_untouched_arg, collect_refcount)
+                      reuse_if_untouched_arg)
 from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
                      Product, Sum, Comparison, Conditional, Division,
                      Index, VariableIndex, Indexed, FlexiblyIndexed,
@@ -293,43 +293,6 @@ def associate(gem_type, operands):
     return ExpressionAndFlopCount(node, flops)
 
 
-@singledispatch
-def _reassociate_product(node, self):
-    raise AssertionError("cannot handle type %s" % type(node))
-
-
-_reassociate_product.register(Node)(reuse_if_untouched)
-
-
-@_reassociate_product.register(Product)
-def _reassociate_product_prod(node, self):
-    # collect all factors of product
-    _, factors = traverse_product(node, self.stop_at)
-    factors = list(map(self, factors))
-    return make_product(factors)
-
-
-def reassociate_product(expressions):
-    """Refactor a Product expression recursively by calling associate_product().
-
-    :arg expressions: list of GEM expressions
-
-    :returns: list of GEM expressions with Product nodes reassociated
-    """
-    refcount = collect_refcount(expressions)
-
-    # Do not break down common subexpression
-    def stop_at(node):
-        if not isinstance(node, Product):
-            return True
-        if refcount[node] > 1:
-            return True
-        return False
-    mapper = Memoizer(_reassociate_product)
-    mapper.stop_at = stop_at
-    return list(map(mapper, expressions))
-
-
 def sum_factorise(sum_indices, factors):
     """Optimise a tensor product through sum factorisation.
 
@@ -396,9 +359,9 @@ def make_sum(summands):
 
 
 def make_product(factors, sum_indices=()):
-    """Create a Product from collection of factors. Calls sum_factorise to
-    group factors based on their free indices and apply associativity rule to
-    construct an operation-minimal product tree.
+    """Create a Product from collection of factors. Uses :func:`sum_factorise`
+    to group factors based on their free indices and apply associativity rule
+    to construct an operation-minimal product tree.
 
     :arg factors: A iterable collection of factors
     :arg sum_indices: sum indices of the product
