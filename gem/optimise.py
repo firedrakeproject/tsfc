@@ -4,21 +4,19 @@ expressions."""
 from __future__ import absolute_import, print_function, division
 from six.moves import filter, map, zip
 
-from collections import namedtuple
 from functools import reduce
 from itertools import combinations, permutations
 
 import numpy
 from singledispatch import singledispatch
 
-from gem.node import (Memoizer, MemoizerArg, reuse_if_untouched,
-                      reuse_if_untouched_arg)
+from gem.utils import groupby
+from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
 from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
                      Product, Sum, Comparison, Conditional, Division,
                      Index, VariableIndex, Indexed, FlexiblyIndexed,
                      IndexSum, ComponentTensor, ListTensor, Delta,
                      partial_indexed, one)
-from gem.utils import groupby
 
 
 @singledispatch
@@ -59,7 +57,7 @@ def ffc_rounding(expression, epsilon):
 
 
 @singledispatch
-def _replace_div(node, self):
+def _replace_division(node, self):
     """Replace division with multiplication
 
     :param node: root of expression
@@ -68,18 +66,18 @@ def _replace_div(node, self):
     raise AssertionError("cannot handle type %s" % type(node))
 
 
-_replace_div.register(Node)(reuse_if_untouched)
+_replace_division.register(Node)(reuse_if_untouched)
 
 
-@_replace_div.register(Division)
-def _replace_div_division(node, self):
+@_replace_division.register(Division)
+def _replace_division_division(node, self):
     a, b = node.children
     return Product(self(a), Division(one, self(b)))
 
 
 def replace_division(expressions):
     """Replace divisions with multiplications in expressions"""
-    mapper = Memoizer(_replace_div)
+    mapper = Memoizer(_replace_division)
     return list(map(mapper, expressions))
 
 
@@ -255,26 +253,22 @@ def delta_elimination(sum_indices, factors):
     return sum_indices, factors
 
 
-ExpressionAndFlopCount = namedtuple('ExpressionAndFlopCount', ['expression', 'flops'])
+def associate(operator, operands):
+    """Apply associativity rules to construct an operation-minimal expression tree.
 
+    For best performance give factors that have different set of free indices.
 
-def associate(gem_type, operands):
-    """Apply associativity rules to associative operations (e.g. summation and
-    product) to construct an operation-minimal operation tree.
-
-    :arg gem_type: GEM class which is associative, e.g. Sum, Product
+    :arg operator: associative binary operator
     :arg operands: list of operands
 
-    :returns: named tuple ExpressionAndFlopCount, with expression holds the
-              resultant expression, and flops holds its number of flops
+    :returns: (reduced expression, # of floating-point operations)
     """
-
     if len(operands) > 32:
         # O(N^3) algorithm
         raise NotImplementedError("Not expected such a complicated expression!")
 
     def count(pair):
-        """Operation count to operate on a pair of GEM expressions"""
+        """Operation count to reduce a pair of GEM expressions"""
         a, b = pair
         extents = [i.extent for i in set().union(a.free_indices, b.free_indices)]
         return numpy.prod(extents, dtype=int)
@@ -282,15 +276,15 @@ def associate(gem_type, operands):
     flops = 0
     while len(operands) > 1:
         # Greedy algorithm: choose a pair of operands that are the
-        # cheapest to do.
+        # cheapest to reduce.
         a, b = min(combinations(operands, 2), key=count)
         flops += count((a, b))
         # Remove chosen factors, append their product
         operands.remove(a)
         operands.remove(b)
-        operands.append(gem_type(a, b))
-    node, = operands
-    return ExpressionAndFlopCount(node, flops)
+        operands.append(operator(a, b))
+    result, = operands
+    return result, flops
 
 
 def sum_factorise(sum_indices, factors):
@@ -347,26 +341,15 @@ def sum_factorise(sum_indices, factors):
 
 
 def make_sum(summands):
-    """Create a Sum from collection of summands. The summands are grouped by
-    their free indices first. Associativity rule is applied to construct an
-    operation-minimal summation tree.
-    :arg summands: A iterable collection of summands
-    :return: Sum expression which represents summation of summands
-    """
+    """Constructs an operation-minimal sum of GEM expressions."""
     groups = groupby(summands, key=lambda f: f.free_indices)
     summands = [reduce(Sum, terms) for _, terms in groups]
-    return associate(Sum, summands).expression
+    result, flops = associate(Sum, summands)
+    return result
 
 
 def make_product(factors, sum_indices=()):
-    """Create a Product from collection of factors. Uses :func:`sum_factorise`
-    to group factors based on their free indices and apply associativity rule
-    to construct an operation-minimal product tree.
-
-    :arg factors: A iterable collection of factors
-    :arg sum_indices: sum indices of the product
-    :return: Product expression which represents product of factors
-    """
+    """Constructs an operation-minimal (tensor) product of GEM expressions."""
     return sum_factorise(sum_indices, factors)
 
 
