@@ -57,7 +57,7 @@ def optimise_expressions(expressions, argument_multiindices):
 
     :returns: list of optimised GEM DAGs
     """
-    # No optimisation for Failure node
+    # Skip optimisation for if Failure node is present
     for n in traversal(expressions):
         if isinstance(n, Failure):
             return expressions
@@ -127,7 +127,7 @@ def find_optimal_atomics(monomials, argument_indices):
         connections.append(tuple(map(lambda a: atomic_index[a], monomial.atomics)))
 
     if len(atomic_index) <= 1:
-        return tuple(iterkeys(atomic_index))  # also includes the case of no atomics
+        return tuple(iterkeys(atomic_index))
 
     # set up the ILP
     import pulp as ilp
@@ -136,7 +136,7 @@ def find_optimal_atomics(monomials, argument_indices):
 
     # Objective function
     # Minimise number of factors to pull. If same number, favour factor with larger extent
-    penalty = 2 * max(index_extent(atomic, argument_indices) for atomic in iterkeys(atomic_index)) * len(atomic_index)
+    penalty = 2 * max(index_extent(atomic, argument_indices) for atomic in atomic_index) * len(atomic_index)
     ilp_prob += ilp.lpSum(ilp_var[index] * (penalty - index_extent(atomic, argument_indices))
                           for atomic, index in iteritems(atomic_index))
 
@@ -151,7 +151,7 @@ def find_optimal_atomics(monomials, argument_indices):
     def optimal(atomic):
         return ilp_var[atomic_index[atomic]].value() == 1
 
-    return tuple(sorted(filter(optimal, iterkeys(atomic_index)), key=atomic_index.get))
+    return tuple(sorted(filter(optimal, atomic_index), key=atomic_index.get))
 
 
 def factorise_atomics(monomials, optimal_atomics, argument_indices):
@@ -163,9 +163,9 @@ def factorise_atomics(monomials, optimal_atomics, argument_indices):
     :arg optimal_atomics: list of tuples of atomics to be used as common subexpression
     :arg argument_indices: tuple of argument indices
 
-    :returns: an iterable of factorised :class:`Monomials`s
+    :returns: an iterable of :class:`Monomials`s after factorisation
     """
-    if not optimal_atomics or len(monomials) < 2:
+    if not optimal_atomics or len(monomials) <= 1:
         return monomials
 
     # Group monomials with respect to each optimal atomic
