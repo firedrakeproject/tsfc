@@ -61,6 +61,9 @@ class MonomialSum(object):
         #     (ordered sum_indices, ordered atomics)
         self.ordering = OrderedDict()
 
+    def __len__(self):
+        return len(self.ordering)
+
     def add(self, sum_indices, atomics, rest):
         """Updates the :py:class:`MonomialSum` adding a new monomial."""
         sum_indices = tuple(sum_indices)
