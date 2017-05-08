@@ -2,16 +2,15 @@
 expressions."""
 
 from __future__ import absolute_import, print_function, division
-from six import itervalues
 from six.moves import filter, map, zip
 
-from collections import OrderedDict
 from functools import reduce
 from itertools import combinations, permutations
 
 import numpy
 from singledispatch import singledispatch
 
+from gem.utils import groupby
 from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
 from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
                      Product, Sum, Comparison, Conditional, Division,
@@ -55,6 +54,31 @@ def ffc_rounding(expression, epsilon):
     mapper = Memoizer(literal_rounding)
     mapper.epsilon = epsilon
     return mapper(expression)
+
+
+@singledispatch
+def _replace_division(node, self):
+    """Replace division with multiplication
+
+    :param node: root of expression
+    :param self: function for recursive calls
+    """
+    raise AssertionError("cannot handle type %s" % type(node))
+
+
+_replace_division.register(Node)(reuse_if_untouched)
+
+
+@_replace_division.register(Division)
+def _replace_division_division(node, self):
+    a, b = node.children
+    return Product(self(a), Division(one, self(b)))
+
+
+def replace_division(expressions):
+    """Replace divisions with multiplications in expressions"""
+    mapper = Memoizer(_replace_division)
+    return list(map(mapper, expressions))
 
 
 @singledispatch
@@ -229,34 +253,38 @@ def delta_elimination(sum_indices, factors):
     return sum_indices, factors
 
 
-def associate_product(factors):
-    """Apply associativity rules to construct an operation-minimal product tree.
+def associate(operator, operands):
+    """Apply associativity rules to construct an operation-minimal expression tree.
 
     For best performance give factors that have different set of free indices.
+
+    :arg operator: associative binary operator
+    :arg operands: list of operands
+
+    :returns: (reduced expression, # of floating-point operations)
     """
-    if len(factors) > 32:
+    if len(operands) > 32:
         # O(N^3) algorithm
         raise NotImplementedError("Not expected such a complicated expression!")
 
     def count(pair):
-        """Operation count to multiply a pair of GEM expressions"""
+        """Operation count to reduce a pair of GEM expressions"""
         a, b = pair
         extents = [i.extent for i in set().union(a.free_indices, b.free_indices)]
         return numpy.prod(extents, dtype=int)
 
-    factors = list(factors)  # copy for in-place modifications
     flops = 0
-    while len(factors) > 1:
-        # Greedy algorithm: choose a pair of factors that are the
-        # cheapest to multiply.
-        a, b = min(combinations(factors, 2), key=count)
+    while len(operands) > 1:
+        # Greedy algorithm: choose a pair of operands that are the
+        # cheapest to reduce.
+        a, b = min(combinations(operands, 2), key=count)
         flops += count((a, b))
         # Remove chosen factors, append their product
-        factors.remove(a)
-        factors.remove(b)
-        factors.append(Product(a, b))
-    product, = factors
-    return product, flops
+        operands.remove(a)
+        operands.remove(b)
+        operands.append(operator(a, b))
+    result, = operands
+    return result, flops
 
 
 def sum_factorise(sum_indices, factors):
@@ -274,10 +302,8 @@ def sum_factorise(sum_indices, factors):
         raise NotImplementedError("Too many indices for sum factorisation!")
 
     # Form groups by free indices
-    groups = OrderedDict()
-    for factor in factors:
-        groups.setdefault(factor.free_indices, []).append(factor)
-    groups = [reduce(Product, terms) for terms in itervalues(groups)]
+    groups = groupby(factors, key=lambda f: f.free_indices)
+    groups = [reduce(Product, terms) for _, terms in groups]
 
     # Sum factorisation
     expression = None
@@ -294,7 +320,7 @@ def sum_factorise(sum_indices, factors):
             deferred = [t for t in terms if sum_index not in t.free_indices]
 
             # Optimise associativity
-            product, flops_ = associate_product(contract)
+            product, flops_ = associate(Product, contract)
             term = IndexSum(product, (sum_index,))
             flops += flops_ + numpy.prod([i.extent for i in product.free_indices], dtype=int)
 
@@ -304,7 +330,7 @@ def sum_factorise(sum_indices, factors):
 
         # If some contraction indices were independent, then we may
         # still have several terms at this point.
-        expr, flops_ = associate_product(terms)
+        expr, flops_ = associate(Product, terms)
         flops += flops_
 
         if flops < best_flops:
@@ -312,6 +338,19 @@ def sum_factorise(sum_indices, factors):
             best_flops = flops
 
     return expression
+
+
+def make_sum(summands):
+    """Constructs an operation-minimal sum of GEM expressions."""
+    groups = groupby(summands, key=lambda f: f.free_indices)
+    summands = [reduce(Sum, terms) for _, terms in groups]
+    result, flops = associate(Sum, summands)
+    return result
+
+
+def make_product(factors, sum_indices=()):
+    """Constructs an operation-minimal (tensor) product of GEM expressions."""
+    return sum_factorise(sum_indices, factors)
 
 
 def traverse_product(expression, stop_at=None):
