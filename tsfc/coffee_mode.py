@@ -33,7 +33,7 @@ _handle_conditional.register(Node)(reuse_if_untouched)
 
 @_handle_conditional.register(Conditional)
 def _handle_conditional_conditional(node, self):
-    if len(set(node.free_indices) & self.argument_indices) == 0:
+    if not self.predicate(node):
         return node
     condition, then, else_ = node.children
     then = self(then)
@@ -42,17 +42,18 @@ def _handle_conditional_conditional(node, self):
                Product(Conditional(condition, Zero(), one), else_))
 
 
-def handle_conditional(expressions, argument_indices):
+def handle_conditional(expressions, predicate):
     """Rewrite :class:`Conditional` nodes as:
        Conditional(condition, 1, 0) * THEN + Conditional(condition, 0, 1) * ELSE
     so that factorisation can occur across THEN and ELSE branches.
     :arg expressions: list of GEM DAGs
-    :arg argument_indices: tuple of argument indices
+    :arg predicate: a predicate function on :class:`Conditional`s to determine
+                    whether to rewrite the node or not
 
     :return: list of GEM DAGs with :class:`Conditional` nodes rewritten
     """
     mapper = Memoizer(_handle_conditional)
-    mapper.argument_indices = set(argument_indices)
+    mapper.predicate = predicate
     return list(map(mapper, expressions))
 
 
@@ -81,7 +82,12 @@ def Integrals(expressions, quadrature_multiindex, argument_multiindices, paramet
     expressions = remove_componenttensors(expressions)
     expressions = replace_division(expressions)
     argument_indices = tuple(itertools.chain(*argument_multiindices))
-    expressions = handle_conditional(expressions, argument_indices)
+
+    def conditional_predicate(argument_indices, node):
+        return len(set(node.free_indices) & argument_indices) >= 1
+
+    conditional_predicate = partial(conditional_predicate, set(argument_indices))
+    expressions = handle_conditional(expressions, conditional_predicate)
     return optimise_expressions(expressions, argument_indices)
 
 
