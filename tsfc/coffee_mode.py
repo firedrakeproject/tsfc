@@ -46,7 +46,9 @@ def handle_conditional(expressions, argument_indices):
     """Rewrite :class:`Conditional` nodes as:
        Conditional(condition, 1, 0) * THEN + Conditional(condition, 0, 1) * ELSE
     so that factorisation can occur across THEN and ELSE branches.
-    :param expressions: list of GEM DAGs
+    :arg expressions: list of GEM DAGs
+    :arg argument_indices: tuple of argument indices
+
     :return: list of GEM DAGs with :class:`Conditional` nodes rewritten
     """
     mapper = Memoizer(_handle_conditional)
@@ -78,15 +80,16 @@ def Integrals(expressions, quadrature_multiindex, argument_multiindices, paramet
     expressions = replace_delta(expressions)
     expressions = remove_componenttensors(expressions)
     expressions = replace_division(expressions)
-    return optimise_expressions(expressions, argument_multiindices)
+    argument_indices = tuple(itertools.chain(*argument_multiindices))
+    # expressions = handle_conditional(expressions, argument_indices)
+    return optimise_expressions(expressions, argument_indices)
 
 
-def optimise_expressions(expressions, argument_multiindices):
+def optimise_expressions(expressions, argument_indices):
     """Perform loop optimisations on GEM DAGs
 
     :arg expressions: list of GEM DAGs
-    :arg argument_multiindices: tuple of argument multiindices,
-                                one multiindex for each argument
+    :arg argument_indices: tuple of argument indices
 
     :returns: list of optimised GEM DAGs
     """
@@ -94,9 +97,6 @@ def optimise_expressions(expressions, argument_multiindices):
     for n in traversal(expressions):
         if isinstance(n, Failure):
             return expressions
-
-    argument_indices = tuple(itertools.chain(*argument_multiindices))
-    expressions = handle_conditional(expressions, argument_indices)
 
     def classify(argument_indices, expression):
         n = len(argument_indices.intersection(expression.free_indices))
