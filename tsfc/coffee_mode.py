@@ -81,7 +81,7 @@ def Integrals(expressions, quadrature_multiindex, argument_multiindices, paramet
     expressions = remove_componenttensors(expressions)
     expressions = replace_division(expressions)
     argument_indices = tuple(itertools.chain(*argument_multiindices))
-    # expressions = handle_conditional(expressions, argument_indices)
+    expressions = handle_conditional(expressions, argument_indices)
     return optimise_expressions(expressions, argument_indices)
 
 
