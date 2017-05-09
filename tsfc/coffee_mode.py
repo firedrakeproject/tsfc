@@ -37,7 +37,7 @@ def _handle_conditional_conditional(node, self):
     if self.predicate(node):
         return Sum(Product(Conditional(condition, one, Zero()), then),
                    Product(Conditional(condition, Zero(), one), else_))
-    return Conditional(condition, then, else_)
+    return node.reconstruct(condition, then, else_)
 
 
 def handle_conditional(expressions, predicate):
