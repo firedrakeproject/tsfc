@@ -11,7 +11,8 @@ from itertools import product
 from gem.node import Memoizer, traversal
 from gem.gem import Node, Zero, Product, Sum, Indexed, ListTensor, one
 from gem.optimise import (remove_componenttensors, sum_factorise,
-                          traverse_product, traverse_sum, unroll_indexsum)
+                          traverse_product, traverse_sum, unroll_indexsum,
+                          expand_conditional)
 
 
 # Refactorisation labels
@@ -228,6 +229,10 @@ def collect_monomials(expressions, classifier):
         expressions = unroll_indexsum(expressions,
                                       predicate=lambda i: i in must_unroll)
         expressions = remove_componenttensors(expressions)
+
+    # Expand Conditional nodes which are COMPOUND
+    conditional_predicate = lambda node: classifier(node) == COMPOUND
+    expressions = expand_conditional(expressions, conditional_predicate)
 
     # Finally, refactorise expressions
     mapper = Memoizer(_collect_monomials)

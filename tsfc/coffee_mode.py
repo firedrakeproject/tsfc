@@ -9,11 +9,9 @@ from collections import defaultdict
 from gem.optimise import (replace_division, make_sum, make_product,
                           unroll_indexsum, replace_delta, remove_componenttensors)
 from gem.refactorise import Monomial, ATOMIC, COMPOUND, OTHER, collect_monomials
-from gem.node import traversal, Memoizer, reuse_if_untouched
-from gem.gem import (Conditional, Indexed, IndexSum, Failure, one, index_sum,
-                     Node, Sum, Zero, Product)
+from gem.node import traversal
+from gem.gem import Indexed, IndexSum, Failure, one, index_sum
 from gem.utils import groupby
-from singledispatch import singledispatch
 
 
 import tsfc.vanilla as vanilla
@@ -21,39 +19,6 @@ import tsfc.vanilla as vanilla
 flatten = vanilla.flatten
 
 finalise_options = dict(replace_delta=False, remove_componenttensors=False)
-
-
-@singledispatch
-def _handle_conditional(node, self):
-    raise AssertionError("cannot handle type %s" % type(node))
-
-
-_handle_conditional.register(Node)(reuse_if_untouched)
-
-
-@_handle_conditional.register(Conditional)
-def _handle_conditional_conditional(node, self):
-    if self.predicate(node):
-        condition, then, else_ = map(self, node.children)
-        return Sum(Product(Conditional(condition, one, Zero()), then),
-                   Product(Conditional(condition, Zero(), one), else_))
-    else:
-        return reuse_if_untouched(node, self)
-
-
-def handle_conditional(expressions, predicate):
-    """Rewrite :class:`Conditional` nodes as:
-       Conditional(condition, 1, 0) * THEN + Conditional(condition, 0, 1) * ELSE
-    so that factorisation can occur across THEN and ELSE branches.
-    :arg expressions: list of GEM DAGs
-    :arg predicate: a predicate function on :class:`Conditional`s to determine
-                    whether to rewrite the node or not
-
-    :return: list of GEM DAGs with :class:`Conditional` nodes rewritten
-    """
-    mapper = Memoizer(_handle_conditional)
-    mapper.predicate = predicate
-    return list(map(mapper, expressions))
 
 
 def Integrals(expressions, quadrature_multiindex, argument_multiindices, parameters):
@@ -81,12 +46,6 @@ def Integrals(expressions, quadrature_multiindex, argument_multiindices, paramet
     expressions = remove_componenttensors(expressions)
     expressions = replace_division(expressions)
     argument_indices = tuple(itertools.chain(*argument_multiindices))
-
-    def conditional_predicate(argument_indices, node):
-        return len(set(node.free_indices) & argument_indices) >= 1
-
-    conditional_predicate = partial(conditional_predicate, set(argument_indices))
-    expressions = handle_conditional(expressions, conditional_predicate)
     return optimise_expressions(expressions, argument_indices)
 
 
