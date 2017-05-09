@@ -9,9 +9,11 @@ from collections import defaultdict
 from gem.optimise import (replace_division, make_sum, make_product,
                           unroll_indexsum, replace_delta, remove_componenttensors)
 from gem.refactorise import Monomial, ATOMIC, COMPOUND, OTHER, collect_monomials
-from gem.node import traversal
-from gem.gem import Conditional, Indexed, IndexSum, Failure, one, index_sum
+from gem.node import traversal, Memoizer, reuse_if_untouched
+from gem.gem import (Conditional, Indexed, IndexSum, Failure, one, index_sum,
+                     Node, Sum, Zero, Product)
 from gem.utils import groupby
+from singledispatch import singledispatch
 
 
 import tsfc.vanilla as vanilla
@@ -19,6 +21,37 @@ import tsfc.vanilla as vanilla
 flatten = vanilla.flatten
 
 finalise_options = dict(replace_delta=False, remove_componenttensors=False)
+
+
+@singledispatch
+def _handle_conditional(node, self):
+    raise AssertionError("cannot handle type %s" % type(node))
+
+
+_handle_conditional.register(Node)(reuse_if_untouched)
+
+
+@_handle_conditional.register(Conditional)
+def _handle_conditional_conditional(node, self):
+    if len(set(node.free_indices) & self.argument_multiindices) == 0:
+        return node
+    condition, then, else_ = node.children
+    then = self(then)
+    else_ = self(else_)
+    return Sum(Product(Conditional(condition, one, Zero()), then),
+               Product(Conditional(condition, Zero(), one), else_))
+
+
+def handle_conditional(expressions, argument_multiindices):
+    """Rewrite :class:`Conditional` nodes as:
+       Conditional(condition, 1, 0) * THEN + Conditional(condition, 0, 1) * ELSE
+    so that factorisation can occur across THEN and ELSE branches.
+    :param expressions: list of GEM DAGs
+    :return: list of GEM DAGs with :class:`Conditional` nodes rewritten
+    """
+    mapper = Memoizer(_handle_conditional)
+    mapper.argument_multiindices = set(argument_multiindices)
+    return list(map(mapper, expressions))
 
 
 def Integrals(expressions, quadrature_multiindex, argument_multiindices, parameters):
@@ -62,12 +95,14 @@ def optimise_expressions(expressions, argument_multiindices):
         if isinstance(n, Failure):
             return expressions
 
+    expressions = handle_conditional(expressions, argument_multiindices)
+
     def classify(argument_indices, expression):
         n = len(argument_indices.intersection(expression.free_indices))
         if n == 0:
             return OTHER
         elif n == 1:
-            if isinstance(expression, (Indexed, Conditional)):
+            if isinstance(expression, Indexed):
                 return ATOMIC
             else:
                 return COMPOUND
