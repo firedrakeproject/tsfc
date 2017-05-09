@@ -33,11 +33,12 @@ _handle_conditional.register(Node)(reuse_if_untouched)
 
 @_handle_conditional.register(Conditional)
 def _handle_conditional_conditional(node, self):
-    condition, then, else_ = map(self, node.children)
     if self.predicate(node):
+        condition, then, else_ = map(self, node.children)
         return Sum(Product(Conditional(condition, one, Zero()), then),
                    Product(Conditional(condition, Zero(), one), else_))
-    return node.reconstruct(condition, then, else_)
+    else:
+        return reuse_if_untouched(node, self)
 
 
 def handle_conditional(expressions, predicate):
