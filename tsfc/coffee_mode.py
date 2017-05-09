@@ -33,7 +33,7 @@ _handle_conditional.register(Node)(reuse_if_untouched)
 
 @_handle_conditional.register(Conditional)
 def _handle_conditional_conditional(node, self):
-    if len(set(node.free_indices) & self.argument_multiindices) == 0:
+    if len(set(node.free_indices) & self.argument_indices) == 0:
         return node
     condition, then, else_ = node.children
     then = self(then)
@@ -42,7 +42,7 @@ def _handle_conditional_conditional(node, self):
                Product(Conditional(condition, Zero(), one), else_))
 
 
-def handle_conditional(expressions, argument_multiindices):
+def handle_conditional(expressions, argument_indices):
     """Rewrite :class:`Conditional` nodes as:
        Conditional(condition, 1, 0) * THEN + Conditional(condition, 0, 1) * ELSE
     so that factorisation can occur across THEN and ELSE branches.
@@ -50,7 +50,7 @@ def handle_conditional(expressions, argument_multiindices):
     :return: list of GEM DAGs with :class:`Conditional` nodes rewritten
     """
     mapper = Memoizer(_handle_conditional)
-    mapper.argument_multiindices = set(argument_multiindices)
+    mapper.argument_indices = set(argument_indices)
     return list(map(mapper, expressions))
 
 
@@ -95,7 +95,8 @@ def optimise_expressions(expressions, argument_multiindices):
         if isinstance(n, Failure):
             return expressions
 
-    expressions = handle_conditional(expressions, argument_multiindices)
+    argument_indices = tuple(itertools.chain(*argument_multiindices))
+    expressions = handle_conditional(expressions, argument_indices)
 
     def classify(argument_indices, expression):
         n = len(argument_indices.intersection(expression.free_indices))
@@ -109,7 +110,6 @@ def optimise_expressions(expressions, argument_multiindices):
         else:
             return COMPOUND
 
-    argument_indices = tuple(itertools.chain(*argument_multiindices))
     # Apply argument factorisation unconditionally
     classifier = partial(classify, set(argument_indices))
     monomial_sums = collect_monomials(expressions, classifier)
