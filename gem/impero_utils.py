@@ -96,13 +96,9 @@ def _(node, self):
         if src not in subst:
             subst[src] = next(index_source)
 
-    for src in node.multiindex:
-        if src not in subst:
-            subst[src] = next(index_source)
-
     return gem.substitute_indices(
         gem.IndexSum(gem.substitute_indices(expr, subst),
-                     tuple(subst[fi] for fi in node.multiindex)),
+                     node.multiindex),
         {ci: fi for fi, ci in iteritems(subst) if fi not in node.multiindex}
     )
 
