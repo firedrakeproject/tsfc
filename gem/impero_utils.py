@@ -7,14 +7,15 @@ C code or a COFFEE AST.
 """
 
 from __future__ import absolute_import, print_function, division
-from six.moves import filter
+from six import iteritems, viewkeys
+from six.moves import filter, map
 
 import collections
 import itertools
 
 from singledispatch import singledispatch
 
-from gem.node import traversal, collect_refcount
+from gem.node import traversal, collect_refcount, reuse_if_untouched
 from gem.utils import OrderedSet
 from gem import gem, impero as imp, optimise, scheduling
 
@@ -34,12 +35,220 @@ class NoopError(Exception):
     pass
 
 
+def update_substitution(substitution, expression, index_source):
+    def keyfunc(index):
+        assert isinstance(expression, gem.FreeIndexMapper)
+        key, = (src for src, dst in expression.substitution if dst == index)
+        return key
+
+    for src in sorted(expression.free_indices, key=keyfunc):
+        if src not in substitution:
+            substitution[src] = next(index_source)
+
+
+@singledispatch
+def index_normal_form(node, self):
+    raise AssertionError("GEM node expected!")
+
+
+@index_normal_form.register(gem.Node)
+def _(node, self):
+    children = list(map(self, node.children))
+
+    index_source = map(gem.CanonicalIndex, itertools.count())
+    subst = {}
+    for child in children:
+        update_substitution(subst, child, index_source)
+
+    return gem.substitute_indices(
+        node.reconstruct(*[gem.substitute_indices(child, {fi: ci
+                                                          for fi, ci in iteritems(subst)
+                                                          if fi in child.free_indices})
+                           for child in children]),
+        {ci: fi for fi, ci in iteritems(subst)}
+    )
+
+
+@index_normal_form.register(gem.Terminal)
+def _(node, self):
+    assert not node.free_indices
+    return node
+
+
+@index_normal_form.register(gem.Delta)
+@index_normal_form.register(gem.ComponentTensor)
+def _(node, self):
+    raise NotImplementedError
+
+
+@index_normal_form.register(gem.IndexSum)
+def _(node, self):
+    expr, = map(self, node.children)
+
+    def keyfunc(index):
+        assert isinstance(expr, gem.FreeIndexMapper)
+        key, = (src for src, dst in expr.substitution if dst == index)
+        return key
+
+    index_source = map(gem.CanonicalIndex, itertools.count())
+    subst = {}
+    for src in sorted([fi for fi in expr.free_indices if fi not in node.multiindex], key=keyfunc):
+        if src not in subst:
+            subst[src] = next(index_source)
+
+    for src in node.multiindex:
+        if src not in subst:
+            subst[src] = next(index_source)
+
+    return gem.substitute_indices(
+        gem.IndexSum(gem.substitute_indices(expr, subst),
+                     tuple(subst[fi] for fi in node.multiindex)),
+        {ci: fi for fi, ci in iteritems(subst) if fi not in node.multiindex}
+    )
+
+
+@index_normal_form.register(gem.Indexed)
+def _(node, self):
+    expr, = map(self, node.children)
+
+    index_source = map(gem.CanonicalIndex, itertools.count())
+    subst = {}
+    update_substitution(subst, expr, index_source)
+
+    for src in node.multiindex:
+        if src not in subst:
+            subst[src] = next(index_source)
+
+    return gem.substitute_indices(
+        gem.Indexed(gem.substitute_indices(expr, {fi: ci
+                                                  for fi, ci in iteritems(subst)
+                                                  if fi in expr.free_indices}),
+                    tuple(subst[fi] for fi in node.multiindex)),
+        {ci: fi for fi, ci in iteritems(subst)}
+    )
+
+
+@index_normal_form.register(gem.FlexiblyIndexed)
+def _(node, self):
+    expr, = map(self, node.children)
+
+    index_source = map(gem.CanonicalIndex, itertools.count())
+    subst = {}
+    # update_substitution(subst, expr, index_source)
+
+    dim2idxs_ = []
+    for offset, idxs in node.dim2idxs:
+        idxs_ = []
+        for index, stride in idxs:
+            index_ = index
+            if isinstance(index, gem.Index):
+                if index not in subst:
+                    subst[index] = next(index_source)
+                index_ = subst[index]
+            idxs_.append((index_, stride))
+        dim2idxs_.append((offset, tuple(idxs_)))
+
+    return gem.substitute_indices(
+        gem.FlexiblyIndexed(expr, tuple(dim2idxs_)),
+        {ci: fi for fi, ci in iteritems(subst)}
+    )
+
+
+def make_index_normal_form(expressions):
+    from gem.node import Memoizer
+    mapper = Memoizer(index_normal_form)
+    return list(map(mapper, expressions))
+
+
+@singledispatch
+def _zzz(node, self):
+    assert False
+
+
+@_zzz.register(gem.Node)
+def _(node, self):
+    print(type(node).__name__)
+    return reuse_if_untouched(node, self)
+
+
+@_zzz.register(gem.Indexed)
+def _(node, self):
+    subst = self.z[node]
+    child, = map(self, node.children)
+    multiindex = tuple(subst.get(i, i) for i in node.multiindex)
+    return gem.Indexed(child, multiindex)
+
+
+@_zzz.register(gem.FlexiblyIndexed)
+def _(node, self):
+    subst = self.z[node]
+    child, = map(self, node.children)
+
+    dim2idxs_ = []
+    for offset, idxs in node.dim2idxs:
+        idxs_ = []
+        for index, stride in idxs:
+            index_ = subst.get(index, index)
+            idxs_.append((index_, stride))
+        dim2idxs_.append((offset, tuple(idxs_)))
+
+    return gem.FlexiblyIndexed(child, tuple(dim2idxs_))
+
+
+@_zzz.register(gem.FreeIndexMapper)
+def _(node, self):
+    child, = node.children
+    new_child = self(child)
+    subst = {c1: self.z[node].get(c2, c2) for c1, c2 in node.substitution}
+    if subst == self.z[child]:
+        return new_child
+    else:
+        assert viewkeys(subst) <= viewkeys(self.z[child])
+        sub = frozenset((self.z[child][k], subst[k]) for k in subst)
+        return gem.FreeIndexMapper(new_child, sub)
+
+
+@_zzz.register(gem.IndexSum)
+def _(node, self):
+    subst = self.z[node]
+    child, = map(self, node.children)
+    multiindex = tuple(subst.get(i, i) for i in node.multiindex)
+    return gem.IndexSum(child, multiindex)
+
+
 def preprocess_gem(expressions, replace_delta=True, remove_componenttensors=True):
     """Lower GEM nodes that cannot be translated to C directly."""
     if replace_delta:
         expressions = optimise.replace_delta(expressions)
     if remove_componenttensors:
         expressions = optimise.remove_componenttensors(expressions)
+
+    expressions = make_index_normal_form(expressions)
+    # print(expressions[0])
+
+    z = {}
+    for n in expressions:
+        z.setdefault(n, {})
+    for n in traversal(expressions):
+        # print(type(n).__name__, hex(id(n)), n.free_indices)
+        subst = z[n]
+        # print(subst)
+        if isinstance(n, gem.FreeIndexMapper):
+            subst = {c1: subst.get(c2, c2) for c1, c2 in n.substitution}
+            # print(subst)
+        # elif isinstance(n, gem.IndexSum):
+        #     subst = subst.copy()
+        #     for index in n.multiindex:
+        #         subst[index] = index
+        #     # print(subst)
+        for child in n.children:
+            z.setdefault(child, subst)
+
+    from gem.node import Memoizer
+    mapper = Memoizer(_zzz)
+    mapper.z = z
+    expressions = list(map(mapper, expressions))
+
     return expressions
 
 
@@ -182,7 +391,7 @@ def make_loop_tree(ops, get_indices, level=0):
         else:
             statements.extend(op_group)
     # Remove no-op terminals from the tree
-    statements = [s for s in statements if not isinstance(s, imp.Noop)]
+    statements = [s for s in statements if not isinstance(s, (imp.Noop, imp.Mapper))]
     return imp.Block(statements)
 
 
@@ -321,7 +530,7 @@ def temp_refcount(temporaries, op):
         recurse(op.expression)
     elif isinstance(op, imp.ReturnAccumulate):
         recurse(op.indexsum.children[0])
-    elif isinstance(op, imp.Noop):
+    elif isinstance(op, (imp.Noop, imp.Mapper)):
         pass
     else:
         raise AssertionError("unhandled operation: %s" % type(op))

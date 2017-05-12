@@ -385,3 +385,19 @@ def _expression_flexiblyindexed(expr, parameters):
             offset.append((1, 0))
 
     return coffee.Symbol(var.symbol, rank=tuple(rank), offset=tuple(offset))
+
+
+@_expression.register(gem.FreeIndexMapper)
+def _expression_freeindexmapper(expr, parameters):
+    referred = expression(expr.children[0], parameters)
+    renames = {}
+    for src, dst in expr.substitution:
+        src_ast = parameters.index_names[src]
+        if isinstance(dst, gem.Index):
+            dst_ast = parameters.index_names[dst]
+        elif isinstance(dst, gem.VariableIndex):
+            dst_ast = expression(dst.expression, parameters).gencode()
+        else:
+            dst_ast = dst
+        renames[src_ast] = dst_ast
+    return coffee.Symbol(referred.symbol, rank=tuple(renames[i] for i in referred.rank))

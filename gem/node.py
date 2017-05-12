@@ -109,7 +109,7 @@ def traversal(expression_dags):
     # Some roots might be same, but they must be visited only once.
     # Keep the original ordering of roots, for deterministic code
     # generation.
-    for root in expression_dags:
+    for root in reversed(expression_dags):
         if root not in seen:
             seen.add(root)
             lifo.append(root)

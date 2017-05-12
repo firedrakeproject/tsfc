@@ -15,10 +15,11 @@ indices.
 """
 
 from __future__ import absolute_import, print_function, division
-from six import with_metaclass
+from six import with_metaclass, iterkeys
 from six.moves import range, zip
 
 from abc import ABCMeta
+from functools import total_ordering
 from itertools import chain
 from operator import attrgetter
 
@@ -426,6 +427,46 @@ class Index(IndexBase):
         self.name, self.extent, self.count = state
 
 
+@total_ordering
+class CanonicalIndex(Index):
+    """Canonical free index"""
+
+    __slots__ = ('count',)
+
+    def __init__(self, count):
+        self.count = count
+
+    def set_extent(self, value):
+        print('set_extent:', self, value)
+
+    @property
+    def extent(self):
+        return numpy.nan
+        raise AssertionError("Cannot associate canonical index with an extent!")
+
+    def __str__(self):
+        return "ci_%d" % self.count
+
+    def __repr__(self):
+        return "CanonicalIndex(%d)" % (self.count,)
+
+    def __eq__(self, other):
+        return type(self) == type(other) and self.count == other.count
+
+    def __hash__(self):
+        return hash((CanonicalIndex, self.count))
+
+    def __lt__(self, other):
+        assert type(self) == type(other)
+        return self.count < other.count
+
+    def __getstate__(self):
+        raise NotImplementedError
+
+    def __setstate__(self, state):
+        raise NotImplementedError
+
+
 class VariableIndex(IndexBase):
     """An index that is constant during a single execution of the
     kernel, but whose value is not known at compile time."""
@@ -549,6 +590,18 @@ class FlexiblyIndexed(Scalar):
         self.children = (variable,)
         self.dim2idxs = tuple(dim2idxs_)
         self.free_indices = unique(free_indices)
+
+
+class FreeIndexMapper(Node):
+    __slots__ = ('children', 'substitution', 'shape')
+    __back__ = ('substitution',)
+
+    def __init__(self, expression, substitution):
+        self.children = (expression,)
+        self.substitution = substitution
+
+        self.free_indices = unique(dst for _, dst in substitution if isinstance(dst, Index))
+        self.shape = expression.shape
 
 
 class ComponentTensor(Node):
@@ -833,6 +886,31 @@ def view(expression, *slices):
 
     expr = FlexiblyIndexed(variable, tuple(dim2idxs_))
     return ComponentTensor(expr, tuple(indices))
+
+
+def substitute_indices(expression, subst):
+    # Merge with existing FreeIndexMapper, if any
+    if isinstance(expression, FreeIndexMapper):
+        it = expression.substitution
+        expression, = expression.children
+    else:
+        it = zip(expression.free_indices, expression.free_indices)
+
+    remainder = set(iterkeys(subst))
+    sm = set()  # sanitised mapping
+    for src, dst in it:
+        remainder.discard(dst)
+        dst = subst.get(dst, dst)
+        if not isinstance(dst, IndexBase):
+            raise ValueError("Cannot substitute a non-index: {}".format(dst))
+        sm.add((src, dst))
+    if remainder:
+        raise ValueError("{} is not a free index!".format(remainder.pop()))
+
+    if all(src == dst for src, dst in sm):
+        return expression
+    else:
+        return FreeIndexMapper(expression, frozenset(sm))
 
 
 # Static one object for quicker constant folding

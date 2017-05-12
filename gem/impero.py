@@ -81,6 +81,22 @@ class Accumulate(Terminal):
         return free_indices(self.indexsum.children[0])
 
 
+class Mapper(Terminal):
+    """Accumulate terms into an :class:`gem.IndexSum`."""
+
+    __slots__ = ('mapper',)
+    __front__ = ('mapper',)
+
+    def __init__(self, mapper):
+        self.mapper = mapper
+
+    def loop_shape(self, free_indices):
+        from gem import gem
+        mock = gem.Terminal()
+        mock.free_indices = tuple(src for src, dst in self.mapper.substitution if src == dst)
+        return free_indices(mock)
+
+
 class Noop(Terminal):
     """No-op terminal. Does not generate code, but wraps a GEM
     expression to have a loop shape, thus affects loop fusion."""
