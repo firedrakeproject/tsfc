@@ -400,4 +400,4 @@ def _expression_freeindexmapper(expr, parameters):
         else:
             dst_ast = dst
         renames[src_ast] = dst_ast
-    return coffee.Symbol(referred.symbol, rank=tuple(renames[i] for i in referred.rank))
+    return coffee.Symbol(referred.symbol, rank=tuple(renames.get(i, i) for i in referred.rank))

@@ -93,7 +93,8 @@ class Mapper(Terminal):
     def loop_shape(self, free_indices):
         from gem import gem
         mock = gem.Terminal()
-        mock.free_indices = tuple(src for src, dst in self.mapper.substitution if src == dst)
+        mock.free_indices = tuple(src for src, dst in self.mapper.substitution
+                                  if src == dst and isinstance(src, gem.Index))
         return free_indices(mock)
 
 
