@@ -35,6 +35,8 @@ literal_rounding.register(Node)(reuse_if_untouched)
 
 @literal_rounding.register(Literal)
 def literal_rounding_literal(node, self):
+    if not node.shape:
+        return node  # skip scalars
     table = node.array
     epsilon = self.epsilon
     # Mimic the rounding applied at COFFEE formatting, which in turn
@@ -298,7 +300,7 @@ def sum_factorise(sum_indices, factors):
         # Empty product
         return one
 
-    if len(sum_indices) > 5:
+    if len(sum_indices) > 6:
         raise NotImplementedError("Too many indices for sum factorisation!")
 
     # Form groups by free indices
