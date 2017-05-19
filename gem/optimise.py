@@ -35,13 +35,11 @@ literal_rounding.register(Node)(reuse_if_untouched)
 
 @literal_rounding.register(Literal)
 def literal_rounding_literal(node, self):
-    if not node.shape:
-        return node  # skip scalars
     table = node.array
     epsilon = self.epsilon
     # Mimic the rounding applied at COFFEE formatting, which in turn
     # mimics FFC formatting.
-    one_decimal = numpy.round(table, 1)
+    one_decimal = numpy.asarray(numpy.round(table, 1))
     one_decimal[numpy.logical_not(one_decimal)] = 0  # no minus zeros
     return Literal(numpy.where(abs(table - one_decimal) < epsilon, one_decimal, table))
 
