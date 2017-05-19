@@ -141,7 +141,7 @@ class ExpressionKernelBuilder(KernelBuilderBase):
 class KernelBuilder(KernelBuilderBase):
     """Helper class for building a :class:`Kernel` object."""
 
-    def __init__(self, integral_type, subdomain_id, domain_number):
+    def __init__(self, integral_type, subdomain_id, domain_number, metadata=None):
         """Initialise a kernel builder."""
         super(KernelBuilder, self).__init__(integral_type.startswith("interior_facet"))
 

@@ -85,7 +85,7 @@ def compile_integral(integral_data, form_data, prefix, parameters,
         del parameters["quadrature_rule"]
 
     integral_type = integral_data.integral_type
-    interior_facet = integral_type.startswith("interior_facet")
+    interior_facet = integral_type.startswith("interior_facet") or (integral_type == "custom" and integral_data.metadata["num_cells"] == 2)
     mesh = integral_data.domain
     cell = integral_data.domain.ufl_cell()
     arguments = form_data.preprocessed_form.arguments()
@@ -102,7 +102,7 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     # Dict mapping domains to index in original_form.ufl_domains()
     domain_numbering = form_data.original_form.domain_numbering()
     builder = interface.KernelBuilder(integral_type, integral_data.subdomain_id,
-                                      domain_numbering[integral_data.domain])
+                                      domain_numbering[integral_data.domain], metadata=integral_data.metadata)
     return_variables = builder.set_arguments(arguments, argument_multiindices)
 
     coordinates = ufl_utils.coordinate_coefficient(mesh)
@@ -154,16 +154,26 @@ def compile_integral(integral_data, form_data, prefix, parameters,
             raise ValueError("Expected to find a QuadratureRule object, not a %s" %
                              type(quad_rule))
 
-        quadrature_multiindex = quad_rule.point_set.indices
-        quadrature_indices.extend(quadrature_multiindex)
-
         config = kernel_cfg.copy()
-        config.update(quadrature_rule=quad_rule)
+        if integral_type == "custom":
+            config.pop("quadrature_degree", None)
+            quadrature_multiindex = gem.Index(),
+            config["point_indices"] = quadrature_multiindex
+            config["point_expr"] = gem.partial_indexed(gem.Variable('X', (48, 2)), quadrature_multiindex)
+            config["weight_expr"] = gem.Indexed(gem.Variable('W', (48,)), quadrature_multiindex)
+            foobar = True
+        else:
+            quadrature_multiindex = quad_rule.point_set.indices
+            config.update(quadrature_rule=quad_rule)
+            foobar = False
         expressions = fem.compile_ufl(integrand,
                                       interior_facet=interior_facet,
+                                      foobar=foobar,
                                       **config)
         reps = mode.Integrals(expressions, quadrature_multiindex,
                               argument_multiindices, params)
+        quadrature_indices.extend(quadrature_multiindex)
+        assert len(return_variables) == len(reps)
         for var, rep in zip(return_variables, reps):
             mode_irs[mode].setdefault(var, []).append(rep)
 
@@ -346,7 +356,7 @@ def lower_integral_type(fiat_cell, integral_type):
     horiz_facet_types = ['exterior_facet_bottom', 'exterior_facet_top', 'interior_facet_horiz']
 
     dim = fiat_cell.get_dimension()
-    if integral_type == 'cell':
+    if integral_type in ['cell', 'custom']:
         integration_dim = dim
     elif integral_type in ['exterior_facet', 'interior_facet']:
         if isinstance(fiat_cell, TensorProductCell):

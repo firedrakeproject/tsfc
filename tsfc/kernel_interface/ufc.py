@@ -21,9 +21,9 @@ from tsfc.coffee import SCALAR_TYPE
 class KernelBuilder(KernelBuilderBase):
     """Helper class for building a :class:`Kernel` object."""
 
-    def __init__(self, integral_type, subdomain_id, domain_number):
+    def __init__(self, integral_type, subdomain_id, domain_number, metadata):
         """Initialise a kernel builder."""
-        super(KernelBuilder, self).__init__(integral_type.startswith("interior_facet"))
+        super(KernelBuilder, self).__init__(integral_type.startswith("interior_facet") or (integral_type == "custom" and metadata["num_cells"] == 2))
         self.integral_type = integral_type
 
         self.local_tensor = None
@@ -31,7 +31,7 @@ class KernelBuilder(KernelBuilderBase):
         self.coefficient_args = None
         self.coefficient_split = {}
 
-        if self.interior_facet:
+        if integral_type.startswith("interior_facet"):
             self._cell_orientations = (gem.Variable("cell_orientation_0", ()),
                                        gem.Variable("cell_orientation_1", ()))
         else:
@@ -46,6 +46,22 @@ class KernelBuilder(KernelBuilderBase):
             }
         elif integral_type == "vertex":
             self._entity_number = {None: gem.VariableIndex(gem.Variable("vertex", ()))}
+
+        if integral_type == "custom":
+            self.apply_glue([coffee.FlatBlock("""
+assert(num_quadrature_points <= 48);
+double X[48][2];
+for (std::size_t i = 0; i < 48; i++) {
+  X[i][0] = quadrature_points[2*(i % num_quadrature_points) + 0];
+  X[i][1] = quadrature_points[2*(i % num_quadrature_points) + 1];
+}
+(void) X;
+double W[48] = { 0.0 };
+for (std::size_t i = 0; i < num_quadrature_points; i++) {
+  W[i] = quadrature_weights[i];
+}
+(void) W;
+""")])
 
     def set_arguments(self, arguments, multiindices):
         """Process arguments.
@@ -66,7 +82,7 @@ class KernelBuilder(KernelBuilderBase):
         :arg mode: (ignored)
         """
         self.coordinates_args, expression = prepare_coordinates(
-            coefficient, "coordinate_dofs", interior_facet=self.interior_facet)
+            coefficient, "coordinate_dofs", integral_type=self.integral_type, interior_facet=self.interior_facet)
         self.coefficient_map[coefficient] = expression
 
     def set_coefficients(self, integral_data, form_data):
@@ -122,7 +138,7 @@ class KernelBuilder(KernelBuilderBase):
             args.append(coffee.Decl("std::size_t", coffee.Symbol("vertex")))
 
         # Cell orientation(s)
-        if self.interior_facet:
+        if self.integral_type.startswith("interior_facet"):
             args.append(coffee.Decl("int", coffee.Symbol("cell_orientation_0")))
             args.append(coffee.Decl("int", coffee.Symbol("cell_orientation_1")))
         else:
@@ -217,7 +233,7 @@ def prepare_coefficients(coefficients, num, name, interior_facet=False):
                         expressions(gem.reshape(data_m, (), (size,)))))
 
 
-def prepare_coordinates(coefficient, name, interior_facet=False):
+def prepare_coordinates(coefficient, name, integral_type='', interior_facet=False):
     """Bridges the kernel interface and the GEM abstraction for
     coordinates.
 
@@ -233,13 +249,7 @@ def prepare_coordinates(coefficient, name, interior_facet=False):
     shape = finat_element.index_shape
     size = numpy.prod(shape, dtype=int)
 
-    if not interior_facet:
-        funargs = [coffee.Decl(SCALAR_TYPE, coffee.Symbol(name),
-                               pointers=[("",)],
-                               qualifiers=["const"])]
-        variable = gem.Variable(name, (size,))
-        expression = gem.reshape(variable, shape)
-    else:
+    if integral_type.startswith("interior_facet"):
         funargs = [coffee.Decl(SCALAR_TYPE, coffee.Symbol(name+"_0"),
                                pointers=[("",)],
                                qualifiers=["const"]),
@@ -250,6 +260,16 @@ def prepare_coordinates(coefficient, name, interior_facet=False):
         variable1 = gem.Variable(name+"_1", (size,))
         expression = (gem.reshape(variable0, shape),
                       gem.reshape(variable1, shape))
+    else:
+        funargs = [coffee.Decl(SCALAR_TYPE, coffee.Symbol(name),
+                               pointers=[("",)],
+                               qualifiers=["const"])]
+        variable = gem.Variable(name, (size,))
+        if not interior_facet:
+            expression = gem.reshape(variable, shape)
+        else:
+            expression = (gem.reshape(variable, shape),
+                          gem.reshape(variable, shape))
 
     return funargs, expression
 

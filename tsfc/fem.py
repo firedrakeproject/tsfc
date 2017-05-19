@@ -16,7 +16,7 @@ from ufl.corealg.multifunction import MultiFunction
 from ufl.classes import (Argument, CellCoordinate, CellEdgeVectors,
                          CellFacetJacobian, CellOrientation,
                          CellVolume, Coefficient, FacetArea,
-                         FacetCoordinate, GeometricQuantity,
+                         FacetCoordinate, FacetNormal, GeometricQuantity,
                          QuadratureWeight, ReferenceCellVolume,
                          ReferenceFacetVolume, ReferenceNormal)
 
@@ -243,6 +243,16 @@ def translate_reference_normal(terminal, mt, ctx):
     return ctx.entity_selector(callback, mt.restriction)
 
 
+@translate.register(FacetNormal)
+def translate_facet_normal(terminal, mt, ctx):
+    var = gem.reshape(gem.Variable("facet_normals", (None,)), (48, 2))
+    exp = gem.partial_indexed(var, ctx.point_indices)
+    if mt.restriction == '-':
+        i = gem.Index()
+        exp = gem.ComponentTensor(gem.Product(gem.Literal(-1), gem.Indexed(exp, (i,))), (i,))
+    return exp
+
+
 @translate.register(CellEdgeVectors)
 def translate_cell_edge_vectors(terminal, mt, ctx):
     from FIAT.reference_element import TensorProductCell as fiat_TensorProductCell
@@ -397,8 +407,11 @@ def translate_coefficient(terminal, mt, ctx):
     return result
 
 
-def compile_ufl(expression, interior_facet=False, point_sum=False, **kwargs):
-    context = PointSetContext(**kwargs)
+def compile_ufl(expression, foobar=False, interior_facet=False, point_sum=False, **kwargs):
+    if foobar:
+        context = GemPointContext(**kwargs)
+    else:
+        context = PointSetContext(**kwargs)
 
     # Abs-simplification
     expression = simplify_abs(expression)
