@@ -12,7 +12,7 @@ from gem.node import Memoizer, traversal
 from gem.gem import Node, Zero, Product, Sum, Indexed, ListTensor, one
 from gem.optimise import (remove_componenttensors, sum_factorise,
                           traverse_product, traverse_sum, unroll_indexsum,
-                          expand_conditional)
+                          expand_conditional, make_rename_map, make_renamer)
 
 
 # Refactorisation labels
@@ -102,17 +102,25 @@ class MonomialSum(object):
         return result
 
     @staticmethod
-    def product(*args):
+    def product(*args, **kwargs):
         """Product of multiple :py:class:`MonomialSum`s"""
+        rename_map = kwargs.pop('rename_map', None)
+        if rename_map is None:
+            rename_map = make_rename_map()
+        if kwargs:
+            raise ValueError("Unrecognised keyword argument: " + kwargs.pop())
+
         result = MonomialSum()
         for monomials in product(*args):
+            renamer = make_renamer(rename_map)
             sum_indices = []
             atomics = []
             rest = one
             for s, a, r in monomials:
-                sum_indices.extend(s)
-                atomics.extend(a)
-                rest = Product(r, rest)
+                s_, applier = renamer(s)
+                sum_indices.extend(s_)
+                atomics.extend(map(applier, a))
+                rest = Product(applier(r), rest)
             result.add(sum_indices, atomics, rest)
         return result
 
@@ -173,9 +181,13 @@ def _collect_monomials(expression, self):
     # Each element of ``sums`` is a MonomialSum.  Expansion produces a
     # series (representing a sum) of products of monomials.
     result = MonomialSum()
-    for s, a, r in MonomialSum.product(*sums):
-        all_indices = common_indices + s
-        atomics = common_atomics + a
+    for s, a, r in MonomialSum.product(*sums, rename_map=self.rename_map):
+        renamer = make_renamer(self.rename_map)
+        renamer(common_indices)  # update current_set
+        s_, applier = renamer(s)
+
+        all_indices = common_indices + s_
+        atomics = common_atomics + tuple(map(applier, a))
 
         # All free indices that appear in atomic terms
         atomic_indices = set().union(*[atomic.free_indices
@@ -193,7 +205,7 @@ def _collect_monomials(expression, self):
 
         # Not really sum factorisation, but rather just an optimised
         # way of building a product.
-        rest = sum_factorise(rest_indices, common_others + [r])
+        rest = sum_factorise(rest_indices, common_others + [applier(r)])
 
         result.add(sum_indices, atomics, rest)
     return result
@@ -237,4 +249,5 @@ def collect_monomials(expressions, classifier):
     # Finally, refactorise expressions
     mapper = Memoizer(_collect_monomials)
     mapper.classifier = classifier
+    mapper.rename_map = make_rename_map()
     return list(map(mapper, expressions))
