@@ -655,6 +655,9 @@ class ListTensor(Node):
     def shape(self):
         return self.array.shape
 
+    def __reduce__(self):
+        return type(self), (self.array,)
+
     def reconstruct(self, *args):
         return ListTensor(asarray(args).reshape(self.array.shape))
 
