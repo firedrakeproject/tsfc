@@ -4,7 +4,8 @@ expressions."""
 from __future__ import absolute_import, print_function, division
 from six.moves import filter, map, zip
 
-from functools import reduce
+from collections import defaultdict
+from functools import partial, reduce
 from itertools import combinations, permutations
 
 import numpy
@@ -353,7 +354,53 @@ def make_product(factors, sum_indices=()):
     return sum_factorise(sum_indices, factors)
 
 
-def traverse_product(expression, stop_at=None):
+def make_rename_map():
+    """Creates an rename map for reusing the same index renames."""
+    return defaultdict(Index)
+
+
+def make_renamer(rename_map):
+    """Creates a function for renaming indices when expanding products of
+    IndexSums, i.e. applying to following rule:
+
+        (sum_i a_i)*(sum_i b_i) ===> \sum_{i,i'} a_i*b_{i'}
+
+    :arg rename_map: An rename map for renaming indices the same way
+                     as functions returned by other calls of this
+                     function.
+    :returns: A function that takes an iterable of indices to rename,
+              and returns (renamed indices, applier), where applier is
+              a function that remap the free indices of GEM
+              expressions from the old to the new indices.
+    """
+    def _renamer(rename_map, current_set, incoming):
+        renamed = []
+        renames = []
+        for i in incoming:
+            j = i
+            while j in current_set:
+                j = rename_map[j]
+            current_set.add(j)
+            renamed.append(j)
+            if i != j:
+                renames.append((i, j))
+
+        if renames:
+            def applier(expr):
+                pairs = [(i, j) for i, j in renames if i in expr.free_indices]
+                if pairs:
+                    current, renamed = zip(*pairs)
+                    return Indexed(ComponentTensor(expr, current), renamed)
+                else:
+                    return expr
+        else:
+            applier = lambda expr: expr
+
+        return tuple(renamed), applier
+    return partial(_renamer, rename_map, set())
+
+
+def traverse_product(expression, stop_at=None, rename_map=None):
     """Traverses a product tree and collects factors, also descending into
     tensor contractions (IndexSum).  The nominators of divisions are
     also broken up, but not the denominators.
@@ -363,10 +410,15 @@ def traverse_product(expression, stop_at=None):
                   and returns true for some subexpression, that
                   subexpression is not broken into further factors
                   even if it is a product-like expression.
+    :arg rename_map: an rename map for consistent index renaming
     :returns: (sum_indices, terms)
               - sum_indices: list of indices to sum over
               - terms: list of product terms
     """
+    if rename_map is None:
+        rename_map = make_rename_map()
+    renamer = make_renamer(rename_map)
+
     sum_indices = []
     terms = []
 
@@ -376,8 +428,9 @@ def traverse_product(expression, stop_at=None):
         if stop_at is not None and stop_at(expr):
             terms.append(expr)
         elif isinstance(expr, IndexSum):
-            stack.append(expr.children[0])
-            sum_indices.extend(expr.multiindex)
+            indices, applier = renamer(expr.multiindex)
+            sum_indices.extend(indices)
+            stack.extend(remove_componenttensors(map(applier, expr.children)))
         elif isinstance(expr, Product):
             stack.extend(reversed(expr.children))
         elif isinstance(expr, Division):
