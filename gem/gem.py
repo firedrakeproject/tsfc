@@ -33,8 +33,8 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'MathFunction', 'MinValue', 'MaxValue', 'Comparison',
            'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
-           'IndexSum', 'ListTensor', 'Delta', 'index_sum',
-           'partial_indexed', 'reshape', 'view']
+           'IndexSum', 'ListTensor', 'Concatenate', 'Delta',
+           'index_sum', 'partial_indexed', 'reshape', 'view']
 
 
 class NodeMeta(type):
@@ -675,6 +675,23 @@ class ListTensor(Node):
 
     def get_hash(self):
         return hash((type(self), self.shape, self.children))
+
+
+class Concatenate(Node):
+    """Flattens and concatenates GEM expressions by shape.
+
+    Similar to what UFL MixedElement does to value shape.  For
+    example, if children have shapes (2, 2), (), and (3,) then the
+    concatenated expression has shape (8,).
+    """
+    __slots__ = ('children',)
+
+    def __init__(self, *children):
+        self.children = children
+
+    @property
+    def shape(self):
+        return (sum(numpy.prod(child.shape, dtype=int) for child in self.children),)
 
 
 class Delta(Scalar, Terminal):
