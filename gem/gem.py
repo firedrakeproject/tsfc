@@ -26,7 +26,7 @@ from gem.node import Node as NodeBase
 
 
 __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
-           'Variable', 'Sum', 'Product', 'Division', 'Power',
+           'Variable', 'Sum', 'Product', 'Division', 'Power', 'Conj', 
            'MathFunction', 'MinValue', 'MaxValue', 'Comparison',
            'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
@@ -105,7 +105,7 @@ class Constant(Terminal):
 
     Convention:
      - array: numpy array of values
-     - value: float value (scalars only)
+     - value: complex value (scalars only)
     """
     __slots__ = ()
 
@@ -158,7 +158,7 @@ class Literal(Constant):
             return super(Literal, cls).__new__(cls)
 
     def __init__(self, array):
-        self.array = asarray(array, dtype=float)
+        self.array = asarray(array, dtype='complex128')
 
     def is_equal(self, other):
         if type(self) != type(other):
@@ -172,7 +172,7 @@ class Literal(Constant):
 
     @property
     def value(self):
-        return float(self.array)
+        return self.array
 
     @property
     def shape(self):
@@ -279,6 +279,20 @@ class Power(Scalar):
 
         self = super(Power, cls).__new__(cls)
         self.children = base, exponent
+        return self
+
+
+class Conj(Scalar):
+    __slots__ = ('children',)
+
+    def __new__(cls, a):
+        assert not a.shape
+
+        if isinstance(a, Constant):
+            return Literal(a.value.conjugate())
+
+        self = super(Conj, cls).__new__(cls)
+        self.children = a
         return self
 
 
