@@ -184,7 +184,8 @@ def _evaluate_mathfunction(e, self):
     ops = [self(o) for o in e.children]
     result = Result.empty(*ops)
     names = {"abs": abs,
-             "log": math.log}
+             "log": math.log,
+             "conj": complex.conjugate}
     op = names[e.name]
     for idx in numpy.ndindex(result.tshape):
         result[idx] = op(*(o[o.filter(idx, result.fids)] for o in ops))
