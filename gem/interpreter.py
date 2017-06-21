@@ -169,13 +169,23 @@ def _evaluate_operator(e, self):
     return result
 
 
-@_evaluate.register(gem.Conj)  # noqa: F811
+@_evaluate.register(gem.Real)  # noqa: F811
 def _(e, self):
     ops = [self(o) for o in e.children]
 
     result = Result.empty(*ops)
     for idx in numpy.ndindex(result.tshape):
-        result[idx] = [o[o.filter(idx,result.fids)].conjugate() for o in ops]
+        result[idx] = [o[o.filter(idx,result.fids)].real for o in ops]
+    return result
+
+
+@_evaluate.register(gem.Imag)  # noqa: F811
+def _(e, self):
+    ops = [self(o) for o in e.children]
+
+    result = Result.empty(*ops)
+    for idx in numpy.ndindex(result.tshape):
+        result[idx] = [o[o.filter(idx,result.fids)].imag for o in ops]
     return result
 
 
