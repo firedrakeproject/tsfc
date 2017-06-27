@@ -25,8 +25,8 @@ from numpy import asarray
 from gem.node import Node as NodeBase
 
 
-__all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure', 'Real', 'Imag',
-           'Variable', 'Sum', 'Product', 'Division', 'Power', 'Conj', 
+__all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure', 'ComplexPartsFunction', 
+           'Variable', 'Sum', 'Product', 'Division', 'Power', 
            'MathFunction', 'MinValue', 'MaxValue', 'Comparison',
            'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
@@ -282,49 +282,61 @@ class Power(Scalar):
         return self
 
 
-class Conj(Scalar):
-    __slots__ = ('children',)
+# class Conj(Scalar):
+#     __slots__ = ('children',)
 
-    def __new__(cls, a):
-        assert not a.shape
+#     def __new__(cls, a):
+#         assert not a.shape
 
-        if isinstance(a, Constant):
-            return Literal(a.value.conjugate())
+#         if isinstance(a, Constant):
+#             return Literal(a.value.conjugate())
 
-        self = super(Conj, cls).__new__(cls)
-        self.children = a
-        return self
-
-
-class Real(Scalar):
-    __slots__ = ('children',)
-
-    def __new__(cls, a):
-        assert not a.shape
-
-        if isinstance(a, Constant):
-            return Literal(a.value.real)
-
-        self = super(Real, cls).__new__(cls)
-        self.children = a
-        return self
+#         self = super(Conj, cls).__new__(cls)
+#         self.children = a
+#         return self
 
 
-class Imag(Scalar):
-    __slots__ = ('children',)
+# class Real(Scalar):
+#     __slots__ = ('children',)
 
-    def __new__(cls, a):
-        assert not a.shape
+#     def __new__(cls, a):
+#         assert not a.shape
 
-        if isinstance(a, Constant):
-            return Literal(a.value.imag)
+#         if isinstance(a, Constant):
+#             return Literal(a.value.real)
 
-        self = super(Imag, cls).__new__(cls)
-        self.children = a
-        return self
+#         self = super(Real, cls).__new__(cls)
+#         self.children = a
+#         return self
+
+
+# class Imag(Scalar):
+#     __slots__ = ('children',)
+
+#     def __new__(cls, a):
+#         assert not a.shape
+
+#         if isinstance(a, Constant):
+#             return Literal(a.value.imag)
+
+#         self = super(Imag, cls).__new__(cls)
+#         self.children = a
+#         return self
 
 
 class MathFunction(Scalar):
+    __slots__ = ('name', 'children')
+    __front__ = ('name',)
+
+    def __init__(self, name, *args):
+        assert isinstance(name, str)
+        assert all(arg.shape == () for arg in args)
+
+        self.name = name
+        self.children = args
+
+
+class ComplexPartsFunction(Scalar):
     __slots__ = ('name', 'children')
     __front__ = ('name',)
 
