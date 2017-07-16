@@ -27,8 +27,8 @@ from gem.node import Node as NodeBase
 from tsfc.parameters import numpy_type
 
 
-__all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure', 'ComplexPartsFunction', 
-           'Variable', 'Sum', 'Product', 'Division', 'Power', 
+__all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure', 'ComplexPartsFunction',
+           'Variable', 'Sum', 'Product', 'Division', 'Power',
            'MathFunction', 'MinValue', 'MaxValue', 'Comparison',
            'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
@@ -282,48 +282,6 @@ class Power(Scalar):
         self = super(Power, cls).__new__(cls)
         self.children = base, exponent
         return self
-
-
-# class Conj(Scalar):
-#     __slots__ = ('children',)
-
-#     def __new__(cls, a):
-#         assert not a.shape
-
-#         if isinstance(a, Constant):
-#             return Literal(a.value.conjugate())
-
-#         self = super(Conj, cls).__new__(cls)
-#         self.children = a
-#         return self
-
-
-# class Real(Scalar):
-#     __slots__ = ('children',)
-
-#     def __new__(cls, a):
-#         assert not a.shape
-
-#         if isinstance(a, Constant):
-#             return Literal(a.value.real)
-
-#         self = super(Real, cls).__new__(cls)
-#         self.children = a
-#         return self
-
-
-# class Imag(Scalar):
-#     __slots__ = ('children',)
-
-#     def __new__(cls, a):
-#         assert not a.shape
-
-#         if isinstance(a, Constant):
-#             return Literal(a.value.imag)
-
-#         self = super(Imag, cls).__new__(cls)
-#         self.children = a
-#         return self
 
 
 class MathFunction(Scalar):
