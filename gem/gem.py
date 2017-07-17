@@ -158,8 +158,10 @@ class Literal(Constant):
             return super(Literal, cls).__new__(cls)
 
     def __init__(self, array):
-        from tsfc.parameters import numpy_type
-        self.array = asarray(array, dtype=numpy_type())
+        # right now we use complex128, but maybe in the future we will determine this per user
+        # maybe at install time we'll have a switch to determine this? dtype = float or complex depending on mode
+        # from tsfc.parameters import numpy_type
+        self.array = asarray(array, dtype=complex)
 
     def is_equal(self, other):
         if type(self) != type(other):
