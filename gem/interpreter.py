@@ -303,9 +303,14 @@ def _(e, self):
 def _(e, self):
     """List tensors just turn into arrays."""
     ops = [self(o) for o in e.children]
-    assert all(ops[0].fids == o.fids for o in ops)
-    return Result(numpy.asarray([o.arr for o in ops]).reshape(e.shape),
-                  ops[0].fids)
+    tmp = Result.empty(*ops)
+    arrs = []
+    for o in ops:
+        arr = numpy.empty(tmp.fshape)
+        arr[:] = o.broadcast(tmp.fids)
+        arrs.append(arr)
+    arrs = numpy.moveaxis(numpy.asarray(arrs), 0, -1).reshape(tmp.fshape + e.shape)
+    return Result(arrs, tmp.fids)
 
 
 def evaluate(expressions, bindings=None):
