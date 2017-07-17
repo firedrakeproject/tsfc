@@ -232,12 +232,12 @@ def _(e, self):
     idx = []
     # First pick up all the existing free indices
     for _ in val.fids:
-        idx.append(Ellipsis)
+        idx.append(slice(None))
     # Now grab the shape axes
     for i in e.multiindex:
         if isinstance(i, gem.Index):
             # Free index, want entire extent
-            idx.append(Ellipsis)
+            idx.append(slice(None))
         elif isinstance(i, gem.VariableIndex):
             # Variable index, evaluate inner expression
             result, = self(i.expression)
