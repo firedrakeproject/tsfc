@@ -274,9 +274,9 @@ def _(e, self):
 def _(e, self):
     """Index sums reduce over the given axis."""
     val = self(e.children[0])
-    idx = val.fids.index(e.index)
-    return Result(val.arr.sum(axis=idx),
-                  val.fids[:idx] + val.fids[idx+1:])
+    idx = tuple(map(val.fids.index, e.multiindex))
+    rfids = tuple(fi for fi in val.fids if fi not in e.multiindex)
+    return Result(val.arr.sum(axis=idx), rfids)
 
 
 @_evaluate.register(gem.ListTensor)  # noqa: F811
