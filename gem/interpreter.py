@@ -29,6 +29,27 @@ class Result(object):
         self.arr = arr
         self.fids = fids if fids is not None else ()
 
+    def broadcast(self, fids):
+        """Given some free indices, return a broadcasted array which
+        contains extra dimensions that correspond to indices in fids
+        that are not in ``self.fids``.
+
+        Note that inserted dimensions will have length one.
+
+        :arg fids: The free indices for broadcasting.
+        """
+        # Select free indices
+        axes = tuple(self.fids.index(fi) for fi in fids if fi in self.fids)
+        assert len(axes) == len(self.fids)
+        # Add shape
+        axes += tuple(range(len(self.fids), self.arr.ndim))
+        # Move axes, insert extra axes
+        arr = numpy.transpose(self.arr, axes)
+        for i, fi in enumerate(fids):
+            if fi not in self.fids:
+                arr = numpy.expand_dims(arr, axis=i)
+        return arr
+
     def filter(self, idx, fids):
         """Given an index tuple and some free indices, return a
         "filtered" index tuple which removes entries that correspond
@@ -132,8 +153,7 @@ def _(e, self):
     a, b = [self(o) for o in e.children]
     result = Result.empty(a, b)
     fids = result.fids
-    for idx in numpy.ndindex(result.tshape):
-        result[idx] = op(a[a.filter(idx, fids)], b[b.filter(idx, fids)])
+    result.arr = op(a.broadcast(fids), b.broadcast(fids))
     return result
 
 
