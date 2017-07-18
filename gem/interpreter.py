@@ -7,6 +7,7 @@ from six.moves import map
 import numpy
 import operator
 import math
+from collections import OrderedDict
 from singledispatch import singledispatch
 import itertools
 
@@ -311,6 +312,25 @@ def _evaluate_listtensor(e, self):
         arrs.append(arr)
     arrs = numpy.moveaxis(numpy.asarray(arrs), 0, -1).reshape(tmp.fshape + e.shape)
     return Result(arrs, tmp.fids)
+
+
+@_evaluate.register(gem.Concatenate)
+def _evaluate_concatenate(e, self):
+    """Concatenate nodes flatten and concatenate shapes."""
+    ops = [self(o) for o in e.children]
+    fids = tuple(OrderedDict.fromkeys(itertools.chain(*(o.fids for o in ops))))
+    fshape = tuple(i.extent for i in fids)
+    arrs = []
+    for o in ops:
+        # Create temporary with correct shape
+        arr = numpy.empty(fshape + o.shape)
+        # Broadcast for extra free indices
+        arr[:] = o.broadcast(fids)
+        # Flatten shape
+        arr = arr.reshape(arr.shape[:arr.ndim-len(o.shape)] + (-1,))
+        arrs.append(arr)
+    arrs = numpy.concatenate(arrs, axis=-1)
+    return Result(arrs, fids)
 
 
 def evaluate(expressions, bindings=None):
