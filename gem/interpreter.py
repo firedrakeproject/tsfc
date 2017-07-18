@@ -29,6 +29,27 @@ class Result(object):
         self.arr = arr
         self.fids = fids if fids is not None else ()
 
+    def broadcast(self, fids):
+        """Given some free indices, return a broadcasted array which
+        contains extra dimensions that correspond to indices in fids
+        that are not in ``self.fids``.
+
+        Note that inserted dimensions will have length one.
+
+        :arg fids: The free indices for broadcasting.
+        """
+        # Select free indices
+        axes = tuple(self.fids.index(fi) for fi in fids if fi in self.fids)
+        assert len(axes) == len(self.fids)
+        # Add shape
+        axes += tuple(range(len(self.fids), self.arr.ndim))
+        # Move axes, insert extra axes
+        arr = numpy.transpose(self.arr, axes)
+        for i, fi in enumerate(fids):
+            if fi not in self.fids:
+                arr = numpy.expand_dims(arr, axis=i)
+        return arr
+
     def filter(self, idx, fids):
         """Given an index tuple and some free indices, return a
         "filtered" index tuple which removes entries that correspond
@@ -132,8 +153,7 @@ def _(e, self):
     a, b = [self(o) for o in e.children]
     result = Result.empty(a, b)
     fids = result.fids
-    for idx in numpy.ndindex(result.tshape):
-        result[idx] = op(a[a.filter(idx, fids)], b[b.filter(idx, fids)])
+    result.arr = op(a.broadcast(fids), b.broadcast(fids))
     return result
 
 
@@ -232,12 +252,12 @@ def _(e, self):
     idx = []
     # First pick up all the existing free indices
     for _ in val.fids:
-        idx.append(Ellipsis)
+        idx.append(slice(None))
     # Now grab the shape axes
     for i in e.multiindex:
         if isinstance(i, gem.Index):
             # Free index, want entire extent
-            idx.append(Ellipsis)
+            idx.append(slice(None))
         elif isinstance(i, gem.VariableIndex):
             # Variable index, evaluate inner expression
             result, = self(i.expression)
@@ -274,18 +294,23 @@ def _(e, self):
 def _(e, self):
     """Index sums reduce over the given axis."""
     val = self(e.children[0])
-    idx = val.fids.index(e.index)
-    return Result(val.arr.sum(axis=idx),
-                  val.fids[:idx] + val.fids[idx+1:])
+    idx = tuple(map(val.fids.index, e.multiindex))
+    rfids = tuple(fi for fi in val.fids if fi not in e.multiindex)
+    return Result(val.arr.sum(axis=idx), rfids)
 
 
 @_evaluate.register(gem.ListTensor)  # noqa: F811
 def _(e, self):
     """List tensors just turn into arrays."""
     ops = [self(o) for o in e.children]
-    assert all(ops[0].fids == o.fids for o in ops)
-    return Result(numpy.asarray([o.arr for o in ops]).reshape(e.shape),
-                  ops[0].fids)
+    tmp = Result.empty(*ops)
+    arrs = []
+    for o in ops:
+        arr = numpy.empty(tmp.fshape)
+        arr[:] = o.broadcast(tmp.fids)
+        arrs.append(arr)
+    arrs = numpy.moveaxis(numpy.asarray(arrs), 0, -1).reshape(tmp.fshape + e.shape)
+    return Result(arrs, tmp.fids)
 
 
 def evaluate(expressions, bindings=None):
