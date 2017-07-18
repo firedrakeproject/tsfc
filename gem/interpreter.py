@@ -115,20 +115,20 @@ def _evaluate(expression, self):
     raise ValueError("Unhandled node type %s" % type(expression))
 
 
-@_evaluate.register(gem.Zero)  # noqa: F811
-def _(e, self):
+@_evaluate.register(gem.Zero)
+def _evaluate_zero(e, self):
     """Zeros produce an array of zeros."""
     return Result(numpy.zeros(e.shape, dtype=float))
 
 
-@_evaluate.register(gem.Constant)  # noqa: F811
-def _(e, self):
+@_evaluate.register(gem.Constant)
+def _evaluate_constant(e, self):
     """Constants return their array."""
     return Result(e.array)
 
 
-@_evaluate.register(gem.Variable)  # noqa: F811
-def _(e, self):
+@_evaluate.register(gem.Variable)
+def _evaluate_variable(e, self):
     """Look up variables in the provided bindings."""
     try:
         val = self.bindings[e]
@@ -140,11 +140,11 @@ def _(e, self):
     return Result(val)
 
 
-@_evaluate.register(gem.Power)  # noqa: F811
+@_evaluate.register(gem.Power)
 @_evaluate.register(gem.Division)
 @_evaluate.register(gem.Product)
 @_evaluate.register(gem.Sum)
-def _(e, self):
+def _evaluate_operator(e, self):
     op = {gem.Product: operator.mul,
           gem.Division: operator.div,
           gem.Sum: operator.add,
@@ -157,8 +157,8 @@ def _(e, self):
     return result
 
 
-@_evaluate.register(gem.MathFunction)  # noqa: F811
-def _(e, self):
+@_evaluate.register(gem.MathFunction)
+def _evaluate_mathfunction(e, self):
     ops = [self(o) for o in e.children]
     result = Result.empty(*ops)
     names = {"abs": abs,
@@ -169,9 +169,9 @@ def _(e, self):
     return result
 
 
-@_evaluate.register(gem.MaxValue)  # noqa: F811
+@_evaluate.register(gem.MaxValue)
 @_evaluate.register(gem.MinValue)
-def _(e, self):
+def _evaluate_minmaxvalue(e, self):
     ops = [self(o) for o in e.children]
     result = Result.empty(*ops)
     op = {gem.MinValue: min,
@@ -181,8 +181,8 @@ def _(e, self):
     return result
 
 
-@_evaluate.register(gem.Comparison)  # noqa: F811
-def _(e, self):
+@_evaluate.register(gem.Comparison)
+def _evaluate_comparison(e, self):
     ops = [self(o) for o in e.children]
     op = {">": operator.gt,
           ">=": operator.ge,
@@ -196,8 +196,8 @@ def _(e, self):
     return result
 
 
-@_evaluate.register(gem.LogicalNot)  # noqa: F811
-def _(e, self):
+@_evaluate.register(gem.LogicalNot)
+def _evaluate_logicalnot(e, self):
     val = self(e.children[0])
     assert val.arr.dtype == numpy.dtype("bool")
     result = Result.empty(val, bool)
@@ -206,8 +206,8 @@ def _(e, self):
     return result
 
 
-@_evaluate.register(gem.LogicalAnd)  # noqa: F811
-def _(e, self):
+@_evaluate.register(gem.LogicalAnd)
+def _evaluate_logicaland(e, self):
     a, b = [self(o) for o in e.children]
     assert a.arr.dtype == numpy.dtype("bool")
     assert b.arr.dtype == numpy.dtype("bool")
@@ -218,8 +218,8 @@ def _(e, self):
     return result
 
 
-@_evaluate.register(gem.LogicalOr)  # noqa: F811
-def _(e, self):
+@_evaluate.register(gem.LogicalOr)
+def _evaluate_logicalor(e, self):
     a, b = [self(o) for o in e.children]
     assert a.arr.dtype == numpy.dtype("bool")
     assert b.arr.dtype == numpy.dtype("bool")
@@ -230,8 +230,8 @@ def _(e, self):
     return result
 
 
-@_evaluate.register(gem.Conditional)  # noqa: F811
-def _(e, self):
+@_evaluate.register(gem.Conditional)
+def _evaluate_conditional(e, self):
     cond, then, else_ = [self(o) for o in e.children]
     assert cond.arr.dtype == numpy.dtype("bool")
     result = Result.empty(cond, then, else_)
@@ -243,8 +243,8 @@ def _(e, self):
     return result
 
 
-@_evaluate.register(gem.Indexed)  # noqa: F811
-def _(e, self):
+@_evaluate.register(gem.Indexed)
+def _evaluate_indexed(e, self):
     """Indexing maps shape to free indices"""
     val = self(e.children[0])
     fids = tuple(i for i in e.multiindex if isinstance(i, gem.Index))
@@ -270,8 +270,8 @@ def _(e, self):
     return Result(val[idx], val.fids + fids)
 
 
-@_evaluate.register(gem.ComponentTensor)  # noqa: F811
-def _(e, self):
+@_evaluate.register(gem.ComponentTensor)
+def _evaluate_componenttensor(e, self):
     """Component tensors map free indices to shape."""
     val = self(e.children[0])
     axes = []
@@ -290,8 +290,8 @@ def _(e, self):
                   tuple(fids))
 
 
-@_evaluate.register(gem.IndexSum)  # noqa: F811
-def _(e, self):
+@_evaluate.register(gem.IndexSum)
+def _evaluate_indexsum(e, self):
     """Index sums reduce over the given axis."""
     val = self(e.children[0])
     idx = tuple(map(val.fids.index, e.multiindex))
@@ -299,8 +299,8 @@ def _(e, self):
     return Result(val.arr.sum(axis=idx), rfids)
 
 
-@_evaluate.register(gem.ListTensor)  # noqa: F811
-def _(e, self):
+@_evaluate.register(gem.ListTensor)
+def _evaluate_listtensor(e, self):
     """List tensors just turn into arrays."""
     ops = [self(o) for o in e.children]
     tmp = Result.empty(*ops)
