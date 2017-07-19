@@ -187,6 +187,12 @@ def _select_expression(expressions, index):
     if types <= {Literal, Zero, Failure}:
         return partial_indexed(ListTensor(expressions), (index,))
 
+    if types <= {ComponentTensor, Zero}:
+        shape, = set(e.shape for e in expressions)
+        multiindex = tuple(Index(extent=d) for d in shape)
+        children = remove_componenttensors([Indexed(e, multiindex) for e in expressions])
+        return ComponentTensor(_select_expression(children, index), multiindex)
+
     if len(types) == 1:
         cls, = types
         if cls.__front__ or cls.__back__:
