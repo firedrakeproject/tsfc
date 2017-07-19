@@ -799,7 +799,7 @@ def reshape(expression, *shapes):
     shape_of = dict(zip(indexes, shapes))
 
     dim2idxs_ = []
-    indices = []
+    indices = [[] for _ in range(len(indexes))]
     for offset, idxs in dim2idxs:
         idxs_ = []
         for idx in idxs:
@@ -811,13 +811,13 @@ def reshape(expression, *shapes):
                 raise ValueError("Shape {} does not match extent {}.".format(shape, dim))
             strides = strides_of(shape)
             for extent, stride_ in zip(shape, strides):
-                index = Index(extent=extent)
-                idxs_.append((index, stride_ * stride))
-                indices.append(index)
+                index_ = Index(extent=extent)
+                idxs_.append((index_, stride_ * stride))
+                indices[indexes.index(index)].append(index_)
         dim2idxs_.append((offset, tuple(idxs_)))
 
     expr = FlexiblyIndexed(variable, tuple(dim2idxs_))
-    return ComponentTensor(expr, tuple(indices))
+    return ComponentTensor(expr, tuple(chain.from_iterable(indices)))
 
 
 def view(expression, *slices):
@@ -831,7 +831,7 @@ def view(expression, *slices):
     slice_of = dict(zip(indexes, slices))
 
     dim2idxs_ = []
-    indices = []
+    indices = [None] * len(slices)
     for offset, idxs in dim2idxs:
         offset_ = offset
         idxs_ = []
@@ -850,7 +850,7 @@ def view(expression, *slices):
             offset_ += start * stride
             extent = 1 + (stop - start - 1) // step
             index_ = Index(extent=extent)
-            indices.append(index_)
+            indices[indexes.index(index)] = index_
             idxs_.append((index_, step * stride))
         dim2idxs_.append((offset_, tuple(idxs_)))
 
