@@ -23,42 +23,6 @@ class cached_property(object):
         return result
 
 
-class OrderedSet(collections.MutableSet):
-    """A set that preserves ordering, useful for deterministic code
-    generation."""
-
-    def __init__(self, iterable=None):
-        self._list = list()
-        self._set = set()
-
-        if iterable is not None:
-            for item in iterable:
-                self.add(item)
-
-    def __contains__(self, item):
-        return item in self._set
-
-    def __iter__(self):
-        return iter(self._list)
-
-    def __len__(self):
-        return len(self._list)
-
-    def __repr__(self):
-        return "OrderedSet({0})".format(self._list)
-
-    def add(self, value):
-        if value not in self._set:
-            self._list.append(value)
-            self._set.add(value)
-
-    def discard(self, value):
-        # O(n) time complexity: do not use this!
-        if value in self._set:
-            self._list.remove(value)
-            self._set.discard(value)
-
-
 def groupby(iterable, key=None):
     """Groups objects by their keys.
 

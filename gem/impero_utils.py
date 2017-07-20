@@ -15,7 +15,6 @@ import itertools
 from singledispatch import singledispatch
 
 from gem.node import traversal, collect_refcount
-from gem.utils import OrderedSet
 from gem import gem, impero as imp, optimise, scheduling
 
 
@@ -61,17 +60,17 @@ def compile_gem(assignments, prefix_ordering, remove_zeros=False):
     expressions = [expression for variable, expression in assignments]
 
     # Collect indices in a deterministic order
-    indices = OrderedSet()
+    indices = collections.OrderedDict()
     for node in traversal(expressions):
         if isinstance(node, gem.Indexed):
             for index in node.multiindex:
                 if isinstance(index, gem.Index):
-                    indices.add(index)
+                    indices.setdefault(index)
         elif isinstance(node, gem.FlexiblyIndexed):
             for offset, idxs in node.dim2idxs:
                 for index, stride in idxs:
                     if isinstance(index, gem.Index):
-                        indices.add(index)
+                        indices.setdefault(index)
 
     # Build ordered index map
     index_ordering = make_prefix_ordering(indices, prefix_ordering)
