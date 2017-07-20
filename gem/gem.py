@@ -500,6 +500,10 @@ class Indexed(Scalar):
 
         return self
 
+    def index_ordering(self):
+        """Running indices in the order of indexing in this node."""
+        return tuple(i for i in self.multiindex if isinstance(i, Index))
+
 
 class FlexiblyIndexed(Scalar):
     """Flexible indexing of :py:class:`Variable`s to implement views and
@@ -552,6 +556,13 @@ class FlexiblyIndexed(Scalar):
         self.children = (variable,)
         self.dim2idxs = tuple(dim2idxs_)
         self.free_indices = unique(free_indices)
+
+    def index_ordering(self):
+        """Running indices in the order of indexing in this node."""
+        return tuple(index
+                     for offset, idxs in self.dim2idxs
+                     for index, stride in idxs
+                     if isinstance(index, Index))
 
 
 class ComponentTensor(Node):
