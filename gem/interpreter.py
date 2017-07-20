@@ -147,7 +147,7 @@ def _evaluate_variable(e, self):
 @_evaluate.register(gem.Sum)
 def _evaluate_operator(e, self):
     op = {gem.Product: operator.mul,
-          gem.Division: operator.div,
+          gem.Division: operator.truediv,
           gem.Sum: operator.add,
           gem.Power: operator.pow}[type(e)]
 
