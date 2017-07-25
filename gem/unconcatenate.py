@@ -1,19 +1,22 @@
 """Utility functions for decomposing Concatenate nodes."""
 
 from __future__ import absolute_import, print_function, division
-from six.moves import range, zip
+from six.moves import map, range, zip
 
 from itertools import chain
 
 import numpy
+from singledispatch import singledispatch
 
 from gem.node import Memoizer, reuse_if_untouched
 from gem.gem import (ComponentTensor, Concatenate, FlexiblyIndexed,
-                     Index, Indexed, Node, reshape, view)
+                     Index, Indexed, Literal, Node, partial_indexed,
+                     reshape, view)
 from gem.optimise import remove_componenttensors
+from gem.interpreter import evaluate
 
 
-__all__ = ['unconcatenate']
+__all__ = ['flatten', 'unconcatenate']
 
 
 def find_group(expressions):
@@ -190,3 +193,31 @@ def unconcatenate(pairs, cache=None):
     pairs = [(v, e) for (v, _), e in zip(pairs, exprs)]
 
     return _unconcatenate(cache, pairs)
+
+
+@singledispatch
+def _flatten(node, self):
+    """Replace Concatenate nodes with Literal nodes.
+
+    :arg node: root of the expression
+    :arg self: function for recursive calls
+    """
+    raise AssertionError("cannot handle type %s" % type(node))
+
+
+_flatten.register(Node)(reuse_if_untouched)
+
+
+@_flatten.register(Concatenate)
+def _flatten_concatenate(node, self):
+    result, = evaluate([node])
+    return partial_indexed(Literal(result.arr), result.fids)
+
+
+def flatten(expressions):
+    """Flatten Concatenate nodes, and destroy the structure they express.
+
+    :arg expressions: a multi-root expression DAG
+    """
+    mapper = Memoizer(_flatten)
+    return list(map(mapper, expressions))
