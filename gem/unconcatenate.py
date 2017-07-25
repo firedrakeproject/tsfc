@@ -173,7 +173,7 @@ def _unconcatenate(cache, pairs):
 
 
 def unconcatenate(pairs, cache=None):
-    """Splits a list of (variable reference, expression) pairs along
+    """Splits a list of (indexed variable, expression) pairs along
     :py:class:`Concatenate` nodes embedded in the expressions.
 
     :param pairs: list of (indexed variable, expression) pairs

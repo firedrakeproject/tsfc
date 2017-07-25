@@ -560,8 +560,8 @@ class FlexiblyIndexed(Scalar):
     def index_ordering(self):
         """Running indices in the order of indexing in this node."""
         return tuple(index
-                     for offset, idxs in self.dim2idxs
-                     for index, stride in idxs
+                     for _, idxs in self.dim2idxs
+                     for index, _ in idxs
                      if isinstance(index, Index))
 
 
