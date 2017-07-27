@@ -2,9 +2,9 @@
 expressions."""
 
 from __future__ import absolute_import, print_function, division
-from six.moves import filter, map, zip
+from six.moves import filter, map, zip, zip_longest
 
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from functools import partial, reduce
 from itertools import combinations, permutations
 
@@ -12,7 +12,8 @@ import numpy
 from singledispatch import singledispatch
 
 from gem.utils import groupby
-from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
+from gem.node import (Memoizer, MemoizerArg, reuse_if_untouched,
+                      reuse_if_untouched_arg, traversal)
 from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
                      Product, Sum, Comparison, Conditional, Division,
                      Index, VariableIndex, Indexed, FlexiblyIndexed,
@@ -490,7 +491,29 @@ def contraction(expression):
     expression, = remove_componenttensors([expression])
 
     # Flatten product tree, eliminate deltas, sum factorise
-    return sum_factorise(*delta_elimination(*traverse_product(expression)))
+    def rebuild(expression):
+        return sum_factorise(*delta_elimination(*traverse_product(expression)))
+
+    # ListTensor free indices
+    lt_fis = OrderedDict()
+    for node in traversal((expression,)):
+        if isinstance(node, Indexed):
+            child, = node.children
+            if isinstance(child, ListTensor):
+                lt_fis.update(zip_longest(node.multiindex, ()))
+    lt_fis = tuple(index for index in lt_fis if index in expression.free_indices)
+
+    if lt_fis:
+        # Rebuild each split component
+        tensor = ComponentTensor(expression, lt_fis)
+        entries = [Indexed(tensor, zeta) for zeta in numpy.ndindex(tensor.shape)]
+        entries = remove_componenttensors(entries)
+        return Indexed(ListTensor(
+            numpy.array(list(map(rebuild, entries))).reshape(tensor.shape)
+        ), lt_fis)
+    else:
+        # Rebuild whole expression at once
+        return rebuild(expression)
 
 
 @singledispatch
