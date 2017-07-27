@@ -10,12 +10,11 @@ from __future__ import absolute_import, print_function, division
 from six.moves import filter
 
 import collections
-import itertools
+from itertools import chain, groupby
 
 from singledispatch import singledispatch
 
 from gem.node import traversal, collect_refcount
-from gem.utils import OrderedSet
 from gem import gem, impero as imp, optimise, scheduling
 
 
@@ -61,17 +60,11 @@ def compile_gem(assignments, prefix_ordering, remove_zeros=False):
     expressions = [expression for variable, expression in assignments]
 
     # Collect indices in a deterministic order
-    indices = OrderedSet()
-    for node in traversal(expressions):
-        if isinstance(node, gem.Indexed):
-            for index in node.multiindex:
-                if isinstance(index, gem.Index):
-                    indices.add(index)
-        elif isinstance(node, gem.FlexiblyIndexed):
-            for offset, idxs in node.dim2idxs:
-                for index, stride in idxs:
-                    if isinstance(index, gem.Index):
-                        indices.add(index)
+    indices = list(collections.OrderedDict.fromkeys(chain.from_iterable(
+        node.index_ordering()
+        for node in traversal(expressions)
+        if isinstance(node, (gem.Indexed, gem.FlexiblyIndexed))
+    )))
 
     # Build ordered index map
     index_ordering = make_prefix_ordering(indices, prefix_ordering)
@@ -175,7 +168,7 @@ def make_loop_tree(ops, get_indices, level=0):
     """
     keyfunc = lambda op: op.loop_shape(get_indices)[level:level+1]
     statements = []
-    for first_index, op_group in itertools.groupby(ops, keyfunc):
+    for first_index, op_group in groupby(ops, keyfunc):
         if first_index:
             inner_block = make_loop_tree(op_group, get_indices, level+1)
             statements.append(imp.For(first_index[0], inner_block))
