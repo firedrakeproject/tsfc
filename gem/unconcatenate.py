@@ -1,4 +1,54 @@
-"""Utility functions for decomposing Concatenate nodes."""
+"""Utility functions for decomposing Concatenate nodes.
+
+The exported functions are flatten and unconcatenate.
+- flatten: destroys the structure preserved within Concatenate nodes,
+           essentially reducing FInAT provided tabulations to what
+           FIAT could have provided, so old code can continue to work.
+- unconcatenate: split up (variable, expression) pairs along
+                 Concatenate nodes, thus recovering the structure
+                 within them, yet eliminating the Concatenate nodes.
+
+Let us see an example on unconcatenate.  Let us consider the form
+
+    div(v) * dx
+
+where v is an RTCF7 test function.  This means that the assembled
+local vector has 8 * 7 + 7 * 8 = 112 entries.  So the compilation of
+the form starts with a single assignment pair [(v, e)].  v is now the
+indexed return variable, something equivalent to
+
+    Indexed(Variable('A', (112,)), (j,))
+
+where j is the basis function index of the argument.  e is just a GEM
+quadrature expression with j as its only free index.  This will
+contain the tabulation of the RTCF7 element, which will cause
+something like
+
+    C_j := Indexed(Concatenate(A, B), (j,))
+
+to appear as a subexpression in e.  unconcatenate splits e along C_j
+into e_1 and e_2 such that
+
+    e_1 := e /. C_j -> A_{ja1,ja2}, and
+    e_2 := e /. C_j -> B_{jb1,jb2}.
+
+The split indices ja1, ja2, jb1, and jb2 have extents 8, 7, 7, and 8
+respectively (see the RTCF7 element construction above).  So the
+result of unconcatenate will be the list of pairs
+
+     [(v_1, e_2), (v_2, e_2)]
+
+where v_1 is the first 56 entries of v, reshaped as an 8 x 7 matrix,
+indexed with (ja1, ja2), and similarly, v_2 is the second 56 entries
+of v, reshaped as a 7 x 8 matrix, indexed with (jb1, jb2).
+
+The unconcatenated form allows for sum factorisation of tensor product
+elements as usual.  This pair splitting is also applicable to
+coefficient evaluation: take the local basis function coefficients as
+the variable, the FInAT tabulation of the element as the expression,
+and apply "matrix-vector multifunction" for each pair after
+unconcatenation, and then add up the results.
+"""
 
 from __future__ import absolute_import, print_function, division
 from six.moves import map, range, zip
