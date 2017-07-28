@@ -1,5 +1,5 @@
 from __future__ import absolute_import, print_function, division
-from six.moves import map, zip
+from six.moves import zip
 
 import numpy
 import itertools
@@ -12,6 +12,7 @@ from gem.node import traversal
 from gem.gem import IndexSum, Failure, Sum, one
 from gem.utils import groupby
 
+from tsfc.logging import logger
 import tsfc.spectral as spectral
 
 
@@ -64,17 +65,6 @@ def optimise_expressions(expressions, argument_indices):
     return [optimise_monomial_sum(ms, argument_indices) for ms in monomial_sums]
 
 
-def index_extent(factor, argument_indices):
-    """Compute the product of the extents of argument indices of a GEM expression
-
-    :arg factor: GEM expression
-    :arg argument_indices: set of argument indices
-
-    :returns: product of extents of argument indices
-    """
-    return numpy.product([i.extent for i in set(factor.free_indices).intersection(argument_indices)])
-
-
 def monomial_sum_to_expression(monomial_sum):
     """Convert a monomial sum to a GEM expression.
 
@@ -110,6 +100,8 @@ def solve_ip(variables, is_feasible, key):
     solution = set()
 
     def solve(idx):
+        if idx > 15:
+            return
         if idx >= len(variables):
             return
         if key(solution) >= key(optimal_solution):
@@ -143,17 +135,25 @@ def find_optimal_atomics(monomials, argument_indices):
     """
     atomics = tuple(OrderedDict.fromkeys(itertools.chain(*(monomial.atomics for monomial in monomials))))
 
+    monoatoms = tuple(set(monomial.atomics) for monomial in monomials)
+
     def is_feasible(solution):
         # Solution is only feasible if it intersects with all monomials
         # Potentially can improve this by keeping track of violated constraints
         # and suggest the next atomic to try (instead of just returning True or False)
-        return all(solution.intersection(monomial.atomics) for monomial in monomials)
+        return all(solution.intersection(atomics) for atomics in monoatoms)
+
+    index_extents = dict((atomic.free_indices,
+                          numpy.product([i.extent for i in set(atomic.free_indices).intersection(argument_indices)]))
+                         for atomic in atomics)
 
     def cost(solution):
-        extent = sum(map(lambda atomic: index_extent(atomic, argument_indices), solution))
+        extent = sum(index_extents[atomic.free_indices] for atomic in solution)
         # Prefer shorter solutions, but larger extents
         return (len(solution), -extent)
 
+    if len(atomics) > 16:
+        logger.warning("Have more than 16 atomics (%d), solution to ILP problem will not be optimal", len(atomics))
     optimal_atomics = solve_ip(atomics, is_feasible, key=cost)
     return tuple(atomic for atomic in atomics if atomic in optimal_atomics)
 
