@@ -494,8 +494,13 @@ def contraction(expression):
     def rebuild(expression):
         return sum_factorise(*delta_elimination(*traverse_product(expression)))
 
-    # ListTensor free indices
-    lt_fis = OrderedDict()
+    # Sometimes the value shape is composed as a ListTensor, which
+    # could get in the way of decomposing factors.  In particular,
+    # this is the case for H(div) and H(curl) conforming tensor
+    # product elements.  So if ListTensors are used, they are pulled
+    # out to be outermost, so we can straightforwardly factorise each
+    # of its entries.
+    lt_fis = OrderedDict()  # ListTensor free indices
     for node in traversal((expression,)):
         if isinstance(node, Indexed):
             child, = node.children
