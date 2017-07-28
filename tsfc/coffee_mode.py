@@ -12,6 +12,7 @@ from gem.node import traversal
 from gem.gem import IndexSum, Failure, Sum, one
 from gem.utils import groupby
 
+from tsfc.logging import logger
 import tsfc.spectral as spectral
 
 
@@ -110,6 +111,8 @@ def solve_ip(variables, is_feasible, key):
     solution = set()
 
     def solve(idx):
+        if idx > 15:
+            return
         if idx >= len(variables):
             return
         if key(solution) >= key(optimal_solution):
@@ -154,6 +157,8 @@ def find_optimal_atomics(monomials, argument_indices):
         # Prefer shorter solutions, but larger extents
         return (len(solution), -extent)
 
+    if len(atomics) > 16:
+        logger.warning("Have more than 16 atomics (%d), solution to ILP problem will not be optimal", len(atomics))
     optimal_atomics = solve_ip(atomics, is_feasible, key=cost)
     return tuple(atomic for atomic in atomics if atomic in optimal_atomics)
 
