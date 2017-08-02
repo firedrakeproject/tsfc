@@ -697,12 +697,18 @@ class Concatenate(Node):
     """
     __slots__ = ('children',)
 
-    def __init__(self, *children):
+    def __new__(cls, *children):
+        if all(isinstance(child, Zero) for child in children):
+            size = int(sum(numpy.prod(child.shape, dtype=int) for child in children))
+            return Zero((size,))
+
+        self = super(Concatenate, cls).__new__(cls)
         self.children = children
+        return self
 
     @property
     def shape(self):
-        return (sum(numpy.prod(child.shape, dtype=int) for child in self.children),)
+        return (int(sum(numpy.prod(child.shape, dtype=int) for child in self.children)),)
 
 
 class Delta(Scalar, Terminal):
