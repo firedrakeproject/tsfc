@@ -243,9 +243,13 @@ def delta_elimination(sum_indices, factors):
     sum_indices = list(sum_indices)  # copy for modification
 
     def substitute(expression, from_, to_):
-        if from_ in expression.free_indices:
-            expression = Indexed(ComponentTensor(expression, (from_,)), (to_,))
-        return expression
+        if from_ not in expression.free_indices:
+            return expression
+        elif isinstance(expression, Delta):
+            mapper = MemoizerArg(filtered_replace_indices)
+            return mapper(expression, ((from_, to_),))
+        else:
+            return Indexed(ComponentTensor(expression, (from_,)), (to_,))
 
     delta_queue = [(f, index)
                    for f in factors if isinstance(f, Delta)
