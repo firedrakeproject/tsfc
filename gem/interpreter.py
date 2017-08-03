@@ -122,6 +122,12 @@ def _evaluate_zero(e, self):
     return Result(numpy.zeros(e.shape, dtype=float))
 
 
+@_evaluate.register(gem.Failure)
+def _evaluate_failure(e, self):
+    """Failure nodes produce NaNs."""
+    return Result(numpy.full(e.shape, numpy.nan, dtype=float))
+
+
 @_evaluate.register(gem.Constant)
 def _evaluate_constant(e, self):
     """Constants return their array."""
