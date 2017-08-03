@@ -242,6 +242,15 @@ def delta_elimination(sum_indices, factors):
     """
     sum_indices = list(sum_indices)  # copy for modification
 
+    def substitute(expression, from_, to_):
+        if from_ not in expression.free_indices:
+            return expression
+        elif isinstance(expression, Delta):
+            mapper = MemoizerArg(filtered_replace_indices)
+            return mapper(expression, ((from_, to_),))
+        else:
+            return Indexed(ComponentTensor(expression, (from_,)), (to_,))
+
     delta_queue = [(f, index)
                    for f in factors if isinstance(f, Delta)
                    for index in (f.i, f.j) if index in sum_indices]
@@ -251,8 +260,7 @@ def delta_elimination(sum_indices, factors):
 
         sum_indices.remove(from_)
 
-        mapper = MemoizerArg(filtered_replace_indices)
-        factors = [mapper(e, ((from_, to_),)) for e in factors]
+        factors = [substitute(f, from_, to_) for f in factors]
 
         delta_queue = [(f, index)
                        for f in factors if isinstance(f, Delta)
@@ -492,7 +500,9 @@ def contraction(expression):
 
     # Flatten product tree, eliminate deltas, sum factorise
     def rebuild(expression):
-        return sum_factorise(*delta_elimination(*traverse_product(expression)))
+        sum_indices, factors = delta_elimination(*traverse_product(expression))
+        factors = remove_componenttensors(factors)
+        return sum_factorise(sum_indices, factors)
 
     # Sometimes the value shape is composed as a ListTensor, which
     # could get in the way of decomposing factors.  In particular,
