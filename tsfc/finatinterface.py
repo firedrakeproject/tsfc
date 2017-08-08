@@ -22,9 +22,12 @@
 # along with FFC. If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import absolute_import, print_function, division
+from six import iteritems
 
 from singledispatch import singledispatch
 import weakref
+
+from gem.utils import DynamicallyScoped
 
 import finat
 from finat.fiat_elements import FiatElementBase
@@ -81,7 +84,7 @@ def fiat_compat(element):
 
 
 @singledispatch
-def convert(element, shape_innermost=True):
+def convert(element):
     """Handler for converting UFL elements to FInAT elements.
 
     :arg element: The UFL element to convert.
@@ -95,7 +98,7 @@ def convert(element, shape_innermost=True):
 
 # Base finite elements first
 @convert.register(ufl.FiniteElement)
-def convert_finiteelement(element, shape_innermost=True):
+def convert_finiteelement(element):
     cell = as_fiat_cell(element.cell())
     if element.family() == "Quadrature":
         degree = element.degree()
@@ -113,7 +116,7 @@ def convert_finiteelement(element, shape_innermost=True):
                              element.family())
         # Handle quadrilateral short names like RTCF and RTCE.
         element = element.reconstruct(cell=quad_tpc)
-        return finat.QuadrilateralElement(create_element(element, shape_innermost))
+        return finat.QuadrilateralElement(create_element(element))
 
     kind = element.variant()
     if kind is None:
@@ -139,82 +142,95 @@ def convert_finiteelement(element, shape_innermost=True):
 
 # EnrichedElement case
 @convert.register(ufl.EnrichedElement)
-def convert_enrichedelement(element, shape_innermost=True):
-    return finat.EnrichedElement([create_element(elem, shape_innermost)
-                                  for elem in element._elements])
+def convert_enrichedelement(element):
+    return finat.EnrichedElement([create_element(elem) for elem in element._elements])
 
 
 # Generic MixedElement case
 @convert.register(ufl.MixedElement)
-def convert_mixedelement(element, shape_innermost=True):
-    return finat.MixedElement([create_element(elem, shape_innermost)
-                               for elem in element.sub_elements()])
+def convert_mixedelement(element):
+    return finat.MixedElement([create_element(elem) for elem in element.sub_elements()])
 
 
 # VectorElement case
 @convert.register(ufl.VectorElement)
-def convert_vectorelement(element, shape_innermost=True):
-    scalar_element = create_element(element.sub_elements()[0], shape_innermost)
+def convert_vectorelement(element):
+    scalar_element = create_element(element.sub_elements()[0])
+    collecting_deps.value[shape_innermost] = shape_innermost.value
     return finat.TensorFiniteElement(scalar_element,
                                      (element.num_sub_elements(),),
-                                     transpose=not shape_innermost)
+                                     transpose=not shape_innermost.value)
 
 
 # TensorElement case
 @convert.register(ufl.TensorElement)
-def convert_tensorelement(element, shape_innermost=True):
-    scalar_element = create_element(element.sub_elements()[0], shape_innermost)
+def convert_tensorelement(element):
+    scalar_element = create_element(element.sub_elements()[0])
+    collecting_deps.value[shape_innermost] = shape_innermost.value
     return finat.TensorFiniteElement(scalar_element,
                                      element.reference_value_shape(),
-                                     transpose=not shape_innermost)
+                                     transpose=not shape_innermost.value)
 
 
 # TensorProductElement case
 @convert.register(ufl.TensorProductElement)
-def convert_tensorproductelement(element, shape_innermost=True):
+def convert_tensorproductelement(element):
     cell = element.cell()
     if type(cell) is not ufl.TensorProductCell:
         raise ValueError("TensorProductElement not on TensorProductCell?")
-    return finat.TensorProductElement([create_element(elem, shape_innermost)
+    return finat.TensorProductElement([create_element(elem)
                                        for elem in element.sub_elements()])
 
 
 # HDivElement case
 @convert.register(ufl.HDivElement)
-def convert_hdivelement(element, shape_innermost=True):
-    return finat.HDivElement(create_element(element._element, shape_innermost))
+def convert_hdivelement(element):
+    return finat.HDivElement(create_element(element._element))
 
 
 # HDivElement case
 @convert.register(ufl.HCurlElement)
-def convert_hcurlelement(element, shape_innermost=True):
-    return finat.HCurlElement(create_element(element._element, shape_innermost))
+def convert_hcurlelement(element):
+    return finat.HCurlElement(create_element(element._element))
 
 
 quad_tpc = ufl.TensorProductCell(ufl.interval, ufl.interval)
 _cache = weakref.WeakKeyDictionary()
 
+shape_innermost = DynamicallyScoped(True)
+"""Relevant for vector/tensor elements: tensor shape indices come
+after scalar basis function indices when True, i.e. use the
+Firedrake-style XYZ XYZ XYZ XYZ DoF ordering instead of the
+FEniCS-style XXXX YYYY ZZZZ.
+"""
 
-def create_element(element, shape_innermost=True):
+collecting_deps = DynamicallyScoped()
+"""Runtime dependencies with keys that were employed during element
+conversion, thus must be part of the cache key."""
+
+
+def create_element(ufl_element):
     """Create a FInAT element (suitable for tabulating with) given a UFL element.
 
-    :arg element: The UFL element to create a FInAT element from.
-    :arg shape_innermost: Vector/tensor indices come after basis function indices
+    :arg ufl_element: The UFL element to create a FInAT element from.
     """
     try:
-        cache = _cache[element]
+        cache = _cache[ufl_element]
     except KeyError:
-        _cache[element] = {}
-        cache = _cache[element]
+        _cache[ufl_element] = {}
+        cache = _cache[ufl_element]
 
-    try:
-        return cache[shape_innermost]
-    except KeyError:
-        pass
+    config = frozenset((variable, variable.value)
+                       for variable in [shape_innermost])
+    for deps, finat_element in iteritems(cache):
+        if deps <= config:
+            return finat_element
 
-    if element.cell() is None:
+    if ufl_element.cell() is None:
         raise ValueError("Don't know how to build element when cell is not given")
 
-    finat_element = convert(element, shape_innermost=shape_innermost)
-    cache[shape_innermost] = finat_element
+    with collecting_deps.let({}):
+        finat_element = convert(ufl_element)
+        current_deps = frozenset(iteritems(collecting_deps.value))
+    cache[current_deps] = finat_element
     return finat_element

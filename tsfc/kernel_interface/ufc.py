@@ -12,13 +12,14 @@ from gem.optimise import remove_componenttensors as prune
 from finat import TensorFiniteElement
 
 from tsfc.kernel_interface.common import KernelBuilderBase
-from tsfc.finatinterface import create_element as _create_element
+from tsfc.finatinterface import create_element as _create_element, shape_innermost
 from tsfc.coffee import SCALAR_TYPE
 
 
 def create_element(element):
     # UFC DoF ordering for vector/tensor elements is XXXX YYYY ZZZZ.
-    return _create_element(element, shape_innermost=False)
+    with shape_innermost.let(False):
+        return _create_element(element)
 
 
 class KernelBuilder(KernelBuilderBase):
