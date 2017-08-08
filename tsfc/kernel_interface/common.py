@@ -2,6 +2,7 @@ from __future__ import absolute_import, print_function, division
 
 import numpy
 
+import ffc.uflacs.language.cnodes as cnodes
 import coffee.base as coffee
 
 import gem
@@ -76,6 +77,10 @@ class KernelBuilderBase(KernelInterface):
         :arg body: function body (:class:`coffee.Block` node)
         :returns: :class:`coffee.FunDecl` object
         """
-        assert isinstance(body, coffee.Block)
-        body_ = coffee.Block(self.prepare + body.children + self.finalise)
+        if isinstance(body, cnodes.StatementList):
+            body_ = coffee.Block(self.prepare + [coffee.FlatBlock(str(body))] + self.finalise)
+        elif isinstance(body, coffee.Block):
+            body_ = coffee.Block(self.prepare + body.children + self.finalise)
+        else:
+            assert False
         return coffee.FunDecl("void", name, args, body_, pred=["static", "inline"])

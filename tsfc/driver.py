@@ -27,10 +27,10 @@ from finat.point_set import PointSet
 from finat.quadrature import AbstractQuadratureRule, make_quadrature
 
 from tsfc import fem, ufl_utils
-from tsfc.coffee import SCALAR_TYPE, generate as generate_coffee
+from tsfc.cnodes import generate as generate_cnodes
 from tsfc.fiatinterface import as_fiat_cell
 from tsfc.logging import logger
-from tsfc.parameters import default_parameters
+from tsfc.parameters import SCALAR_TYPE, default_parameters
 
 from tsfc.kernel_interface import ProxyKernelInterface
 import tsfc.kernel_interface.firedrake as firedrake_interface
@@ -243,7 +243,7 @@ def compile_integral(integral_data, form_data, prefix, parameters,
         name_multiindex(multiindex, name)
 
     # Construct kernel
-    body = generate_coffee(impero_c, index_names, parameters["precision"], expressions, split_argument_indices)
+    body = generate_cnodes(impero_c, index_names)
 
     return builder.construct_kernel(kernel_name, body)
 
@@ -360,7 +360,7 @@ def compile_expression_at_points(expression, points, coordinates, parameters=Non
     ir, = impero_utils.preprocess_gem([ir])
     impero_c = impero_utils.compile_gem([(return_expr, ir)], return_indices)
     point_index, = point_set.indices
-    body = generate_coffee(impero_c, {point_index: 'p'}, parameters["precision"])
+    body = generate_cnodes(impero_c, {point_index: 'p'})
 
     # Handle cell orientations
     if builder.needs_cell_orientations([ir]):
