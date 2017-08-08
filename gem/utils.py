@@ -40,9 +40,7 @@ def groupby(iterable, key=None):
 
 
 def make_proxy_class(name, cls):
-    """Constructs a proxy class for a given class.  Instance attributes
-    are supposed to be listed e.g. with the unset_attribute decorator,
-    so that this function find them and create wrappers for them.
+    """Constructs a proxy class for a given class.
 
     :arg name: name of the new proxy class
     :arg cls: the wrapee class to create a proxy for
