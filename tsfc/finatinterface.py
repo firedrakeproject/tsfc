@@ -156,7 +156,7 @@ def convert_mixedelement(element):
 @convert.register(ufl.VectorElement)
 def convert_vectorelement(element):
     scalar_element = create_element(element.sub_elements()[0])
-    collecting_deps.value[shape_innermost] = shape_innermost.value
+    collecting_deps.value.add(shape_innermost)
     return finat.TensorFiniteElement(scalar_element,
                                      (element.num_sub_elements(),),
                                      transpose=not shape_innermost.value)
@@ -166,7 +166,7 @@ def convert_vectorelement(element):
 @convert.register(ufl.TensorElement)
 def convert_tensorelement(element):
     scalar_element = create_element(element.sub_elements()[0])
-    collecting_deps.value[shape_innermost] = shape_innermost.value
+    collecting_deps.value.add(shape_innermost)
     return finat.TensorFiniteElement(scalar_element,
                                      element.reference_value_shape(),
                                      transpose=not shape_innermost.value)
@@ -204,7 +204,10 @@ Firedrake-style XYZ XYZ XYZ XYZ DoF ordering instead of the
 FEniCS-style XXXX YYYY ZZZZ.
 """
 
-collecting_deps = DynamicallyScoped()
+all_params = {shape_innermost}
+"""Set of all parameters that might affect element conversion."""
+
+collecting_deps = DynamicallyScoped(all_params)
 """Runtime dependencies with keys that were employed during element
 conversion, thus must be part of the cache key."""
 
@@ -221,7 +224,7 @@ def create_element(ufl_element):
         cache = _cache[ufl_element]
 
     config = frozenset((variable, variable.value)
-                       for variable in [shape_innermost])
+                       for variable in all_params)
     for deps, finat_element in iteritems(cache):
         if deps <= config:
             return finat_element
@@ -229,8 +232,12 @@ def create_element(ufl_element):
     if ufl_element.cell() is None:
         raise ValueError("Don't know how to build element when cell is not given")
 
-    with collecting_deps.let({}):
+    with collecting_deps.let(set()):
         finat_element = convert(ufl_element)
-        current_deps = frozenset(iteritems(collecting_deps.value))
-    cache[current_deps] = finat_element
+        current_deps = collecting_deps.value
+    collecting_deps.value.update(current_deps)
+
+    deps_key = frozenset((variable, variable.value)
+                         for variable in current_deps)
+    cache[deps_key] = finat_element
     return finat_element
