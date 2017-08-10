@@ -27,7 +27,7 @@ from six import iteritems
 from singledispatch import singledispatch
 import weakref
 
-from gem.utils import DynamicallyScoped
+from gem.utils import BlackholeSet, DynamicallyScoped
 
 import finat
 
@@ -151,19 +151,17 @@ def convert_mixedelement(element):
 @convert.register(ufl.VectorElement)
 def convert_vectorelement(element):
     scalar_element = create_element(element.sub_elements()[0])
-    collecting_deps.value.add(shape_innermost)
     return finat.TensorFiniteElement(scalar_element,
                                      (element.num_sub_elements(),),
-                                     transpose=not shape_innermost.value)
+                                     transpose=not shape_innermost.use)
 
 
 @convert.register(ufl.TensorElement)
 def convert_tensorelement(element):
     scalar_element = create_element(element.sub_elements()[0])
-    collecting_deps.value.add(shape_innermost)
     return finat.TensorFiniteElement(scalar_element,
                                      element.reference_value_shape(),
-                                     transpose=not shape_innermost.value)
+                                     transpose=not shape_innermost.use)
 
 
 @convert.register(ufl.TensorProductElement)
@@ -194,19 +192,27 @@ def convert_restrictedelement(element):
 quad_tpc = ufl.TensorProductCell(ufl.interval, ufl.interval)
 _cache = weakref.WeakKeyDictionary()
 
-shape_innermost = DynamicallyScoped(True)
+collecting_deps = DynamicallyScoped(BlackholeSet())
+"""Runtime dependencies with keys that were employed during element
+conversion, thus must be part of the cache key."""
+
+
+class ConversionParam(DynamicallyScoped):
+    """A parameter that could affect element conversion."""
+
+    @property
+    def use(self):
+        """Like .value, but also register as dependency."""
+        collecting_deps.value.add(self)
+        return self.value
+
+
+shape_innermost = ConversionParam(True)
 """Relevant for vector/tensor elements: tensor shape indices come
 after scalar basis function indices when True, i.e. use the
 Firedrake-style XYZ XYZ XYZ XYZ DoF ordering instead of the
 FEniCS-style XXXX YYYY ZZZZ.
 """
-
-all_params = {shape_innermost}
-"""Set of all parameters that might affect element conversion."""
-
-collecting_deps = DynamicallyScoped(all_params)
-"""Runtime dependencies with keys that were employed during element
-conversion, thus must be part of the cache key."""
 
 
 def create_element(ufl_element):
@@ -220,21 +226,27 @@ def create_element(ufl_element):
         _cache[ufl_element] = {}
         cache = _cache[ufl_element]
 
-    config = frozenset((variable, variable.value)
-                       for variable in all_params)
     for deps, finat_element in iteritems(cache):
-        if deps <= config:
+        # Cache hit if all relevant parameter values match.
+        if all(param.value == value for param, value in deps):
+            # Cache hit shall also propagate dependencies to outer
+            # create_element calls.
+            collecting_deps.value.update(param for param, value in deps)
             return finat_element
 
     if ufl_element.cell() is None:
         raise ValueError("Don't know how to build element when cell is not given")
 
+    # Collect the parameters used during conversion, so we can build a
+    # minimal cache key.
     with collecting_deps.let(set()):
         finat_element = convert(ufl_element)
         current_deps = collecting_deps.value
-    collecting_deps.value.update(current_deps)
 
-    deps_key = frozenset((variable, variable.value)
-                         for variable in current_deps)
+    # Note: .use instead .value, so dependencies are recorded for the
+    # outer create_element call as well.  If this is the outermost
+    # create_element call, then dependencies are saved to /dev/null.
+    deps_key = frozenset((param, param.use)
+                         for param in current_deps)
     cache[deps_key] = finat_element
     return finat_element
