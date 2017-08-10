@@ -3,6 +3,13 @@ from six import viewitems
 
 import collections
 
+try:
+    # Python 3.3+
+    from collections.abc import MutableSet
+except ImportError:
+    # Python up to 3.2
+    from collections import MutableSet
+
 
 # This is copied from PyOP2, and it is here to be available for both
 # FInAT and TSFC without depending on PyOP2.
@@ -58,6 +65,28 @@ def make_proxy_class(name, cls):
         if not attr.startswith('_'):
             dct[attr] = make_proxy_property(attr)
     return type(name, (), dct)
+
+
+class BlackholeSet(MutableSet):
+    """A mutable set that discards elements, like /dev/null."""
+
+    def __contains__(self, elem):
+        raise NotImplementedError("Cannot peek a blackhole!")
+
+    def __iter__(self):
+        raise NotImplementedError("Cannot peek a blackhole!")
+
+    def __len__(self):
+        raise NotImplementedError("Cannot peek a blackhole!")
+
+    def add(self, elem):
+        pass  # thanks!
+
+    def update(self, others):
+        pass  # thanks!
+
+    def discard(self, elem):
+        raise NotImplementedError("Nothing ever discarded here.")
 
 
 # Implementation of dynamically scoped variables in Python.
