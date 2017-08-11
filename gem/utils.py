@@ -40,9 +40,7 @@ def groupby(iterable, key=None):
 
 
 def make_proxy_class(name, cls):
-    """Constructs a proxy class for a given class.  Instance attributes
-    are supposed to be listed e.g. with the unset_attribute decorator,
-    so that this function find them and create wrappers for them.
+    """Constructs a proxy class for a given class.
 
     :arg name: name of the new proxy class
     :arg cls: the wrapee class to create a proxy for
@@ -60,3 +58,54 @@ def make_proxy_class(name, cls):
         if not attr.startswith('_'):
             dct[attr] = make_proxy_property(attr)
     return type(name, (), dct)
+
+
+# Implementation of dynamically scoped variables in Python.
+class UnsetVariableError(LookupError):
+    pass
+
+
+_unset = object()
+
+
+class DynamicallyScoped(object):
+    """A dynamically scoped variable."""
+
+    def __init__(self, default_value=_unset):
+        if default_value is _unset:
+            self._head = None
+        else:
+            self._head = (default_value, None)
+
+    def let(self, value):
+        return _LetBlock(self, value)
+
+    @property
+    def value(self):
+        if self._head is None:
+            raise UnsetVariableError("Dynamically scoped variable not set.")
+        result, tail = self._head
+        return result
+
+
+class _LetBlock(object):
+    """Context manager representing a dynamic scope."""
+
+    def __init__(self, variable, value):
+        self.variable = variable
+        self.value = value
+        self.state = None
+
+    def __enter__(self):
+        assert self.state is None
+        value = self.value
+        tail = self.variable._head
+        scope = (value, tail)
+        self.variable._head = scope
+        self.state = scope
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        variable = self.variable
+        assert self.state is variable._head
+        value, variable._head = variable._head
+        self.state = None
