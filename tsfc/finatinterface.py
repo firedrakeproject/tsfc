@@ -28,10 +28,12 @@ from singledispatch import singledispatch
 import weakref
 
 import finat
+from finat.fiat_elements import FiatElement
 
 import ufl
 
 from tsfc.fiatinterface import as_fiat_cell
+from tsfc.ufl_utils import spanning_degree
 
 
 __all__ = ("create_element", "supported_elements", "as_fiat_cell")
@@ -67,12 +69,23 @@ element is supported, but must be handled specially because it doesn't
 have a direct FInAT equivalent."""
 
 
+class FiatElementWrapper(FiatElement):
+    def __init__(self, element, degree=None):
+        super(FiatElementWrapper, self).__init__(element)
+        self._degree = degree
+
+    @property
+    def degree(self):
+        if self._degree is not None:
+            return self._degree
+        else:
+            return super(FiatElementWrapper, self).degree
+
+
 def fiat_compat(element):
     from tsfc.fiatinterface import create_element
-    from finat.fiat_elements import FiatElement
-
-    assert element.cell().is_simplex()
-    return FiatElement(create_element(element))
+    return FiatElementWrapper(create_element(element),
+                              degree=spanning_degree(element))
 
 
 @singledispatch
