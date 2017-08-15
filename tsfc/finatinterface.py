@@ -32,6 +32,8 @@ from finat.fiat_elements import FiatElement
 
 import ufl
 
+from gem.utils import DynamicallyScoped
+
 from tsfc.fiatinterface import as_fiat_cell
 from tsfc.ufl_utils import spanning_degree
 
@@ -211,6 +213,28 @@ def convert_restrictedelement(element, **kwargs):
     return fiat_compat(element), set()
 
 
+@singledispatch
+def wrapped_fiat(element):
+    return fiat_compat(element)
+
+
+@wrapped_fiat.register(ufl.VectorElement)
+def wrapped_fiat_vectorelement(element):
+    scalar_elem = create_element(element.sub_elements()[0])
+    shape = (element.num_sub_elements(),)
+    return finat.TensorFiniteElement(scalar_elem, shape)
+
+
+@wrapped_fiat.register(ufl.TensorElement)
+def wrapped_fiat_tensorelement(element):
+    scalar_elem = create_element(element.sub_elements()[0])
+    shape = element.reference_value_shape()
+    return finat.TensorFiniteElement(scalar_elem, shape)
+
+
+fiat_mode = DynamicallyScoped(False)
+
+
 quad_tpc = ufl.TensorProductCell(ufl.interval, ufl.interval)
 _cache = weakref.WeakKeyDictionary()
 
@@ -221,6 +245,10 @@ def create_element(ufl_element, shape_innermost=True):
     :arg ufl_element: The UFL element to create a FInAT element from.
     :arg shape_innermost: Vector/tensor indices come after basis function indices
     """
+    if fiat_mode.value:
+        assert shape_innermost
+        return wrapped_fiat(ufl_element)
+
     finat_element, deps = _create_element(ufl_element,
                                           shape_innermost=shape_innermost)
     return finat_element
