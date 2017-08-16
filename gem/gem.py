@@ -25,7 +25,7 @@ from numpy import asarray
 from gem.node import Node as NodeBase
 
 
-__all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure', 'ComplexPartsFunction',
+__all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'Variable', 'Sum', 'Product', 'Division', 'Power',
            'MathFunction', 'MinValue', 'MaxValue', 'Comparison',
            'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
@@ -283,18 +283,6 @@ class Power(Scalar):
 
 
 class MathFunction(Scalar):
-    __slots__ = ('name', 'children')
-    __front__ = ('name',)
-
-    def __init__(self, name, *args):
-        assert isinstance(name, str)
-        assert all(arg.shape == () for arg in args)
-
-        self.name = name
-        self.children = args
-
-
-class ComplexPartsFunction(Scalar):
     __slots__ = ('name', 'children')
     __front__ = ('name',)
 
