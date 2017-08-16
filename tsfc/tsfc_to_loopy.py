@@ -369,12 +369,12 @@ def tsfc_to_loopy(ir, argument_ordering, output_names="A", kernel_name="tsfc_ker
 
     if 1:  # Add an option to turn this off later if we want.
         for outname in output_names:
-            Aiwrites = [ins for ins in knl.instructions
+            aiwrites = [ins for ins in knl.instructions
                         if ins.assignee.aggregate.name == outname]
-            assert len(Aiwrites) == 1
+            assert len(aiwrites) == 1
 
             # turn x = x + y into x = y
-            insn = Aiwrites[0]
+            insn = aiwrites[0]
             rvalue = insn.expression
             newrvalue = rvalue.children[1]
             insn.expression = newrvalue
