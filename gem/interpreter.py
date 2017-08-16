@@ -169,18 +169,25 @@ def _evaluate_operator(e, self):
     return result
 
 
-@_evaluate.register(gem.ComplexPartsFunction)  # noqa: F811
+@_evaluate.register(gem.MathFunction)  # noqa: F811
 def _(e, self):
     ops = [self(o) for o in e.children]
+    result = Result.empty(*ops)
+    names = {"abs": abs,
+             "log": math.log}
+    op = names[e.name]
     if e.name is 'imag':
         for idx in numpy.ndindex(result.tshape):
             result[idx] = [o[o.filter(idx,result.fids)].imag for o in ops]
     elif e.name is 'conj':
         for idx in numpy.ndindex(result.tshape):
             result[idx] = [o[o.filter(idx,result.fids)].conjugate() for o in ops]
+    elif e.name is 'real':
+        for idx in numpy.ndindex(result.tshape):
+            result[idx] = [o[o.filter(idx,result.fids)].real for o in ops]
     else:
         for idx in numpy.ndindex(result.tshape):
-            result[idx] = [o[o.filter(idx,result.fids)].real for o in ops] 
+            result[idx] = op(*(o[o.filter(idx, result.fids)] for o in ops))
     return result
 
 
