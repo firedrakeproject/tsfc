@@ -25,17 +25,12 @@ from __future__ import absolute_import, print_function, division
 
 from singledispatch import singledispatch
 from functools import partial
-import types
 import weakref
 
 import FIAT
-from FIAT.reference_element import FiredrakeQuadrilateral
-from FIAT.dual_set import DualSet
-from FIAT.quadrature import QuadratureRule  # noqa
+from FIAT.tensor_product import FlattenedDimensions
 
 import ufl
-
-from .mixedelement import MixedElement
 
 
 __all__ = ("create_element", "supported_elements", "as_fiat_cell")
@@ -71,77 +66,6 @@ element is supported, but must be handled specially because it doesn't
 have a direct FIAT equivalent."""
 
 
-class FlattenToQuad(FIAT.FiniteElement):
-    """A wrapper class that flattens a FIAT quadrilateral element defined
-    on a TensorProductCell to one with FiredrakeQuadrilateral entities
-    and tabulation properties."""
-
-    def __init__(self, element):
-        """ Constructs a FlattenToQuad element.
-
-        :arg element: a fiat element
-        """
-        nodes = element.dual.nodes
-        ref_el = FiredrakeQuadrilateral()
-        entity_ids = element.dual.entity_ids
-
-        flat_entity_ids = {}
-        flat_entity_ids[0] = entity_ids[(0, 0)]
-        flat_entity_ids[1] = dict(enumerate(
-            [v for k, v in sorted(entity_ids[(0, 1)].items())] +
-            [v for k, v in sorted(entity_ids[(1, 0)].items())]
-        ))
-        flat_entity_ids[2] = entity_ids[(1, 1)]
-        dual = DualSet(nodes, ref_el, flat_entity_ids)
-        super(FlattenToQuad, self).__init__(ref_el, dual,
-                                            element.get_order(),
-                                            element.get_formdegree(),
-                                            element._mapping)
-        self.element = element
-
-    def degree(self):
-        """Return the degree of the (embedding) polynomial space."""
-        return self.element.degree()
-
-    def tabulate(self, order, points, entity=None):
-        """Return tabulated values of derivatives up to a given order of
-        basis functions at given points.
-
-        :arg order: The maximum order of derivative.
-        :arg points: An iterable of points.
-        :arg entity: Optional (dimension, entity number) pair
-                     indicating which topological entity of the
-                     reference element to tabulate on.  If ``None``,
-                     default cell-wise tabulation is performed.
-        """
-        if entity is None:
-            entity = (2, 0)
-
-        # Entity is provided in flattened form (d, i)
-        # We factor the entity and construct an appropriate
-        # entity id for a TensorProductCell: ((d1, d2), i)
-        entity_dim, entity_id = entity
-        if entity_dim == 2:
-            assert entity_id == 0
-            product_entity = ((1, 1), 0)
-        elif entity_dim == 1:
-            facets = [((0, 1), 0),
-                      ((0, 1), 1),
-                      ((1, 0), 0),
-                      ((1, 0), 1)]
-            product_entity = facets[entity_id]
-        elif entity_dim == 0:
-            raise NotImplementedError("Not implemented for 0 dimension entities")
-        else:
-            raise ValueError("Illegal entity dimension %s" % entity_dim)
-
-        return self.element.tabulate(order, points, product_entity)
-
-    def value_shape(self):
-        """Return the value shape of the finite element functions."""
-        return self.element.value_shape()
-
-
 def as_fiat_cell(cell):
     """Convert a ufl cell to a FIAT cell.
 
@@ -173,16 +97,15 @@ def _(element, vector_is_mixed):
         # Real element is just DG0
         cell = element.cell()
         return create_element(ufl.FiniteElement("DG", cell, 0), vector_is_mixed)
-    if element.family() == "Quadrature":
-        # Sneaky import from FFC
-        from ffc.quadratureelement import QuadratureElement
-        ffc_element = QuadratureElement(element)
-
-        def tabulate(self, order, points, entity):
-            return QuadratureElement.tabulate(self, order, points)
-        ffc_element.tabulate = types.MethodType(tabulate, ffc_element)
-        return ffc_element
     cell = as_fiat_cell(element.cell())
+    if element.family() == "Quadrature":
+        degree = element.degree()
+        scheme = element.quadrature_scheme()
+        if degree is None or scheme is None:
+            raise ValueError("Quadrature scheme and degree must be specified!")
+
+        quad_rule = FIAT.create_quadrature(cell, degree, scheme)
+        return FIAT.QuadratureElement(cell, quad_rule.get_points())
     lmbda = supported_elements[element.family()]
     if lmbda is None:
         if element.cell().cellname() != "quadrilateral":
@@ -190,7 +113,7 @@ def _(element, vector_is_mixed):
                              element.family())
         # Handle quadrilateral short names like RTCF and RTCE.
         element = element.reconstruct(cell=quad_tpc)
-        return FlattenToQuad(create_element(element, vector_is_mixed))
+        return FlattenedDimensions(create_element(element, vector_is_mixed))
 
     kind = element.variant()
     if kind is None:
@@ -276,7 +199,7 @@ def _(element, vector_is_mixed):
     rec(element.sub_elements())
     fiat_elements = map(partial(create_element, vector_is_mixed=vector_is_mixed),
                         elements)
-    return MixedElement(fiat_elements)
+    return FIAT.MixedElement(fiat_elements)
 
 
 quad_tpc = ufl.TensorProductCell(ufl.Cell("interval"), ufl.Cell("interval"))

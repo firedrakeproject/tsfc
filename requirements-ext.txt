@@ -2,4 +2,3 @@ loo.py
 numpy
 singledispatch
 six
-PuLP>=1.6.5

@@ -23,42 +23,6 @@ class cached_property(object):
         return result
 
 
-class OrderedSet(collections.MutableSet):
-    """A set that preserves ordering, useful for deterministic code
-    generation."""
-
-    def __init__(self, iterable=None):
-        self._list = list()
-        self._set = set()
-
-        if iterable is not None:
-            for item in iterable:
-                self.add(item)
-
-    def __contains__(self, item):
-        return item in self._set
-
-    def __iter__(self):
-        return iter(self._list)
-
-    def __len__(self):
-        return len(self._list)
-
-    def __repr__(self):
-        return "OrderedSet({0})".format(self._list)
-
-    def add(self, value):
-        if value not in self._set:
-            self._list.append(value)
-            self._set.add(value)
-
-    def discard(self, value):
-        # O(n) time complexity: do not use this!
-        if value in self._set:
-            self._list.remove(value)
-            self._set.discard(value)
-
-
 def groupby(iterable, key=None):
     """Groups objects by their keys.
 
@@ -76,9 +40,7 @@ def groupby(iterable, key=None):
 
 
 def make_proxy_class(name, cls):
-    """Constructs a proxy class for a given class.  Instance attributes
-    are supposed to be listed e.g. with the unset_attribute decorator,
-    so that this function find them and create wrappers for them.
+    """Constructs a proxy class for a given class.
 
     :arg name: name of the new proxy class
     :arg cls: the wrapee class to create a proxy for
@@ -96,3 +58,54 @@ def make_proxy_class(name, cls):
         if not attr.startswith('_'):
             dct[attr] = make_proxy_property(attr)
     return type(name, (), dct)
+
+
+# Implementation of dynamically scoped variables in Python.
+class UnsetVariableError(LookupError):
+    pass
+
+
+_unset = object()
+
+
+class DynamicallyScoped(object):
+    """A dynamically scoped variable."""
+
+    def __init__(self, default_value=_unset):
+        if default_value is _unset:
+            self._head = None
+        else:
+            self._head = (default_value, None)
+
+    def let(self, value):
+        return _LetBlock(self, value)
+
+    @property
+    def value(self):
+        if self._head is None:
+            raise UnsetVariableError("Dynamically scoped variable not set.")
+        result, tail = self._head
+        return result
+
+
+class _LetBlock(object):
+    """Context manager representing a dynamic scope."""
+
+    def __init__(self, variable, value):
+        self.variable = variable
+        self.value = value
+        self.state = None
+
+    def __enter__(self):
+        assert self.state is None
+        value = self.value
+        tail = self.variable._head
+        scope = (value, tail)
+        self.variable._head = scope
+        self.state = scope
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        variable = self.variable
+        assert self.state is variable._head
+        value, variable._head = variable._head
+        self.state = None

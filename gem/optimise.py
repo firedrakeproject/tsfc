@@ -2,16 +2,18 @@
 expressions."""
 
 from __future__ import absolute_import, print_function, division
-from six.moves import filter, map, zip
+from six.moves import filter, map, zip, zip_longest
 
-from functools import reduce
+from collections import OrderedDict, defaultdict
+from functools import partial, reduce
 from itertools import combinations, permutations
 
 import numpy
 from singledispatch import singledispatch
 
 from gem.utils import groupby
-from gem.node import Memoizer, MemoizerArg, reuse_if_untouched, reuse_if_untouched_arg
+from gem.node import (Memoizer, MemoizerArg, reuse_if_untouched,
+                      reuse_if_untouched_arg, traversal)
 from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
                      Product, Sum, Comparison, Conditional, Division,
                      Index, VariableIndex, Indexed, FlexiblyIndexed,
@@ -39,7 +41,7 @@ def literal_rounding_literal(node, self):
     epsilon = self.epsilon
     # Mimic the rounding applied at COFFEE formatting, which in turn
     # mimics FFC formatting.
-    one_decimal = numpy.round(table, 1)
+    one_decimal = numpy.asarray(numpy.round(table, 1))
     one_decimal[numpy.logical_not(one_decimal)] = 0  # no minus zeros
     return Literal(numpy.where(abs(table - one_decimal) < epsilon, one_decimal, table))
 
@@ -186,6 +188,12 @@ def _select_expression(expressions, index):
     if types <= {Literal, Zero, Failure}:
         return partial_indexed(ListTensor(expressions), (index,))
 
+    if types <= {ComponentTensor, Zero}:
+        shape, = set(e.shape for e in expressions)
+        multiindex = tuple(Index(extent=d) for d in shape)
+        children = remove_componenttensors([Indexed(e, multiindex) for e in expressions])
+        return ComponentTensor(_select_expression(children, index), multiindex)
+
     if len(types) == 1:
         cls, = types
         if cls.__front__ or cls.__back__:
@@ -234,6 +242,15 @@ def delta_elimination(sum_indices, factors):
     """
     sum_indices = list(sum_indices)  # copy for modification
 
+    def substitute(expression, from_, to_):
+        if from_ not in expression.free_indices:
+            return expression
+        elif isinstance(expression, Delta):
+            mapper = MemoizerArg(filtered_replace_indices)
+            return mapper(expression, ((from_, to_),))
+        else:
+            return Indexed(ComponentTensor(expression, (from_,)), (to_,))
+
     delta_queue = [(f, index)
                    for f in factors if isinstance(f, Delta)
                    for index in (f.i, f.j) if index in sum_indices]
@@ -243,8 +260,7 @@ def delta_elimination(sum_indices, factors):
 
         sum_indices.remove(from_)
 
-        mapper = MemoizerArg(filtered_replace_indices)
-        factors = [mapper(e, ((from_, to_),)) for e in factors]
+        factors = [substitute(f, from_, to_) for f in factors]
 
         delta_queue = [(f, index)
                        for f in factors if isinstance(f, Delta)
@@ -298,7 +314,7 @@ def sum_factorise(sum_indices, factors):
         # Empty product
         return one
 
-    if len(sum_indices) > 5:
+    if len(sum_indices) > 6:
         raise NotImplementedError("Too many indices for sum factorisation!")
 
     # Form groups by free indices
@@ -353,7 +369,53 @@ def make_product(factors, sum_indices=()):
     return sum_factorise(sum_indices, factors)
 
 
-def traverse_product(expression, stop_at=None):
+def make_rename_map():
+    """Creates an rename map for reusing the same index renames."""
+    return defaultdict(Index)
+
+
+def make_renamer(rename_map):
+    """Creates a function for renaming indices when expanding products of
+    IndexSums, i.e. applying to following rule:
+
+        (sum_i a_i)*(sum_i b_i) ===> \sum_{i,i'} a_i*b_{i'}
+
+    :arg rename_map: An rename map for renaming indices the same way
+                     as functions returned by other calls of this
+                     function.
+    :returns: A function that takes an iterable of indices to rename,
+              and returns (renamed indices, applier), where applier is
+              a function that remap the free indices of GEM
+              expressions from the old to the new indices.
+    """
+    def _renamer(rename_map, current_set, incoming):
+        renamed = []
+        renames = []
+        for i in incoming:
+            j = i
+            while j in current_set:
+                j = rename_map[j]
+            current_set.add(j)
+            renamed.append(j)
+            if i != j:
+                renames.append((i, j))
+
+        if renames:
+            def applier(expr):
+                pairs = [(i, j) for i, j in renames if i in expr.free_indices]
+                if pairs:
+                    current, renamed = zip(*pairs)
+                    return Indexed(ComponentTensor(expr, current), renamed)
+                else:
+                    return expr
+        else:
+            applier = lambda expr: expr
+
+        return tuple(renamed), applier
+    return partial(_renamer, rename_map, set())
+
+
+def traverse_product(expression, stop_at=None, rename_map=None):
     """Traverses a product tree and collects factors, also descending into
     tensor contractions (IndexSum).  The nominators of divisions are
     also broken up, but not the denominators.
@@ -363,10 +425,15 @@ def traverse_product(expression, stop_at=None):
                   and returns true for some subexpression, that
                   subexpression is not broken into further factors
                   even if it is a product-like expression.
+    :arg rename_map: an rename map for consistent index renaming
     :returns: (sum_indices, terms)
               - sum_indices: list of indices to sum over
               - terms: list of product terms
     """
+    if rename_map is None:
+        rename_map = make_rename_map()
+    renamer = make_renamer(rename_map)
+
     sum_indices = []
     terms = []
 
@@ -376,8 +443,9 @@ def traverse_product(expression, stop_at=None):
         if stop_at is not None and stop_at(expr):
             terms.append(expr)
         elif isinstance(expr, IndexSum):
-            stack.append(expr.children[0])
-            sum_indices.extend(expr.multiindex)
+            indices, applier = renamer(expr.multiindex)
+            sum_indices.extend(indices)
+            stack.extend(remove_componenttensors(map(applier, expr.children)))
         elif isinstance(expr, Product):
             stack.extend(reversed(expr.children))
         elif isinstance(expr, Division):
@@ -431,7 +499,36 @@ def contraction(expression):
     expression, = remove_componenttensors([expression])
 
     # Flatten product tree, eliminate deltas, sum factorise
-    return sum_factorise(*delta_elimination(*traverse_product(expression)))
+    def rebuild(expression):
+        sum_indices, factors = delta_elimination(*traverse_product(expression))
+        factors = remove_componenttensors(factors)
+        return sum_factorise(sum_indices, factors)
+
+    # Sometimes the value shape is composed as a ListTensor, which
+    # could get in the way of decomposing factors.  In particular,
+    # this is the case for H(div) and H(curl) conforming tensor
+    # product elements.  So if ListTensors are used, they are pulled
+    # out to be outermost, so we can straightforwardly factorise each
+    # of its entries.
+    lt_fis = OrderedDict()  # ListTensor free indices
+    for node in traversal((expression,)):
+        if isinstance(node, Indexed):
+            child, = node.children
+            if isinstance(child, ListTensor):
+                lt_fis.update(zip_longest(node.multiindex, ()))
+    lt_fis = tuple(index for index in lt_fis if index in expression.free_indices)
+
+    if lt_fis:
+        # Rebuild each split component
+        tensor = ComponentTensor(expression, lt_fis)
+        entries = [Indexed(tensor, zeta) for zeta in numpy.ndindex(tensor.shape)]
+        entries = remove_componenttensors(entries)
+        return Indexed(ListTensor(
+            numpy.array(list(map(rebuild, entries))).reshape(tensor.shape)
+        ), lt_fis)
+    else:
+        # Rebuild whole expression at once
+        return rebuild(expression)
 
 
 @singledispatch
@@ -531,3 +628,37 @@ def aggressive_unroll(expression):
     expression, = unroll_indexsum((expression,), predicate=lambda index: True)
     expression, = remove_componenttensors((expression,))
     return expression
+
+
+@singledispatch
+def _expand_conditional(node, self):
+    raise AssertionError("cannot handle type %s" % type(node))
+
+
+_expand_conditional.register(Node)(reuse_if_untouched)
+
+
+@_expand_conditional.register(Conditional)
+def _expand_conditional_conditional(node, self):
+    if self.predicate(node):
+        condition, then, else_ = map(self, node.children)
+        return Sum(Product(Conditional(condition, one, Zero()), then),
+                   Product(Conditional(condition, Zero(), one), else_))
+    else:
+        return reuse_if_untouched(node, self)
+
+
+def expand_conditional(expressions, predicate):
+    """Applies the following substitution rule on selected :py:class:`Conditional`s:
+
+        Conditional(a, b, c) => Conditional(a, 1, 0)*b + Conditional(a, 0, 1)*c
+
+    :arg expressions: expression DAG roots
+    :arg predicate: a predicate function on :py:class:`Conditional`s to determine
+                    whether to apply the substitution rule or not
+
+    :returns: expression DAG roots with some :py:class:`Conditional` nodes expanded
+    """
+    mapper = Memoizer(_expand_conditional)
+    mapper.predicate = predicate
+    return list(map(mapper, expressions))

@@ -1,10 +1,6 @@
 """Utilities for preprocessing UFL objects."""
 
 from __future__ import absolute_import, print_function, division
-from six.moves import range, zip
-
-import collections
-import itertools
 
 import numpy
 from singledispatch import singledispatch
@@ -21,11 +17,10 @@ from ufl.corealg.map_dag import map_expr_dag
 from ufl.corealg.multifunction import MultiFunction
 from ufl.geometry import QuadratureWeight
 from ufl.classes import (Abs, Argument, CellOrientation, Coefficient,
-                         ComponentTensor, Expr, FloatValue,
-                         FunctionSpace, Division, MixedElement,
-                         MultiIndex, Product, ReferenceValue,
-                         ScalarValue, Sqrt, Zero, CellVolume,
-                         FacetArea)
+                         ComponentTensor, Expr, FloatValue, Division,
+                         MixedElement, MultiIndex, Product,
+                         ReferenceValue, ScalarValue, Sqrt, Zero,
+                         CellVolume, FacetArea)
 
 from gem.node import MemoizerArg
 
@@ -206,89 +201,17 @@ class CoefficientSplitter(MultiFunction, ModifiedTerminalMixin):
 
 def split_coefficients(expression, split):
     """Split mixed coefficients, so mixed elements need not be
-    implemented."""
+    implemented.
+
+    :arg split: A :py:class:`dict` mapping each mixed coefficient to a
+                sequence of subcoefficients.  If None, calling this
+                function is a no-op.
+    """
+    if split is None:
+        return expression
+
     splitter = CoefficientSplitter(split)
     return map_expr_dag(splitter, expression)
-
-
-class ArgumentReplacer(MultiFunction, ModifiedTerminalMixin):
-    def __init__(self, indices):
-        MultiFunction.__init__(self)
-        self._indices = tuple(indices)
-
-    expr = MultiFunction.reuse_if_untouched
-
-    def modified_terminal(self, o):
-        mt = analyse_modified_terminal(o)
-        terminal = mt.terminal
-
-        if not isinstance(terminal, Argument):
-            # Only replace arguments
-            return o
-
-        if type(terminal.ufl_element()) != MixedElement:
-            # Only replace mixed arguments
-            return o
-
-        # Reference value expected
-        assert mt.reference_value
-
-        # Derivative indices
-        beta = indices(mt.local_derivatives)
-
-        # Dimension
-        dim = terminal.ufl_domain().ufl_cell().topological_dimension()
-
-        # Selected sub element
-        i = self._indices[terminal.number()]
-
-        components = []
-        for j, sub_elem in enumerate(terminal.ufl_element().sub_elements()):
-            if i == j:
-                arg = Argument(FunctionSpace(terminal.ufl_domain(), sub_elem), terminal.number())
-                # Apply terminal modifiers to the subargument
-                component = construct_modified_terminal(mt, arg)
-                # Collect components of the subargument
-                for alpha in numpy.ndindex(sub_elem.reference_value_shape()):
-                    # New modified terminal: component[alpha + beta]
-                    components.append(component[alpha + beta])
-            else:
-                # Fill space with zeros
-                for alpha in numpy.ndindex(sub_elem.reference_value_shape()):
-                    components.append(Zero(free_indices=tuple(index.count() for index in beta),
-                                           index_dimensions=tuple(dim for index in beta)))
-        # Repack derivative indices to shape
-        c, = indices(1)
-        return ComponentTensor(as_tensor(components)[c], MultiIndex((c,) + beta))
-
-
-SplitExpression = collections.namedtuple("SplitExpression", ["indices", "expression"])
-
-
-def split_expression(expression, arguments):
-    index_ranges = []
-    for arg in arguments:
-        if type(arg.ufl_element()) == MixedElement:
-            index_ranges.append(list(range(len(arg.ufl_element().sub_elements()))))
-        else:
-            index_ranges.append([0])
-
-    exprs = []
-    for multiindex in itertools.product(*index_ranges):
-        replacer = ArgumentReplacer(multiindex)
-        exprs.append(SplitExpression(multiindex, map_expr_dag(replacer, expression)))
-    return tuple(exprs)
-
-
-def break_element(element):
-    if type(element) == MixedElement:
-        return list(enumerate(element.sub_elements()))
-    else:
-        return [(0, element)]
-
-
-def unmix_element(element):
-    return list(zip(*break_element(element)))[1]
 
 
 class PickRestriction(MultiFunction, ModifiedTerminalMixin):
@@ -319,40 +242,6 @@ class PickRestriction(MultiFunction, ModifiedTerminalMixin):
             return Zero(o.ufl_shape, o.ufl_free_indices, o.ufl_index_dimensions)
         else:
             return o
-
-
-def _spanning_degree(cell, degree):
-    if cell is None:
-        assert degree == 0
-        return degree
-    elif cell.cellname() in ["interval", "triangle", "tetrahedron"]:
-        return degree
-    elif cell.cellname() == "quadrilateral":
-        # TODO: Tensor-product space assumed
-        return 2 * degree
-    elif isinstance(cell, ufl.TensorProductCell):
-        try:
-            # A component cell might be a quadrilateral, so recurse.
-            return sum(_spanning_degree(sub_cell, d)
-                       for sub_cell, d in zip(cell.sub_cells(), degree))
-        except TypeError:
-            assert degree == 0
-            return 0
-    else:
-        raise ValueError("Unknown cell %s" % cell.cellname())
-
-
-def spanning_degree(element):
-    """Determine the degree of the polynomial space spanning an element.
-
-    :arg element: The element to determine the degree of.
-
-    .. warning::
-
-       For non-simplex elements, this assumes a tensor-product
-       space.
-    """
-    return _spanning_degree(element.cell(), element.degree())
 
 
 def ufl_reuse_if_untouched(o, *ops):

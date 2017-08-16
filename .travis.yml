@@ -7,23 +7,11 @@ python:
   - "2.7"
   - "3.5"
 
-env:
-  - NUMPY_VERSION="==1.9.0"
-  - NUMPY_VERSION=">=1.10"
-
-matrix:
-  exclude:
-  - python: "3.5"
-  include:
-  - python: "3.5"
-    env: NUMPY_VERSION=">=1.10"
-
 before_install:
   - pip install -r requirements.txt
   - pip install flake8
   - pip install flake8-future-import
   - pip install --upgrade pytest
-  - pip install --upgrade "numpy$NUMPY_VERSION"
 
 install:
   - python setup.py install

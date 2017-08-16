@@ -33,8 +33,8 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'MathFunction', 'MinValue', 'MaxValue', 'Comparison',
            'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
-           'IndexSum', 'ListTensor', 'Delta', 'index_sum',
-           'partial_indexed', 'reshape', 'view']
+           'IndexSum', 'ListTensor', 'Concatenate', 'Delta',
+           'index_sum', 'partial_indexed', 'reshape', 'view']
 
 
 class NodeMeta(type):
@@ -269,13 +269,16 @@ class Power(Scalar):
         assert not base.shape
         assert not exponent.shape
 
-        # Zero folding
+        # Constant folding
         if isinstance(base, Zero):
             if isinstance(exponent, Zero):
                 raise ValueError("cannot solve 0^0")
             return Zero()
         elif isinstance(exponent, Zero):
             return one
+
+        if isinstance(base, Constant) and isinstance(exponent, Constant):
+            return Literal(base.value ** exponent.value)
 
         self = super(Power, cls).__new__(cls)
         self.children = base, exponent
@@ -497,6 +500,10 @@ class Indexed(Scalar):
 
         return self
 
+    def index_ordering(self):
+        """Running indices in the order of indexing in this node."""
+        return tuple(i for i in self.multiindex if isinstance(i, Index))
+
 
 class FlexiblyIndexed(Scalar):
     """Flexible indexing of :py:class:`Variable`s to implement views and
@@ -549,6 +556,13 @@ class FlexiblyIndexed(Scalar):
         self.children = (variable,)
         self.dim2idxs = tuple(dim2idxs_)
         self.free_indices = unique(free_indices)
+
+    def index_ordering(self):
+        """Running indices in the order of indexing in this node."""
+        return tuple(index
+                     for _, idxs in self.dim2idxs
+                     for index, _ in idxs
+                     if isinstance(index, Index))
 
 
 class ComponentTensor(Node):
@@ -652,6 +666,9 @@ class ListTensor(Node):
     def shape(self):
         return self.array.shape
 
+    def __reduce__(self):
+        return type(self), (self.array,)
+
     def reconstruct(self, *args):
         return ListTensor(asarray(args).reshape(self.array.shape))
 
@@ -669,6 +686,29 @@ class ListTensor(Node):
 
     def get_hash(self):
         return hash((type(self), self.shape, self.children))
+
+
+class Concatenate(Node):
+    """Flattens and concatenates GEM expressions by shape.
+
+    Similar to what UFL MixedElement does to value shape.  For
+    example, if children have shapes (2, 2), (), and (3,) then the
+    concatenated expression has shape (8,).
+    """
+    __slots__ = ('children',)
+
+    def __new__(cls, *children):
+        if all(isinstance(child, Zero) for child in children):
+            size = int(sum(numpy.prod(child.shape, dtype=int) for child in children))
+            return Zero((size,))
+
+        self = super(Concatenate, cls).__new__(cls)
+        self.children = children
+        return self
+
+    @property
+    def shape(self):
+        return (int(sum(numpy.prod(child.shape, dtype=int) for child in self.children)),)
 
 
 class Delta(Scalar, Terminal):
@@ -776,7 +816,7 @@ def reshape(expression, *shapes):
     shape_of = dict(zip(indexes, shapes))
 
     dim2idxs_ = []
-    indices = []
+    indices = [[] for _ in range(len(indexes))]
     for offset, idxs in dim2idxs:
         idxs_ = []
         for idx in idxs:
@@ -788,13 +828,13 @@ def reshape(expression, *shapes):
                 raise ValueError("Shape {} does not match extent {}.".format(shape, dim))
             strides = strides_of(shape)
             for extent, stride_ in zip(shape, strides):
-                index = Index(extent=extent)
-                idxs_.append((index, stride_ * stride))
-                indices.append(index)
+                index_ = Index(extent=extent)
+                idxs_.append((index_, stride_ * stride))
+                indices[indexes.index(index)].append(index_)
         dim2idxs_.append((offset, tuple(idxs_)))
 
     expr = FlexiblyIndexed(variable, tuple(dim2idxs_))
-    return ComponentTensor(expr, tuple(indices))
+    return ComponentTensor(expr, tuple(chain.from_iterable(indices)))
 
 
 def view(expression, *slices):
@@ -808,7 +848,7 @@ def view(expression, *slices):
     slice_of = dict(zip(indexes, slices))
 
     dim2idxs_ = []
-    indices = []
+    indices = [None] * len(slices)
     for offset, idxs in dim2idxs:
         offset_ = offset
         idxs_ = []
@@ -827,7 +867,7 @@ def view(expression, *slices):
             offset_ += start * stride
             extent = 1 + (stop - start - 1) // step
             index_ = Index(extent=extent)
-            indices.append(index_)
+            indices[indexes.index(index)] = index_
             idxs_.append((index_, step * stride))
         dim2idxs_.append((offset_, tuple(idxs_)))
 

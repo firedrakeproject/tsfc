@@ -3,20 +3,25 @@ from six import iterkeys, iteritems, viewitems
 from six.moves import range, zip
 
 import collections
-import itertools
 import operator
+import string
 import time
 from functools import reduce
 from itertools import chain
 
+from numpy import asarray
+
 import ufl
 from ufl.algorithms import extract_arguments, extract_coefficients
 from ufl.algorithms.analysis import has_type
-from ufl.classes import Form, CellVolume, Argument, FunctionSpace
+from ufl.classes import Form, CellVolume
 from ufl.log import GREEN
+from ufl.utils.sequences import max_degree
 
 import gem
 import gem.impero_utils as impero_utils
+
+from FIAT.reference_element import TensorProductCell
 
 from finat.point_set import PointSet
 from finat.quadrature import AbstractQuadratureRule, make_quadrature
@@ -24,7 +29,6 @@ from finat.quadrature import AbstractQuadratureRule, make_quadrature
 from tsfc import fem, ufl_utils
 from tsfc.coffee import SCALAR_TYPE, generate as generate_coffee
 from tsfc.fiatinterface import as_fiat_cell
-from tsfc.finatinterface import create_element
 from tsfc.logging import logger
 from tsfc.parameters import default_parameters
 
@@ -89,27 +93,21 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     cell = integral_data.domain.ufl_cell()
     arguments = form_data.preprocessed_form.arguments()
     kernel_name = "%s_%s_integral_%s" % (prefix, integral_type, integral_data.subdomain_id)
+    # Handle negative subdomain_id
+    kernel_name = kernel_name.replace("-", "_")
 
     fiat_cell = as_fiat_cell(cell)
     integration_dim, entity_ids = lower_integral_type(fiat_cell, integral_type)
 
-    argument_multiindices = tuple(tuple(create_element(elem).get_indices()
-                                        for elem in ufl_utils.unmix_element(arg.ufl_element()))
-                                  for arg in arguments)
-    argument_indices = tuple(chain(*chain(*argument_multiindices)))
     quadrature_indices = []
 
     # Dict mapping domains to index in original_form.ufl_domains()
     domain_numbering = form_data.original_form.domain_numbering()
     builder = interface.KernelBuilder(integral_type, integral_data.subdomain_id,
                                       domain_numbering[integral_data.domain])
-    return_variables = []
-    fake_args = [[Argument(FunctionSpace(arg.ufl_domain(), sub_elem), arg.number())
-                  for sub_elem in ufl_utils.unmix_element(arg.ufl_element())]
-                 for arg in arguments]
-    for split_indices, split_args in zip(itertools.product(*argument_multiindices),
-                                         itertools.product(*fake_args)):
-        return_variables.extend(builder.set_arguments(split_args, split_indices))
+    argument_multiindices = tuple(builder.create_element(arg.ufl_element()).get_indices()
+                                  for arg in arguments)
+    return_variables = builder.set_arguments(arguments, argument_multiindices)
 
     coordinates = ufl_utils.coordinate_coefficient(mesh)
     builder.set_coordinates(coordinates)
@@ -119,6 +117,11 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     # Map from UFL FiniteElement objects to multiindices.  This is
     # so we reuse Index instances when evaluating the same coefficient
     # multiple times with the same table.
+    #
+    # We also use the same dict for the unconcatenate index cache,
+    # which maps index objects to tuples of multiindices.  These two
+    # caches shall never conflict as their keys have different types
+    # (UFL finite elements vs. GEM index objects).
     index_cache = {}
 
     kernel_cfg = dict(interface=builder,
@@ -126,13 +129,13 @@ def compile_integral(integral_data, form_data, prefix, parameters,
                       precision=parameters["precision"],
                       integration_dim=integration_dim,
                       entity_ids=entity_ids,
-                      # argument_multiindices=argument_multiindices,
+                      argument_multiindices=argument_multiindices,
                       index_cache=index_cache)
 
     kernel_cfg["facetarea"] = facetarea_generator(mesh, coordinates, kernel_cfg, integral_type)
     kernel_cfg["cellvolume"] = cellvolume_generator(mesh, coordinates, kernel_cfg)
 
-    mode_irs = collections.defaultdict(collections.OrderedDict)
+    mode_irs = collections.OrderedDict()
     for integral in integral_data.integrals:
         params = parameters.copy()
         params.update(integral.metadata())  # integral metadata overrides
@@ -140,6 +143,7 @@ def compile_integral(integral_data, form_data, prefix, parameters,
             del params["quadrature_rule"]
 
         mode = pick_mode(params["mode"])
+        mode_irs.setdefault(mode, collections.OrderedDict())
 
         integrand = ufl_utils.replace_coordinates(integral.integrand(), coordinates)
         integrand = ufl.replace(integrand, form_data.function_replace_map)
@@ -149,6 +153,19 @@ def compile_integral(integral_data, form_data, prefix, parameters,
         # the estimated polynomial degree attached by compute_form_data
         quadrature_degree = params.get("quadrature_degree",
                                        params["estimated_polynomial_degree"])
+        try:
+            quadrature_degree = params["quadrature_degree"]
+        except KeyError:
+            quadrature_degree = params["estimated_polynomial_degree"]
+            functions = list(arguments) + [coordinates] + list(integral_data.integral_coefficients)
+            function_degrees = [f.ufl_function_space().ufl_element().degree() for f in functions]
+            if all((asarray(quadrature_degree) > 10 * asarray(degree)).all()
+                   for degree in function_degrees):
+                logger.warning("Estimated quadrature degree %s more "
+                               "than tenfold greater than any "
+                               "argument/coefficient degree (max %s)",
+                               quadrature_degree, max_degree(function_degrees))
+
         try:
             quad_rule = params["quadrature_rule"]
         except KeyError:
@@ -164,23 +181,18 @@ def compile_integral(integral_data, form_data, prefix, parameters,
 
         config = kernel_cfg.copy()
         config.update(quadrature_rule=quad_rule)
-        for idx, expr in ufl_utils.split_expression(integrand, arguments):
-            config_ = config.copy()
-            subblock_argument_multiindices = tuple(foo[ii] for foo, ii in zip(argument_multiindices, idx))
-            config_.update(argument_multiindices=subblock_argument_multiindices)
-            expressions = fem.compile_ufl(integrand,
-                                          interior_facet=interior_facet,
-                                          **config_)
-            reps = mode.Integrals(expressions, quadrature_multiindex,
-                                  subblock_argument_multiindices, params)
-            for var, rep in zip(return_variables, reps):
-                mode_irs[idx].setdefault(mode, collections.OrderedDict()).setdefault(var, []).append(rep)
+        expressions = fem.compile_ufl(integrand,
+                                      interior_facet=interior_facet,
+                                      **config)
+        reps = mode.Integrals(expressions, quadrature_multiindex,
+                              argument_multiindices, params)
+        for var, rep in zip(return_variables, reps):
+            mode_irs[mode].setdefault(var, []).append(rep)
 
     # Finalise mode representations into a set of assignments
     assignments = []
-    for idx in sorted(mode_irs):
-        for mode, var_reps in iteritems(mode_irs[idx]):
-            assignments.extend(mode.flatten(viewitems(var_reps)))
+    for mode, var_reps in iteritems(mode_irs):
+        assignments.extend(mode.flatten(viewitems(var_reps), index_cache))
 
     if assignments:
         return_variables, expressions = zip(*assignments)
@@ -191,8 +203,7 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     # Need optimised roots for COFFEE
     options = dict(reduce(operator.and_,
                           [viewitems(mode.finalise_options)
-                           for idx in sorted(mode_irs)
-                           for mode in iterkeys(mode_irs[idx])]))
+                           for mode in iterkeys(mode_irs)]))
     expressions = impero_utils.preprocess_gem(expressions, **options)
     assignments = list(zip(return_variables, expressions))
 
@@ -201,7 +212,9 @@ def compile_integral(integral_data, form_data, prefix, parameters,
         builder.require_cell_orientations()
 
     # Construct ImperoC
-    index_ordering = tuple(quadrature_indices) + argument_indices
+    split_argument_indices = tuple(chain(*[var.index_ordering()
+                                           for var in return_variables]))
+    index_ordering = tuple(quadrature_indices) + split_argument_indices
     try:
         impero_c = impero_utils.compile_gem(assignments, index_ordering, remove_zeros=True)
     except impero_utils.NoopError:
@@ -210,21 +223,31 @@ def compile_integral(integral_data, form_data, prefix, parameters,
 
     # Generate COFFEE
     index_names = []
-    # index_names = [(si, name + str(n))
-    #                for index, name in zip(argument_multiindices, ['j', 'k'])
-    #                for n, si in enumerate(index)]
-    if len(quadrature_indices) == 1:
-        index_names.append((quadrature_indices[0], 'ip'))
-    else:
-        for i, quadrature_index in enumerate(quadrature_indices):
-            index_names.append((quadrature_index, 'ip_%d' % i))
+
+    def name_index(index, name):
+        index_names.append((index, name))
+        if index in index_cache:
+            for multiindex, suffix in zip(index_cache[index],
+                                          string.ascii_lowercase):
+                name_multiindex(multiindex, name + suffix)
+
+    def name_multiindex(multiindex, name):
+        if len(multiindex) == 1:
+            name_index(multiindex[0], name)
+        else:
+            for i, index in enumerate(multiindex):
+                name_index(index, name + str(i))
+
+    name_multiindex(quadrature_indices, 'ip')
+    for multiindex, name in zip(argument_multiindices, ['j', 'k']):
+        name_multiindex(multiindex, name)
 
     # Construct kernel
-    body = generate_coffee(impero_c, index_names, parameters["precision"], expressions, argument_indices)
+    body = generate_coffee(impero_c, index_names, parameters["precision"], expressions, split_argument_indices)
 
     temp = builder.construct_kernel(kernel_name, body)
     temp._ir = expressions
-    temp._argument_ordering = argument_indices
+    temp._argument_ordering = split_argument_indices
     return temp
 
 
@@ -364,11 +387,15 @@ def lower_integral_type(fiat_cell, integral_type):
     if integral_type == 'cell':
         integration_dim = dim
     elif integral_type in ['exterior_facet', 'interior_facet']:
+        if isinstance(fiat_cell, TensorProductCell):
+            raise ValueError("{} integral cannot be used with a TensorProductCell; need to distinguish between vertical and horizontal contributions.".format(integral_type))
         integration_dim = dim - 1
     elif integral_type == 'vertex':
         integration_dim = 0
     elif integral_type in vert_facet_types + horiz_facet_types:
         # Extrusion case
+        if not isinstance(fiat_cell, TensorProductCell):
+            raise ValueError("{} integral requires a TensorProductCell.".format(integral_type))
         basedim, extrdim = dim
         assert extrdim == 1
 
@@ -397,6 +424,8 @@ def pick_mode(mode):
         import tsfc.coffee_mode as m
     elif mode == "spectral":
         import tsfc.spectral as m
+    elif mode == "tensor":
+        import tsfc.tensor as m
     else:
         raise ValueError("Unknown mode: {}".format(mode))
     return m

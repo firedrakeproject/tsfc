@@ -22,17 +22,16 @@
 # along with FFC. If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import absolute_import, print_function, division
+from six import iteritems
 
 from singledispatch import singledispatch
 import weakref
 
 import finat
-from finat.fiat_elements import FiatElementBase
 
 import ufl
 
 from tsfc.fiatinterface import as_fiat_cell
-from tsfc.ufl_utils import spanning_degree
 
 
 __all__ = ("create_element", "supported_elements", "as_fiat_cell")
@@ -42,8 +41,15 @@ supported_elements = {
     # These all map directly to FInAT elements
     "Brezzi-Douglas-Marini": finat.BrezziDouglasMarini,
     "Brezzi-Douglas-Fortin-Marini": finat.BrezziDouglasFortinMarini,
+    "Bubble": finat.Bubble,
+    "Crouzeix-Raviart": finat.CrouzeixRaviart,
     "Discontinuous Lagrange": finat.DiscontinuousLagrange,
-    "Discontinuous Raviart-Thomas": finat.DiscontinuousRaviartThomas,
+    "Discontinuous Raviart-Thomas": lambda c, d: finat.DiscontinuousElement(finat.RaviartThomas(c, d)),
+    "Discontinuous Taylor": finat.DiscontinuousTaylor,
+    "Gauss-Legendre": finat.GaussLegendre,
+    "Gauss-Lobatto-Legendre": finat.GaussLobattoLegendre,
+    "HDiv Trace": finat.HDivTrace,
+    "Hellan-Herrmann-Johnson": finat.HellanHerrmannJohnson,
     "Lagrange": finat.Lagrange,
     "Nedelec 1st kind H(curl)": finat.Nedelec,
     "Nedelec 2nd kind H(curl)": finat.NedelecSecondKind,
@@ -52,6 +58,8 @@ supported_elements = {
     # These require special treatment below
     "DQ": None,
     "Q": None,
+    "RTCE": None,
+    "RTCF": None,
 }
 """A :class:`.dict` mapping UFL element family names to their
 FInAT-equivalent constructors.  If the value is ``None``, the UFL
@@ -59,27 +67,16 @@ element is supported, but must be handled specially because it doesn't
 have a direct FInAT equivalent."""
 
 
-class FiatElementWrapper(FiatElementBase):
-    def __init__(self, element, degree=None):
-        super(FiatElementWrapper, self).__init__(element)
-        self._degree = degree
-
-    @property
-    def degree(self):
-        if self._degree is not None:
-            return self._degree
-        else:
-            return super(FiatElementWrapper, self).degree
-
-
 def fiat_compat(element):
     from tsfc.fiatinterface import create_element
-    return FiatElementWrapper(create_element(element),
-                              degree=spanning_degree(element))
+    from finat.fiat_elements import FiatElement
+
+    assert element.cell().is_simplex()
+    return FiatElement(create_element(element))
 
 
 @singledispatch
-def convert(element):
+def convert(element, **kwargs):
     """Handler for converting UFL elements to FInAT elements.
 
     :arg element: The UFL element to convert.
@@ -88,33 +85,29 @@ def convert(element):
     :func:`create_element`."""
     if element.family() in supported_elements:
         raise ValueError("Element %s supported, but no handler provided" % element)
-    return fiat_compat(element)
+    raise ValueError("Unsupported element type %s" % type(element))
 
 
 # Base finite elements first
 @convert.register(ufl.FiniteElement)
-def convert_finiteelement(element):
+def convert_finiteelement(element, **kwargs):
     cell = as_fiat_cell(element.cell())
     if element.family() == "Quadrature":
         degree = element.degree()
-        if degree is None:
-            # FEniCS default (ffc/quadratureelement.py:34)
-            degree = 1
         scheme = element.quadrature_scheme()
-        if scheme is None:
-            # FEniCS default (ffc/quadratureelement.py:35)
-            scheme = "canonical"
-        return finat.QuadratureElement(cell, degree, scheme)
-    if element.family() not in supported_elements:
-        return fiat_compat(element)
-    lmbda = supported_elements.get(element.family())
+        if degree is None or scheme is None:
+            raise ValueError("Quadrature scheme and degree must be specified!")
+
+        return finat.QuadratureElement(cell, degree, scheme), set()
+    lmbda = supported_elements[element.family()]
     if lmbda is None:
         if element.cell().cellname() != "quadrilateral":
             raise ValueError("%s is supported, but handled incorrectly" %
                              element.family())
         # Handle quadrilateral short names like RTCF and RTCE.
         element = element.reconstruct(cell=quad_tpc)
-        return finat.QuadrilateralElement(create_element(element))
+        finat_elem, deps = _create_element(element, **kwargs)
+        return finat.QuadrilateralElement(finat_elem), deps
 
     kind = element.variant()
     if kind is None:
@@ -135,50 +128,119 @@ def convert_finiteelement(element):
             lmbda = finat.GaussLegendre
         else:
             raise ValueError("Variant %r not supported on %s" % (kind, element.cell()))
-    return lmbda(cell, element.degree())
+    return lmbda(cell, element.degree()), set()
 
 
-# VectorElement case
+# Element modifiers and compound element types
+@convert.register(ufl.BrokenElement)
+def convert_brokenelement(element, **kwargs):
+    finat_elem, deps = _create_element(element._element, **kwargs)
+    return finat.DiscontinuousElement(finat_elem), deps
+
+
+@convert.register(ufl.EnrichedElement)
+def convert_enrichedelement(element, **kwargs):
+    elements, deps = zip(*[_create_element(elem, **kwargs)
+                           for elem in element._elements])
+    return finat.EnrichedElement(elements), set.union(*deps)
+
+
+@convert.register(ufl.MixedElement)
+def convert_mixedelement(element, **kwargs):
+    elements, deps = zip(*[_create_element(elem, **kwargs)
+                           for elem in element.sub_elements()])
+    return finat.MixedElement(elements), set.union(*deps)
+
+
 @convert.register(ufl.VectorElement)
-def convert_vectorelement(element):
-    scalar_element = create_element(element.sub_elements()[0])
-    return finat.TensorFiniteElement(scalar_element, (element.num_sub_elements(),))
+def convert_vectorelement(element, **kwargs):
+    scalar_elem, deps = _create_element(element.sub_elements()[0], **kwargs)
+    shape = (element.num_sub_elements(),)
+    shape_innermost = kwargs["shape_innermost"]
+    return (finat.TensorFiniteElement(scalar_elem, shape, not shape_innermost),
+            deps | {"shape_innermost"})
 
 
-# TensorElement case
 @convert.register(ufl.TensorElement)
-def convert_tensorelement(element):
-    scalar_element = create_element(element.sub_elements()[0])
-    return finat.TensorFiniteElement(scalar_element, element.reference_value_shape())
+def convert_tensorelement(element, **kwargs):
+    scalar_elem, deps = _create_element(element.sub_elements()[0], **kwargs)
+    shape = element.reference_value_shape()
+    shape_innermost = kwargs["shape_innermost"]
+    return (finat.TensorFiniteElement(scalar_elem, shape, not shape_innermost),
+            deps | {"shape_innermost"})
 
 
-# TensorProductElement case
 @convert.register(ufl.TensorProductElement)
-def convert_tensorproductelement(element):
+def convert_tensorproductelement(element, **kwargs):
     cell = element.cell()
     if type(cell) is not ufl.TensorProductCell:
         raise ValueError("TensorProductElement not on TensorProductCell?")
-    return finat.TensorProductElement([create_element(elem)
-                                       for elem in element.sub_elements()])
+    elements, deps = zip(*[_create_element(elem, **kwargs)
+                           for elem in element.sub_elements()])
+    return finat.TensorProductElement(elements), set.union(*deps)
+
+
+@convert.register(ufl.HDivElement)
+def convert_hdivelement(element, **kwargs):
+    finat_elem, deps = _create_element(element._element, **kwargs)
+    return finat.HDivElement(finat_elem), deps
+
+
+@convert.register(ufl.HCurlElement)
+def convert_hcurlelement(element, **kwargs):
+    finat_elem, deps = _create_element(element._element, **kwargs)
+    return finat.HCurlElement(finat_elem), deps
+
+
+@convert.register(ufl.RestrictedElement)
+def convert_restrictedelement(element, **kwargs):
+    # Fall back on FIAT
+    return fiat_compat(element), set()
 
 
 quad_tpc = ufl.TensorProductCell(ufl.interval, ufl.interval)
 _cache = weakref.WeakKeyDictionary()
 
 
-def create_element(element):
+def create_element(ufl_element, shape_innermost=True):
     """Create a FInAT element (suitable for tabulating with) given a UFL element.
 
-    :arg element: The UFL element to create a FInAT element from.
+    :arg ufl_element: The UFL element to create a FInAT element from.
+    :arg shape_innermost: Vector/tensor indices come after basis function indices
     """
-    try:
-        return _cache[element]
-    except KeyError:
-        pass
+    finat_element, deps = _create_element(ufl_element,
+                                          shape_innermost=shape_innermost)
+    return finat_element
 
-    if element.cell() is None:
+
+def _create_element(ufl_element, **kwargs):
+    """A caching wrapper around :py:func:`convert`.
+
+    Takes a UFL element and an unspecified set of parameter options,
+    and returns the converted element with the set of keyword names
+    that were relevant for conversion.
+    """
+    # Look up conversion in cache
+    try:
+        cache = _cache[ufl_element]
+    except KeyError:
+        _cache[ufl_element] = {}
+        cache = _cache[ufl_element]
+
+    for key, finat_element in iteritems(cache):
+        # Cache hit if all relevant parameter values match.
+        if all(kwargs[param] == value for param, value in key):
+            return finat_element, set(param for param, value in key)
+
+    # Convert if cache miss
+    if ufl_element.cell() is None:
         raise ValueError("Don't know how to build element when cell is not given")
 
-    finat_element = convert(element)
-    _cache[element] = finat_element
-    return finat_element
+    finat_element, deps = convert(ufl_element, **kwargs)
+
+    # Store conversion in cache
+    key = frozenset((param, kwargs[param]) for param in deps)
+    cache[key] = finat_element
+
+    # Forward result
+    return finat_element, deps
