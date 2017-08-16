@@ -4,7 +4,7 @@ from ufl import (
     triangle, Mesh, VectorElement, FiniteElement, Coefficient,
     TestFunction, FunctionSpace, dx)
 
-from tsfc_to_loopy import tsfc_to_loopy
+from tsfc.tsfc_to_loopy import tsfc_to_loopy
 from tsfc import compile_form
 
 import six
@@ -28,7 +28,7 @@ print(kernel._ir)
 
 print(kernel.ast)
 
-knl = tsfc_to_loopy(kernel._ir)
+knl = tsfc_to_loopy(kernel._ir, kernel._ir[0].free_indices)
 
 ctx = cl.create_some_context()
 
