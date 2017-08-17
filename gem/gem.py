@@ -286,12 +286,18 @@ class MathFunction(Scalar):
     __slots__ = ('name', 'children')
     __front__ = ('name',)
 
-    def __init__(self, name, *args):
+    def __new__(cls, name, *args):
         assert isinstance(name, str)
         assert all(arg.shape == () for arg in args)
 
+        if name in {'conj', 'real', 'imag'}:
+            if isinstance(args[0], Zero):
+                return args[0]
+
+        self = super(MathFunction, cls).__new__(cls)
         self.name = name
         self.children = args
+        return self
 
 
 class MinValue(Scalar):
