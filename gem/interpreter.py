@@ -12,6 +12,7 @@ from singledispatch import singledispatch
 import itertools
 
 from gem import gem, node
+from gem.optimise import replace_delta
 
 __all__ = ("evaluate", )
 
@@ -132,6 +133,13 @@ def _evaluate_failure(e, self):
 def _evaluate_constant(e, self):
     """Constants return their array."""
     return Result(e.array)
+
+
+@_evaluate.register(gem.Delta)
+def _evaluate_delta(e, self):
+    """Lower delta and evaluate."""
+    e, = replace_delta((e,))
+    return self(e)
 
 
 @_evaluate.register(gem.Variable)
