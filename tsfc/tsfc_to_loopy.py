@@ -293,7 +293,17 @@ def count_subexpression_uses(node, expr_use_count):
 
 # {{{ main entrypoint
 
-def tsfc_to_loopy(ir, argument_ordering, output_names="A", kernel_name="tsfc_kernel"):
+def tsfc_to_loopy(
+        ir, argument_ordering, output_names="A",
+        kernel_name="tsfc_kernel"):
+
+    new_argument_ordering = []
+    for idx in argument_ordering:
+        if idx not in new_argument_ordering:
+            new_argument_ordering.append(idx)
+
+    argument_ordering = new_argument_ordering
+    del new_argument_ordering
 
     if isinstance(output_names, str):
         output_names = tuple(
@@ -310,7 +320,8 @@ def tsfc_to_loopy(ir, argument_ordering, output_names="A", kernel_name="tsfc_ker
 
     exprs_and_free_inames = [
         (ctx.rec_gem(node, None),
-            tuple(ctx.index_to_iname(i) for i in argument_ordering if i in node.free_indices))
+            tuple(ctx.index_to_iname(i)
+                for i in argument_ordering if i in node.free_indices))
         for node in ir]
 
     def subscr(name, indices):
