@@ -246,7 +246,7 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     body = generate_coffee(impero_c, index_names, parameters["precision"], expressions, split_argument_indices)
 
     temp = builder.construct_kernel(kernel_name, body)
-    temp._ir = expressions
+    temp._ir = assignments
     temp._argument_ordering = split_argument_indices
     return temp
 

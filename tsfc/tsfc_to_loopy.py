@@ -293,9 +293,7 @@ def count_subexpression_uses(node, expr_use_count):
 
 # {{{ main entrypoint
 
-def tsfc_to_loopy(
-        ir, argument_ordering, output_names="A",
-        kernel_name="tsfc_kernel"):
+def tsfc_to_loopy(ir, argument_ordering, kernel_name="tsfc_kernel", generate_increments=False):
 
     new_argument_ordering = []
     for idx in argument_ordering:
@@ -305,24 +303,18 @@ def tsfc_to_loopy(
     argument_ordering = new_argument_ordering
     del new_argument_ordering
 
-    if isinstance(output_names, str):
-        output_names = tuple(
-            output_names + str(i)
-            for i in range(len(ir)))
-    elif not isinstance(output_names, tuple):
-        raise TypeError("output_names must be a string or a tuple")
-
     expr_use_count = {}
-    for expr in ir:
+    for lhs, expr in ir:
         count_subexpression_uses(expr, expr_use_count)
 
     ctx = ConversionContext(expr_use_count)
 
     exprs_and_free_inames = [
-        (ctx.rec_gem(node, None),
-            tuple(ctx.index_to_iname(i)
+        (lhs, ctx.rec_gem(node, None),
+            tuple(
+                ctx.index_to_iname(i)
                 for i in argument_ordering if i in node.free_indices))
-        for node in ir]
+        for lhs, node in ir]
 
     def subscr(name, indices):
         return (
@@ -331,22 +323,38 @@ def tsfc_to_loopy(
             if indices else
             p.Variable(name))
 
-    instructions = (
-        [
-            lp.Assignment(
-                subscr(var_name, free_indices),
-                rhs,
-                forced_iname_deps=frozenset(free_indices),
-                forced_iname_deps_is_final=True)
-            for var_name, free_indices, rhs in ctx.assignments] +
-        [
-            lp.Assignment(
-                subscr(var_name, free_indices),
-                subscr(var_name, free_indices) + rhs,
-                forced_iname_deps=frozenset(free_indices),
-                forced_iname_deps_is_final=True)
-            for var_name, (rhs, free_indices) in zip(
-                output_names, exprs_and_free_inames)])
+    # instructions resulting from common subexpressions
+    instructions = [
+        lp.Assignment(
+            subscr(var_name, free_indices),
+            rhs,
+            forced_iname_deps=frozenset(free_indices),
+            forced_iname_deps_is_final=True)
+        for var_name, free_indices, rhs in ctx.assignments]
+
+    write_counts = {}
+
+    # instructions from IR
+    for lhs, rhs, free_indices in exprs_and_free_inames:
+        lhs_expr = ctx.rec_gem(lhs, None)
+
+        if generate_increments:
+            assignment_rhs = lhs_expr + rhs
+        else:
+            assignment_rhs = rhs
+
+            # check that writes are unique
+            write_counts[lhs_expr] = write_counts.get(lhs_expr, 0) + 1
+            if write_counts[lhs_expr] > 1:
+                raise ValueError(
+                    "generate_increments may not be set to True when "
+                    "one instruction writes the same output")
+
+        instructions.append(lp.Assignment(
+            lhs_expr,
+            assignment_rhs,
+            forced_iname_deps=frozenset(free_indices),
+            forced_iname_deps_is_final=True))
 
     inames = isl.make_zero_and_vars([
         iname
@@ -377,18 +385,6 @@ def tsfc_to_loopy(
         instructions + ctx.subst_rules,
         data,
         name=kernel_name)
-
-    if 1:  # Add an option to turn this off later if we want.
-        for outname in output_names:
-            aiwrites = [ins for ins in knl.instructions
-                        if ins.assignee.aggregate.name == outname]
-            assert len(aiwrites) == 1
-
-            # turn x = x + y into x = y
-            insn = aiwrites[0]
-            rvalue = insn.expression
-            newrvalue = rvalue.children[1]
-            insn.expression = newrvalue
 
     return knl
 
