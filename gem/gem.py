@@ -21,6 +21,7 @@ from six.moves import range, zip
 from abc import ABCMeta
 from itertools import chain
 from operator import attrgetter
+from numbers import Integral
 
 import numpy
 from numpy import asarray
@@ -384,7 +385,7 @@ class IndexBase(with_metaclass(ABCMeta)):
     pass
 
 
-IndexBase.register(int)
+IndexBase.register(Integral)
 
 
 class Index(IndexBase):
