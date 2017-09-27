@@ -385,7 +385,7 @@ class IndexBase(with_metaclass(ABCMeta)):
     pass
 
 
-IndexBase.register(Integral)
+IndexBase.register(int)
 
 
 class Index(IndexBase):
@@ -470,6 +470,10 @@ class Indexed(Scalar):
     __back__ = ('multiindex',)
 
     def __new__(cls, aggregate, multiindex):
+        # Accept numpy or any integer, but cast to int.
+        multiindex = tuple(int(i) if isinstance(i, Integral) else i
+                           for i in multiindex)
+
         # Set index extents from shape
         assert len(aggregate.shape) == len(multiindex)
         for index, extent in zip(multiindex, aggregate.shape):
