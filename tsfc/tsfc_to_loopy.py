@@ -291,6 +291,19 @@ def count_subexpression_uses(node, expr_use_count):
         count_subexpression_uses(c, expr_use_count)
 
 
+def get_empty_assumptions_domain(domain):
+    dim_type = isl.dim_type
+
+    dom_space = domain.get_space()
+    assumptions_space = isl.Space.params_alloc(
+        dom_space.get_ctx(), dom_space.dim(dim_type.param))
+    for i in range(dom_space.dim(dim_type.param)):
+        assumptions_space = assumptions_space.set_dim_name(
+            dim_type.param, i,
+            dom_space.get_dim_name(dim_type.param, i))
+    return isl.BasicSet.universe(assumptions_space)
+
+
 # {{{ main entrypoint
 
 def tsfc_to_loopy(ir, argument_ordering, kernel_name="tsfc_kernel", generate_increments=False):
@@ -323,7 +336,7 @@ def tsfc_to_loopy(ir, argument_ordering, kernel_name="tsfc_kernel", generate_inc
             if indices else
             p.Variable(name))
 
-    # instructions resulting from common subexpressions
+    # {{{ instructions resulting from common subexpressions
     instructions = [
         lp.Assignment(
             subscr(var_name, free_indices),
@@ -332,29 +345,38 @@ def tsfc_to_loopy(ir, argument_ordering, kernel_name="tsfc_kernel", generate_inc
             forced_iname_deps_is_final=True)
         for var_name, free_indices, rhs in ctx.assignments]
 
-    write_counts = {}
+    # }}}
 
-    # instructions from IR
+    pymbolic_lhss = []
+
+    # {{{ instructions from IR
+
     for lhs, rhs, free_indices in exprs_and_free_inames:
         lhs_expr = ctx.rec_gem(lhs, None)
+        pymbolic_lhss.append(lhs_expr)
+
+        assert isinstance(lhs_expr, p.Subscript)
+        from pymbolic.mapper.dependency import DependencyMapper
+        iname_dep, = DependencyMapper(composite_leaves=False)(lhs_expr.index_tuple)
+
+        assert isinstance(iname_dep, p.Variable)
+
+        lhs_expr_single = p.Variable(ctx.name_gen(lhs_expr.aggregate.name))[iname_dep]
 
         if generate_increments:
             assignment_rhs = lhs_expr + rhs
         else:
             assignment_rhs = rhs
 
-            # check that writes are unique
-            write_counts[lhs_expr] = write_counts.get(lhs_expr, 0) + 1
-            if write_counts[lhs_expr] > 1:
-                raise ValueError(
-                    "generate_increments may not be set to True when "
-                    "one instruction writes the same output")
-
         instructions.append(lp.Assignment(
-            lhs_expr,
+            lhs_expr_single,
             assignment_rhs,
             forced_iname_deps=frozenset(free_indices),
             forced_iname_deps_is_final=True))
+
+    # }}}
+
+    # {{{ construct domain
 
     inames = isl.make_zero_and_vars([
         iname
@@ -372,6 +394,24 @@ def tsfc_to_loopy(ir, argument_ordering, kernel_name="tsfc_kernel", generate_inc
             domain = domain & axis
 
     domain = domain.get_basic_sets()[0]
+
+    # }}}
+
+    # {{{ check disjointness of write footprints
+
+    from loopy.symbolic import get_access_range
+
+    assumptions = get_empty_assumptions_domain(domain)
+
+    write_ranges = []
+    for i, lhs in enumerate(pymbolic_lhss):
+        write_range = get_access_range(domain, lhs.index_tuple, assumptions)
+
+        for other_write_range in write_ranges:
+            if not (write_range & other_write_range).is_empty():
+                raise ValueError("assignment write ranges are not disjoint")
+
+    # }}}
 
     data = [
         lp.TemporaryVariable(
