@@ -97,7 +97,7 @@ def convert(element, **kwargs):
     :func:`create_element`."""
     if element.family() in supported_elements:
         raise ValueError("Element %s supported, but no handler provided" % element)
-    raise ValueError("Unsupported element type %s" % type(element))
+    return fiat_compat(element), set()
 
 
 # Base finite elements first
@@ -144,26 +144,6 @@ def convert_finiteelement(element, **kwargs):
 
 
 # Element modifiers and compound element types
-@convert.register(ufl.BrokenElement)
-def convert_brokenelement(element, **kwargs):
-    finat_elem, deps = _create_element(element._element, **kwargs)
-    return finat.DiscontinuousElement(finat_elem), deps
-
-
-@convert.register(ufl.EnrichedElement)
-def convert_enrichedelement(element, **kwargs):
-    elements, deps = zip(*[_create_element(elem, **kwargs)
-                           for elem in element._elements])
-    return finat.EnrichedElement(elements), set.union(*deps)
-
-
-@convert.register(ufl.MixedElement)
-def convert_mixedelement(element, **kwargs):
-    elements, deps = zip(*[_create_element(elem, **kwargs)
-                           for elem in element.sub_elements()])
-    return finat.MixedElement(elements), set.union(*deps)
-
-
 @convert.register(ufl.VectorElement)
 def convert_vectorelement(element, **kwargs):
     scalar_elem, deps = _create_element(element.sub_elements()[0], **kwargs)
@@ -180,34 +160,6 @@ def convert_tensorelement(element, **kwargs):
     shape_innermost = kwargs["shape_innermost"]
     return (finat.TensorFiniteElement(scalar_elem, shape, not shape_innermost),
             deps | {"shape_innermost"})
-
-
-@convert.register(ufl.TensorProductElement)
-def convert_tensorproductelement(element, **kwargs):
-    cell = element.cell()
-    if type(cell) is not ufl.TensorProductCell:
-        raise ValueError("TensorProductElement not on TensorProductCell?")
-    elements, deps = zip(*[_create_element(elem, **kwargs)
-                           for elem in element.sub_elements()])
-    return finat.TensorProductElement(elements), set.union(*deps)
-
-
-@convert.register(ufl.HDivElement)
-def convert_hdivelement(element, **kwargs):
-    finat_elem, deps = _create_element(element._element, **kwargs)
-    return finat.HDivElement(finat_elem), deps
-
-
-@convert.register(ufl.HCurlElement)
-def convert_hcurlelement(element, **kwargs):
-    finat_elem, deps = _create_element(element._element, **kwargs)
-    return finat.HCurlElement(finat_elem), deps
-
-
-@convert.register(ufl.RestrictedElement)
-def convert_restrictedelement(element, **kwargs):
-    # Fall back on FIAT
-    return fiat_compat(element), set()
 
 
 quad_tpc = ufl.TensorProductCell(ufl.interval, ufl.interval)
