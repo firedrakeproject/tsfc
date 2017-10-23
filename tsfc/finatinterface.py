@@ -80,6 +80,9 @@ class FiatElementWrapper(finat.fiat_elements.FiatElement):
         else:
             return super(FiatElementWrapper, self).degree
 
+    def entity_support_dofs(self):
+        return None
+
 
 def fiat_compat(element):
     from tsfc.fiatinterface import create_element
