@@ -21,6 +21,7 @@ from six.moves import range, zip
 from abc import ABCMeta
 from itertools import chain
 from operator import attrgetter
+from numbers import Integral
 
 import numpy
 from numpy import asarray
@@ -469,6 +470,10 @@ class Indexed(Scalar):
     __back__ = ('multiindex',)
 
     def __new__(cls, aggregate, multiindex):
+        # Accept numpy or any integer, but cast to int.
+        multiindex = tuple(int(i) if isinstance(i, Integral) else i
+                           for i in multiindex)
+
         # Set index extents from shape
         assert len(aggregate.shape) == len(multiindex)
         for index, extent in zip(multiindex, aggregate.shape):
