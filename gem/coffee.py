@@ -19,13 +19,6 @@ from gem.refactorise import Monomial
 from gem.utils import groupby
 
 
-try:
-    from firedrake_citations import Citations
-    Citations().register("Luporini2016")
-except ImportError:
-    pass
-
-
 __all__ = ['optimise_monomial_sum']
 
 
