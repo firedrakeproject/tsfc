@@ -20,7 +20,7 @@ from gem.utils import groupby
 
 
 try:
-    from firedrake import Citations
+    from firedrake_citations import Citations
     Citations().register("Luporini2016")
 except ImportError:
     pass
