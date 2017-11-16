@@ -59,13 +59,15 @@ def generate(impero_c, precision):
     """
     ctx = LoopyContext()
     ctx.precision = precision
-    ctx.epsilon = 10.0 * eval("1e-%d" % precision)
+    ctx.epsilon = 10.0 ** (-precision)
 
     data = []
     for i, temp in enumerate(impero_c.temporaries):
         name = "t%d" % i
         if isinstance(temp, gem.Constant):
-             data.append(lp.TemporaryVariable(name, shape=lp.auto, initializer=temp.array, scope=lp.temp_var_scope.LOCAL, read_only=True))
+            data.append(lp.TemporaryVariable(name, shape=temp.shape, initializer=temp.array, scope=lp.temp_var_scope.LOCAL, read_only=True))
+        else:
+            data.append(lp.TemporaryVariable(name, shape=temp.shape, initializer=None, scope=lp.temp_var_scope.LOCAL, read_only=False))
         ctx.pymbolic_variable(temp, name)
 
     instructions = statement(impero_c.tree, ctx)
@@ -362,7 +364,7 @@ def _expression_scalar(expr, parameters):
         r = round(v, 1)
         if r and abs(v - r) < parameters.epsilon:
             v = r  # round to nonzero
-        return eval(("%%.%dg" % parameters.precision) % v)
+        return v
 
 
 @_expression.register(gem.Variable)
