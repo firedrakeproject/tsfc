@@ -27,7 +27,10 @@ from pytools import UniqueNameGenerator
 class LoopyContext(object):
     def __init__(self):
         self.domain = None
-        self.index_variables = {}
+        # gem index -> [pymbolic variables]
+        # use a stack to model the scope
+        self.index_variables = defaultdict(list)
+        self.index_extent = {}
         self.variable_to_pymbolic_and_shape = {}
         self.counter = itertools.count()
         self.name_gen = UniqueNameGenerator()
@@ -69,8 +72,17 @@ def generate(impero_c, precision):
     #         scope=lp.temp_var_scope.GLOBAL,
     #         read_only=True)
     #     for name, val in six.itervalues(ctx.literal_to_name_and_array)] + ["..."]
+    domain = None
+    inames = isl.make_zero_and_vars(list(ctx.index_extent.keys()))
+    for idx, extent in ctx.index_extent.items():
+        axis = ((inames[0].le_set(inames[idx])) & (inames[idx].lt_set(inames[0] + extent)))
+        if domain is None:
+            domain = axis
+        else:
+            domain = domain & axis
 
-    return lp.make_kernel([ctx.domain], instructions, data, name="test_loopy")
+
+    return lp.make_kernel([domain], instructions, data, name="test_loopy")
 
 
 def _coffee_symbol(symbol, rank=()):
@@ -137,15 +149,12 @@ def statement_for(tree, ctx):
     extent = tree.index.extent
     assert extent
     idx = ctx.next_index_name()
-    ctx.index_variables[tree.index] = p.Variable(idx)
-    inames = isl.make_zero_and_vars([idx])
-    axis = ((inames[0].le_set(inames[idx])) & (inames[idx].lt_set(inames[0] + extent)))
+    ctx.index_variables[tree.index].append(p.Variable(idx))
+    ctx.index_extent[idx] = extent
 
-    if ctx.domain is None:
-        ctx.domain = axis
-    else:
-        ctx.domain = domain & axis
-    return statement(tree.children[0], ctx)
+    statements = statement(tree.children[0], ctx)
+    ctx.index_variables[tree.index].pop()
+    return statements
 
 
 @statement.register(imp.Initialise)
@@ -170,11 +179,10 @@ def statement_return(leaf, ctx):
 
 
 @statement.register(imp.ReturnAccumulate)
-def statement_returnaccumulate(leaf, parameters):
-    pragma = _root_pragma(leaf.indexsum, parameters)
-    return coffee.Incr(expression(leaf.variable, parameters),
-                       expression(leaf.indexsum.children[0], parameters),
-                       pragma=pragma)
+def statement_returnaccumulate(leaf, ctx):
+    lhs = expression(leaf.variable, ctx)
+    rhs = lhs + expression(leaf.indexsum.children[0], ctx)
+    return [lp.Assignment(lhs, rhs)]
 
 
 @statement.register(imp.Evaluate)
@@ -352,7 +360,7 @@ def _expression_indexed(expr, ctx):
     rank = []
     for index in expr.multiindex:
         if isinstance(index, gem.Index):
-            rank.append(ctx.index_variables[index])
+            rank.append(ctx.index_variables[index][-1])
         elif isinstance(index, gem.VariableIndex):
             assert False
             rank.append(expression(index.expression, ctx).gencode())
