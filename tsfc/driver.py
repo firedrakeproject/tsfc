@@ -243,6 +243,7 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     temp = builder.construct_kernel(kernel_name, body)
     temp._ir = assignments
     temp._argument_ordering = split_argument_indices
+    temp._impero_c = impero_c
     return temp
 
 

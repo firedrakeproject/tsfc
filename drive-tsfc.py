@@ -43,3 +43,4 @@ print(knl)
 code = lp.generate_code_v2(knl)
 print(code.device_code())
 # lp.auto_test_vs_ref(knl, ctx, knl, parameters={"nelements": 200})
+
