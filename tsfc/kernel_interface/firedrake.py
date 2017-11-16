@@ -24,12 +24,13 @@ ExpressionKernel = namedtuple('ExpressionKernel', ['ast', 'oriented', 'coefficie
 
 
 class Kernel(object):
-    __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
+    __slots__ = ("ast", "knl", "integral_type", "oriented", "subdomain_id",
                  "domain_number",
                  "coefficient_numbers", "__weakref__", "_ir", "_argument_ordering", "_impero_c")
     """A compiled Kernel object.
 
     :kwarg ast: The COFFEE ast for the kernel.
+    :kwarg knl: The loopy kernel.
     :kwarg integral_type: The type of integral.
     :kwarg oriented: Does the kernel require cell_orientations.
     :kwarg subdomain_id: What is the subdomain id for this kernel.
@@ -225,7 +226,7 @@ class KernelBuilder(KernelBuilderBase):
         """Set that the kernel requires cell orientations."""
         self.kernel.oriented = True
 
-    def construct_kernel(self, name, body):
+    def construct_kernel(self, name, body, knl):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument
@@ -233,6 +234,7 @@ class KernelBuilder(KernelBuilderBase):
 
         :arg name: function name
         :arg body: function body (:class:`coffee.Block` node)
+        :arg knl: loopy kernel
         :returns: :class:`Kernel` object
         """
         args = [self.local_tensor, self.coordinates_arg]
@@ -249,6 +251,7 @@ class KernelBuilder(KernelBuilderBase):
                                     qualifiers=["const"]))
 
         self.kernel.ast = KernelBuilderBase.construct_kernel(self, name, args, body)
+        self.kernel.knl = knl
         return self.kernel
 
     def construct_empty_kernel(self, name):

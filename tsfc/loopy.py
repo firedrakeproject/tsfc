@@ -49,7 +49,7 @@ class LoopyContext(object):
         return pym
 
 
-def generate(impero_c, precision):
+def generate(impero_c, precision, kernel_name="loopy_kernel"):
     """Generates COFFEE code.
 
     :arg impero_c: ImperoC tuple with Impero AST and other data
@@ -88,7 +88,7 @@ def generate(impero_c, precision):
         else:
             domain = domain & axis
 
-    return lp.make_kernel([domain], instructions, data, name="test_loopy", target=lp.CTarget())
+    return lp.make_kernel([domain], instructions, data, name=kernel_name, target=lp.CTarget())
 
 
 def _coffee_symbol(symbol, rank=()):

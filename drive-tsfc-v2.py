@@ -1,6 +1,5 @@
 from firedrake import *
 from tsfc import compile_form
-from tsfc.loopy import generate as generate_loopy
 from tsfc import parameters
 import numpy as np
 import loopy as lp
@@ -11,12 +10,10 @@ f = Function(V)
 v = TestFunction(V)
 
 L = f*v*dx
+# print(assemble(L).vector()[:])
 
 kernel, = compile_form(L)
-impero_c = kernel._impero_c
-
-knl = generate_loopy(impero_c, parameters.default_parameters()['precision'])
-
+knl = kernel.knl
 knl = lp.add_and_infer_dtypes(knl, {"coords, w_0, t1, t2, t3, t5": np.float64})
 
 # knl = lp.to_batched(knl, "nelements", ("A_0", "coords",), batch_iname_prefix="iel")

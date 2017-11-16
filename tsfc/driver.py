@@ -28,6 +28,7 @@ from finat.quadrature import AbstractQuadratureRule, make_quadrature
 
 from tsfc import fem, ufl_utils
 from tsfc.coffee import SCALAR_TYPE, generate as generate_coffee
+from tsfc.loopy import generate as generate_loopy
 from tsfc.fiatinterface import as_fiat_cell
 from tsfc.logging import logger
 from tsfc.parameters import default_parameters
@@ -239,8 +240,10 @@ def compile_integral(integral_data, form_data, prefix, parameters,
 
     # Construct kernel
     body = generate_coffee(impero_c, index_names, parameters["precision"], expressions, split_argument_indices)
+    # Build loopy kernel
+    knl = generate_loopy(impero_c, parameters["precision"], kernel_name)
 
-    temp = builder.construct_kernel(kernel_name, body)
+    temp = builder.construct_kernel(kernel_name, body, knl)
     temp._ir = assignments
     temp._argument_ordering = split_argument_indices
     temp._impero_c = impero_c
