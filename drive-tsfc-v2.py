@@ -10,11 +10,13 @@ f = Function(V)
 v = TestFunction(V)
 
 L = f*v*dx
+
 # print(assemble(L).vector()[:])
+# exit(0)
 
 kernel, = compile_form(L)
 knl = kernel.knl
-knl = lp.add_and_infer_dtypes(knl, {"coords, w_0, t1, t2, t3, t5": np.float64})
+knl = lp.add_and_infer_dtypes(knl, {"coords, w_0": np.float64})
 
 # knl = lp.to_batched(knl, "nelements", ("A_0", "coords",), batch_iname_prefix="iel")
 # knl = lp.tag_inames(knl, "j:ilp.seq")

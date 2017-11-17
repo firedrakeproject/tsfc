@@ -65,9 +65,9 @@ def generate(impero_c, precision, kernel_name="loopy_kernel"):
     for i, temp in enumerate(impero_c.temporaries):
         name = "t%d" % i
         if isinstance(temp, gem.Constant):
-            data.append(lp.TemporaryVariable(name, shape=temp.shape, initializer=temp.array, scope=lp.temp_var_scope.LOCAL, read_only=True))
+            data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=numpy.float64, initializer=temp.array, scope=lp.temp_var_scope.LOCAL, read_only=True))
         else:
-            data.append(lp.TemporaryVariable(name, shape=temp.shape, initializer=None, scope=lp.temp_var_scope.LOCAL, read_only=False))
+            data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=numpy.float64, initializer=None, scope=lp.temp_var_scope.LOCAL, read_only=False))
         ctx.pymbolic_variable(temp, name)
 
     instructions = statement(impero_c.tree, ctx)
