@@ -48,6 +48,11 @@ class LoopyContext(object):
             self.gem_to_pymbolic_and_shape[node] = (pym, node.shape)
         return pym
 
+    def active_inames(self):
+        # Return all active indices
+        inames = [var[-1].name for var in self.index_variables.values() if var]
+        return frozenset(inames)
+
 
 def generate(impero_c, args, precision, kernel_name="loopy_kernel"):
     """Generates COFFEE code.
@@ -163,21 +168,15 @@ def statement_for(tree, ctx):
 
 
 @statement.register(imp.Initialise)
-def statement_initialise(leaf, parameters):
-    assert False
-    if parameters.declare[leaf]:
-        return coffee.Decl(SCALAR_TYPE, _decl_symbol(leaf.indexsum, parameters), 0.0)
-    else:
-        return coffee.Assign(_ref_symbol(leaf.indexsum, parameters), 0.0)
+def statement_initialise(leaf, ctx):
+    return [lp.Assignment(expression(leaf.indexsum, ctx), 0.0, within_inames=ctx.active_inames())]
 
 
 @statement.register(imp.Accumulate)
-def statement_accumulate(leaf, parameters):
-    assert False
-    pragma = _root_pragma(leaf.indexsum, parameters)
-    return coffee.Incr(_ref_symbol(leaf.indexsum, parameters),
-                       expression(leaf.indexsum.children[0], parameters),
-                       pragma=pragma)
+def statement_accumulate(leaf, ctx):
+    lhs = expression(leaf.indexsum, ctx)
+    rhs = lhs + expression(leaf.indexsum.children[0], ctx)
+    return [lp.Assignment(lhs, rhs)]
 
 
 @statement.register(imp.Return)

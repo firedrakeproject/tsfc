@@ -11,8 +11,11 @@ v = TestFunction(V)
 
 L = f*v*dx
 
+x, y = SpatialCoordinate(mesh)
+f.interpolate((1+8*pi*pi)*cos(x*pi*2)*cos(y*pi*2))
 # print(assemble(L).vector()[:])
-# exit(0)
+print(f.vector()[:])
+exit(0)
 
 kernel, = compile_form(L)
 knl = kernel.ast

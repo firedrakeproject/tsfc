@@ -129,10 +129,10 @@ class ExpressionKernelBuilder(KernelBuilderBase):
         """Set that the kernel requires cell orientations."""
         self.oriented = True
 
-    def construct_kernel(self, return_arg, body):
+    def construct_kernel(self, return_arg, impero_c, precision):
         """Constructs an :class:`ExpressionKernel`.
 
-        :arg return_arg: COFFEE argument for the return value
+        :arg return_arg: loopy.GlobalArg for the return value
         :arg body: function body (:class:`coffee.Block` node)
         :returns: :class:`ExpressionKernel` object
         """
@@ -140,8 +140,9 @@ class ExpressionKernelBuilder(KernelBuilderBase):
         if self.oriented:
             args.insert(1, cell_orientations_coffee_arg)
 
-        kernel_code = super(ExpressionKernelBuilder, self).construct_kernel("expression_kernel", args, body)
-        return ExpressionKernel(kernel_code, self.oriented, self.coefficients)
+        loopy_kernel = generate_loopy(impero_c, args, precision, "expression_kernel")
+        print(loopy_kernel)
+        return ExpressionKernel(loopy_kernel, self.oriented, self.coefficients)
 
 
 class KernelBuilder(KernelBuilderBase):

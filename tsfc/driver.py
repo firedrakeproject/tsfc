@@ -28,13 +28,14 @@ from finat.quadrature import AbstractQuadratureRule, make_quadrature
 
 from tsfc import fem, ufl_utils
 from tsfc.coffee import SCALAR_TYPE, generate as generate_coffee
-from tsfc.loopy import generate as generate_loopy
+from tsfc.loopy import SCALAR_TYPE, generate as generate_loopy
 from tsfc.fiatinterface import as_fiat_cell
 from tsfc.logging import logger
 from tsfc.parameters import default_parameters
 
 import tsfc.kernel_interface.firedrake_loopy as firedrake_interface
 
+import loopy as lp
 
 def compile_form(form, prefix="form", parameters=None):
     """Compiles a UFL form into a set of assembly kernels.
@@ -260,8 +261,6 @@ def compile_expression_at_points(expression, points, coordinates, parameters=Non
     :arg coordinates: the coordinate function
     :arg parameters: parameters object
     """
-    import coffee.base as ast
-
     if parameters is None:
         parameters = default_parameters()
     else:
@@ -312,19 +311,19 @@ def compile_expression_at_points(expression, points, coordinates, parameters=Non
     return_shape = (len(points),) + value_shape
     return_indices = point_set.indices + tensor_indices
     return_var = gem.Variable('A', return_shape)
-    return_arg = ast.Decl(SCALAR_TYPE, ast.Symbol('A', rank=return_shape))
+    return_arg = lp.GlobalArg("A", dtype=SCALAR_TYPE, shape=return_shape)
     return_expr = gem.Indexed(return_var, return_indices)
     ir, = impero_utils.preprocess_gem([ir])
     impero_c = impero_utils.compile_gem([(return_expr, ir)], return_indices)
     point_index, = point_set.indices
-    body = generate_coffee(impero_c, {point_index: 'p'}, parameters["precision"])
+    # body = generate_coffee(impero_c, {point_index: 'p'}, parameters["precision"])
 
     # Handle cell orientations
     if builder.needs_cell_orientations([ir]):
         builder.require_cell_orientations()
 
     # Build kernel tuple
-    return builder.construct_kernel(return_arg, body)
+    return builder.construct_kernel(return_arg, impero_c, parameters["precision"])
 
 
 def lower_integral_type(fiat_cell, integral_type):
