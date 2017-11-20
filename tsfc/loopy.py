@@ -49,10 +49,11 @@ class LoopyContext(object):
         return pym
 
 
-def generate(impero_c, precision, kernel_name="loopy_kernel"):
+def generate(impero_c, args, precision, kernel_name="loopy_kernel"):
     """Generates COFFEE code.
 
     :arg impero_c: ImperoC tuple with Impero AST and other data
+    :arg args: list of loopy.GlobalArgs
     :arg index_names: pre-assigned index names
     :arg precision: floating-point precision for printing
     :returns: loopy kernel
@@ -61,7 +62,7 @@ def generate(impero_c, precision, kernel_name="loopy_kernel"):
     ctx.precision = precision
     ctx.epsilon = 10.0 ** (-precision)
 
-    data = []
+    data = list(args)
     for i, temp in enumerate(impero_c.temporaries):
         name = "t%d" % i
         if isinstance(temp, gem.Constant):
@@ -70,15 +71,9 @@ def generate(impero_c, precision, kernel_name="loopy_kernel"):
             data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=numpy.float64, initializer=None, scope=lp.temp_var_scope.LOCAL, read_only=False))
         ctx.pymbolic_variable(temp, name)
 
+
     instructions = statement(impero_c.tree, ctx)
 
-    data.append("...")
-    # data = [
-    #     lp.TemporaryVariable(
-    #         name, shape=lp.auto, initializer=val,
-    #         scope=lp.temp_var_scope.GLOBAL,
-    #         read_only=True)
-    #     for name, val in six.itervalues(ctx.literal_to_name_and_array)] + ["..."]
     domain = None
     inames = isl.make_zero_and_vars(list(ctx.index_extent.keys()))
     for idx, extent in ctx.index_extent.items():

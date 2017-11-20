@@ -82,6 +82,7 @@ class KernelBuilderBase(KernelInterface):
         :arg body: function body (:class:`coffee.Block` node)
         :returns: :class:`coffee.FunDecl` object
         """
+        assert False
         assert isinstance(body, coffee.Block)
         body_ = coffee.Block(self.prepare + body.children + self.finalise)
         return coffee.FunDecl("void", name, args, body_, pred=["static", "inline"])

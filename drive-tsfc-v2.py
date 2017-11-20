@@ -15,8 +15,7 @@ L = f*v*dx
 # exit(0)
 
 kernel, = compile_form(L)
-knl = kernel.knl
-knl = lp.add_and_infer_dtypes(knl, {"coords, w_0": np.float64})
+knl = kernel.ast
 
 # knl = lp.to_batched(knl, "nelements", ("A_0", "coords",), batch_iname_prefix="iel")
 # knl = lp.tag_inames(knl, "j:ilp.seq")

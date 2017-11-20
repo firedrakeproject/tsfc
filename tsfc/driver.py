@@ -33,7 +33,7 @@ from tsfc.fiatinterface import as_fiat_cell
 from tsfc.logging import logger
 from tsfc.parameters import default_parameters
 
-import tsfc.kernel_interface.firedrake as firedrake_interface
+import tsfc.kernel_interface.firedrake_loopy as firedrake_interface
 
 
 def compile_form(form, prefix="form", parameters=None):
@@ -241,9 +241,9 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     # Construct kernel
     body = generate_coffee(impero_c, index_names, parameters["precision"], expressions, split_argument_indices)
     # Build loopy kernel
-    knl = generate_loopy(impero_c, parameters["precision"], kernel_name)
+    # knl = generate_loopy(impero_c, parameters["precision"], kernel_name)
 
-    temp = builder.construct_kernel(kernel_name, body, knl)
+    temp = builder.construct_kernel(kernel_name, impero_c, parameters["precision"])
     temp._ir = assignments
     temp._argument_ordering = split_argument_indices
     temp._impero_c = impero_c

@@ -12,9 +12,12 @@ from gem.optimise import remove_componenttensors as prune
 
 from finat import TensorFiniteElement
 
+import loopy as lp
+
 from tsfc.finatinterface import create_element
 from tsfc.kernel_interface.common import KernelBuilderBase as _KernelBuilderBase
 from tsfc.coffee import SCALAR_TYPE
+from tsfc.loopy import generate as generate_loopy
 
 
 # Expression kernel description type
@@ -223,11 +226,8 @@ class KernelBuilder(KernelBuilderBase):
         """Set that the kernel requires cell orientations."""
         self.kernel.oriented = True
 
-    def construct_kernel(self, name, body, knl):
+    def construct_kernel(self, name, impero_c, precision):
         """Construct a fully built :class:`Kernel`.
-
-        This function contains the logic for building the argument
-        list for assembly kernels.
 
         :arg name: function name
         :arg body: function body (:class:`coffee.Block` node)
@@ -236,19 +236,14 @@ class KernelBuilder(KernelBuilderBase):
         """
         args = [self.local_tensor, self.coordinates_arg]
         if self.kernel.oriented:
-            args.append(cell_orientations_coffee_arg)
+            args.append(cell_orientatios_loopy_arg)
         args.extend(self.coefficient_args)
         if self.kernel.integral_type in ["exterior_facet", "exterior_facet_vert"]:
-            args.append(coffee.Decl("unsigned int",
-                                    coffee.Symbol("facet", rank=(1,)),
-                                    qualifiers=["const"]))
+            args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(1,)))
         elif self.kernel.integral_type in ["interior_facet", "interior_facet_vert"]:
-            args.append(coffee.Decl("unsigned int",
-                                    coffee.Symbol("facet", rank=(2,)),
-                                    qualifiers=["const"]))
+            args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(2,)))
 
-        self.kernel.ast = KernelBuilderBase.construct_kernel(self, name, args, body)
-        self.kernel.knl = knl
+        self.kernel.ast = generate_loopy(impero_c, args, precision, name)
         return self.kernel
 
     def construct_empty_kernel(self, name):
@@ -283,7 +278,7 @@ def prepare_coefficient(coefficient, name, interior_facet=False):
     :arg name: unique name to refer to the Coefficient in the kernel
     :arg interior_facet: interior facet integral?
     :returns: (funarg, expression)
-         funarg     - :class:`coffee.Decl` function argument
+         funarg     - :class:`loopy.GlobalArg` function argument
          expression - GEM expression referring to the Coefficient
                       values
     """
@@ -291,10 +286,7 @@ def prepare_coefficient(coefficient, name, interior_facet=False):
 
     if coefficient.ufl_element().family() == 'Real':
         # Constant
-        funarg = coffee.Decl(SCALAR_TYPE, coffee.Symbol(name),
-                             pointers=[("restrict",)],
-                             qualifiers=["const"])
-
+        funarg = lp.GlobalArg(name, dtype=SCALAR_TYPE, shape=lp.auto)
         expression = gem.reshape(gem.Variable(name, (None,)),
                                  coefficient.ufl_shape)
 
@@ -311,9 +303,7 @@ def prepare_coefficient(coefficient, name, interior_facet=False):
     scalar_size = numpy.prod(scalar_shape, dtype=int)
     tensor_size = numpy.prod(tensor_shape, dtype=int)
 
-    funarg = coffee.Decl(SCALAR_TYPE, coffee.Symbol(name),
-                         pointers=[("const", "restrict"), ("restrict",)],
-                         qualifiers=["const"])
+    funarg = lp.GlobalArg(name, dtype=SCALAR_TYPE, shape=lp.auto)
 
     if not interior_facet:
         expression = gem.reshape(
@@ -338,15 +328,16 @@ def prepare_arguments(arguments, multiindices, interior_facet=False):
     :arg multiindices: Argument multiindices
     :arg interior_facet: interior facet integral?
     :returns: (funarg, expression)
-         funarg      - :class:`coffee.Decl` function argument
+         funarg      - :class:`loopy.GlobalArg` function argument
          expressions - GEM expressions referring to the argument
                        tensor
     """
+
     assert isinstance(interior_facet, bool)
 
     if len(arguments) == 0:
         # No arguments
-        funarg = coffee.Decl(SCALAR_TYPE, coffee.Symbol("A", rank=(1,)))
+        funarg = lp.GlobalArg("A", dtype=SCALAR_TYPE, shape=(1,))
         expression = gem.Indexed(gem.Variable("A", (1,)), (0,))
 
         return funarg, [expression]
@@ -368,13 +359,10 @@ def prepare_arguments(arguments, multiindices, interior_facet=False):
         c_shape = tuple(u_shape)
         slicez = [[slice(s) for s in u_shape]]
 
-    funarg = coffee.Decl(SCALAR_TYPE, coffee.Symbol("A", rank=c_shape))
+    funarg = lp.GlobalArg("A", dtype=SCALAR_TYPE, shape=c_shape)
     varexp = gem.Variable("A", c_shape)
     expressions = [expression(gem.view(varexp, *slices)) for slices in slicez]
     return funarg, prune(expressions)
 
 
-cell_orientations_coffee_arg = coffee.Decl("int", coffee.Symbol("cell_orientations"),
-                                           pointers=[("restrict", "const"), ("restrict",)],
-                                           qualifiers=["const"])
-"""COFFEE function argument for cell orientations"""
+cell_orientations_loopy_arg = lp.GlobalArg("cell_orientations", dtype=numpy.int32, shape=lp.auto)
