@@ -88,7 +88,10 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel"):
         else:
             domain = domain & axis
 
-    return lp.make_kernel([domain], instructions, data, name=kernel_name, target=lp.CTarget())
+    knl = lp.make_kernel([domain], instructions, data, name=kernel_name, target=lp.CTarget())
+    iname_tag = dict((i, 'forceseq') for i in knl.all_inames())
+    knl = lp.tag_inames(knl, iname_tag)
+    return knl
 
 
 def _coffee_symbol(symbol, rank=()):
