@@ -31,22 +31,37 @@ class LoopyContext(object):
         # use a stack to model the scope
         self.index_variables = defaultdict(list)
         self.index_extent = {}
-        self.gem_to_pymbolic_and_shape = {}
+        self.gem_to_pymbolic = {}
         self.counter = itertools.count()
         self.name_gen = UniqueNameGenerator()
 
     def next_index_name(self):
         return "i_{0}".format(next(self.counter))
 
-    def pymbolic_variable(self, node, name=None):
+    def pymbolic_variable(self, node):
         try:
-            pym, shape = self.gem_to_pymbolic_and_shape[node]
+            pym = self.gem_to_pymbolic[node]
         except KeyError:
-            if not name:
-                name = self.name_gen(node.name)  # TODO: Catch exception here
+            name = self.name_gen(node.name)
             pym = p.Variable(name)
-            self.gem_to_pymbolic_and_shape[node] = (pym, node.shape)
-        return pym
+            self.gem_to_pymbolic[node] = pym
+        if node in self.indices:
+            rank = []
+            for index in self.indices[node]:
+                if isinstance(index, gem.Index):
+                    rank.append(self.index_variables[index][-1])
+                elif isinstance(index, gem.VariableIndex):
+                    assert False
+                    rank.append(expression(index.expression, self).gencode())
+                else:
+                    assert isinstance(index, int)
+                    rank.append(index)
+            if rank:
+                return p.Subscript(pym, tuple(rank))
+            else:
+                return pym
+        else:
+            return pym
 
     def active_inames(self):
         # Return all active indices
@@ -64,6 +79,7 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel"):
     :returns: loopy kernel
     """
     ctx = LoopyContext()
+    ctx.indices = impero_c.indices
     ctx.precision = precision
     ctx.epsilon = 10.0 ** (-precision)
 
@@ -73,9 +89,9 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel"):
         if isinstance(temp, gem.Constant):
             data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=numpy.float64, initializer=temp.array, scope=lp.temp_var_scope.LOCAL, read_only=True))
         else:
-            data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=numpy.float64, initializer=None, scope=lp.temp_var_scope.LOCAL, read_only=False))
-        ctx.pymbolic_variable(temp, name)
-
+            shape = tuple([i.extent for i in ctx.indices[temp]])
+            data.append(lp.TemporaryVariable(name, shape=shape, dtype=numpy.float64, initializer=None, scope=lp.temp_var_scope.LOCAL, read_only=False))
+        ctx.gem_to_pymbolic[temp] = p.Variable(name)
 
     instructions = statement(impero_c.tree, ctx)
 
@@ -88,9 +104,10 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel"):
         else:
             domain = domain & axis
 
-    knl = lp.make_kernel([domain], instructions, data, name=kernel_name, target=lp.CTarget())
-    iname_tag = dict((i, 'forceseq') for i in knl.all_inames())
-    knl = lp.tag_inames(knl, iname_tag)
+    knl = lp.make_kernel([domain], instructions, data, name=kernel_name, target=lp.CTarget(), seq_dependencies=True)
+    print(knl)
+    iname_tag = dict((i, 'ord') for i in knl.all_inames())
+    # knl = lp.tag_inames(knl, iname_tag)
     return knl
 
 
@@ -179,19 +196,21 @@ def statement_initialise(leaf, ctx):
 def statement_accumulate(leaf, ctx):
     lhs = expression(leaf.indexsum, ctx)
     rhs = lhs + expression(leaf.indexsum.children[0], ctx)
-    return [lp.Assignment(lhs, rhs)]
+    return [lp.Assignment(lhs, rhs, within_inames=ctx.active_inames())]
 
 
 @statement.register(imp.Return)
 def statement_return(leaf, ctx):
-    return [lp.Assignment(expression(leaf.variable, ctx), expression(leaf.expression, ctx))]
+    lhs = expression(leaf.variable, ctx)
+    rhs = lhs + expression(leaf.expression, ctx)
+    return [lp.Assignment(lhs, rhs, within_inames=ctx.active_inames())]
 
 
 @statement.register(imp.ReturnAccumulate)
 def statement_returnaccumulate(leaf, ctx):
     lhs = expression(leaf.variable, ctx)
     rhs = lhs + expression(leaf.indexsum.children[0], ctx)
-    return [lp.Assignment(lhs, rhs)]
+    return [lp.Assignment(lhs, rhs, within_inames=ctx.active_inames())]
 
 
 @statement.register(imp.Evaluate)
@@ -214,8 +233,7 @@ def statement_evaluate(leaf, ctx):
     elif isinstance(expr, gem.Constant):
         return []
     else:
-        # TODO: handle shape
-        return [lp.Assignment(ctx.pymbolic_variable(expr), expression(expr, ctx, top=True))]
+        return [lp.Assignment(ctx.pymbolic_variable(expr), expression(expr, ctx, top=True), within_inames=ctx.active_inames())]
 
 
 def expression(expr, ctx, top=False):
@@ -227,7 +245,7 @@ def expression(expr, ctx, top=False):
     :returns: COFFEE expression
     """
     # TODO: fix top
-    if not top and expr in ctx.gem_to_pymbolic_and_shape:
+    if not top and expr in ctx.gem_to_pymbolic:
         return ctx.pymbolic_variable(expr)
     else:
         return _expression(expr, ctx)
@@ -254,10 +272,8 @@ def _expression_sum(expr, ctx):
 
 
 @_expression.register(gem.Division)
-def _expression_division(expr, parameters):
-    assert False
-    return coffee.Div(*[expression(c, parameters)
-                        for c in expr.children])
+def _expression_division(expr, ctx):
+    return p.Quotient(*[expression(c, ctx) for c in expr.children])
 
 
 @_expression.register(gem.Power)

@@ -141,7 +141,6 @@ class ExpressionKernelBuilder(KernelBuilderBase):
             args.insert(1, cell_orientations_coffee_arg)
 
         loopy_kernel = generate_loopy(impero_c, args, precision, "expression_kernel")
-        print(loopy_kernel)
         return ExpressionKernel(loopy_kernel, self.oriented, self.coefficients)
 
 
