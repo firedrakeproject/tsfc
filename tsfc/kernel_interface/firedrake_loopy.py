@@ -16,7 +16,7 @@ import loopy as lp
 
 from tsfc.finatinterface import create_element
 from tsfc.kernel_interface.common import KernelBuilderBase as _KernelBuilderBase
-from tsfc.coffee import SCALAR_TYPE
+from tsfc.parameters import SCALAR_TYPE
 from tsfc.loopy import generate as generate_loopy
 
 
@@ -138,7 +138,7 @@ class ExpressionKernelBuilder(KernelBuilderBase):
         """
         args = [return_arg] + self.kernel_args
         if self.oriented:
-            args.insert(1, cell_orientations_coffee_arg)
+            args.insert(1, cell_orientations_loopy_arg)
 
         loopy_kernel = generate_loopy(impero_c, args, precision, "expression_kernel")
         return ExpressionKernel(loopy_kernel, self.oriented, self.coefficients)
@@ -236,7 +236,7 @@ class KernelBuilder(KernelBuilderBase):
         """
         args = [self.local_tensor, self.coordinates_arg]
         if self.kernel.oriented:
-            args.append(cell_orientatios_loopy_arg)
+            args.append(cell_orientations_loopy_arg)
         args.extend(self.coefficient_args)
         if self.kernel.integral_type in ["exterior_facet", "exterior_facet_vert"]:
             args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(1,)))
@@ -257,7 +257,7 @@ class KernelBuilder(KernelBuilderBase):
     def get_loopy_arguments(self):
         args = [self.local_tensor, self.coordinates_arg]
         if self.kernel.oriented:
-            args.append(cell_orientations_coffee_arg)
+            args.append(cell_orientations_loopy_arg)
         args.extend(self.coefficient_args)
         if self.kernel.integral_type in ["exterior_facet", "exterior_facet_vert"]:
             args.append(coffee.Decl("unsigned int",
@@ -267,7 +267,6 @@ class KernelBuilder(KernelBuilderBase):
             args.append(coffee.Decl("unsigned int",
                                     coffee.Symbol("facet", rank=(2,)),
                                     qualifiers=["const"]))
-
 
 
 def prepare_coefficient(coefficient, name, interior_facet=False):
@@ -286,7 +285,7 @@ def prepare_coefficient(coefficient, name, interior_facet=False):
 
     if coefficient.ufl_element().family() == 'Real':
         # Constant
-        funarg = lp.GlobalArg(name, dtype=SCALAR_TYPE, shape=lp.auto)
+        funarg = lp.GlobalArg(name, dtype=SCALAR_TYPE, shape=(coefficient.ufl_element().value_size(),))
         expression = gem.reshape(gem.Variable(name, (None,)),
                                  coefficient.ufl_shape)
 
@@ -303,19 +302,20 @@ def prepare_coefficient(coefficient, name, interior_facet=False):
     scalar_size = numpy.prod(scalar_shape, dtype=int)
     tensor_size = numpy.prod(tensor_shape, dtype=int)
 
-    funarg = lp.GlobalArg(name, dtype=SCALAR_TYPE, shape=lp.auto)
-
     if not interior_facet:
         expression = gem.reshape(
             gem.Variable(name, (scalar_size, tensor_size)),
             scalar_shape, tensor_shape
         )
+        shape = (scalar_size, tensor_size)
     else:
         varexp = gem.Variable(name, (2 * scalar_size, tensor_size))
         plus = gem.view(varexp, slice(scalar_size), slice(tensor_size))
         minus = gem.view(varexp, slice(scalar_size, 2 * scalar_size), slice(tensor_size))
         expression = (gem.reshape(plus, scalar_shape, tensor_shape),
                       gem.reshape(minus, scalar_shape, tensor_shape))
+        shape = (scalar_size*2, tensor_size)
+    funarg = lp.GlobalArg(name, dtype=SCALAR_TYPE, shape=shape)
     return funarg, expression
 
 
@@ -365,4 +365,4 @@ def prepare_arguments(arguments, multiindices, interior_facet=False):
     return funarg, prune(expressions)
 
 
-cell_orientations_loopy_arg = lp.GlobalArg("cell_orientations", dtype=numpy.int32, shape=lp.auto)
+cell_orientations_loopy_arg = lp.GlobalArg("cell_orientations", dtype=numpy.int32, shape=(1,))

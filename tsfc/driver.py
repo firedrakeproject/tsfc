@@ -27,15 +27,15 @@ from finat.point_set import PointSet
 from finat.quadrature import AbstractQuadratureRule, make_quadrature
 
 from tsfc import fem, ufl_utils
-from tsfc.coffee import SCALAR_TYPE, generate as generate_coffee
-from tsfc.loopy import SCALAR_TYPE, generate as generate_loopy
+from tsfc.coffee import generate as generate_coffee
 from tsfc.fiatinterface import as_fiat_cell
 from tsfc.logging import logger
-from tsfc.parameters import default_parameters
+from tsfc.parameters import default_parameters, SCALAR_TYPE
 
 import tsfc.kernel_interface.firedrake_loopy as firedrake_interface
 
 import loopy as lp
+
 
 def compile_form(form, prefix="form", parameters=None):
     """Compiles a UFL form into a set of assembly kernels.

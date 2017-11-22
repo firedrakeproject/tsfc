@@ -1,7 +1,5 @@
 from firedrake import *
 from tsfc import compile_form
-from tsfc import parameters
-import numpy as np
 import loopy as lp
 
 mesh = UnitSquareMesh(2,2)

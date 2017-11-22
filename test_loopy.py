@@ -27,7 +27,7 @@ Fk = Indexed(F, (k,))
 Gk = Indexed(G, (k,))
 
 H = Variable('h', (I, J))
-Hij = Indexed(H, (i,j))
+Hij = Indexed(H, (i, j))
 
 # Bj*Cj
 lhs = Aj
@@ -46,4 +46,3 @@ knl = lp.add_and_infer_dtypes(knl, {"a, h": np.float64})
 print(knl)
 code = lp.generate_code_v2(knl)
 print(code.device_code())
-
