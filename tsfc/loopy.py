@@ -103,6 +103,7 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel"):
             domain = domain & axis
     if not domain:
         domain = isl.BasicSet("[] -> {[]}")
+
     knl = lp.make_kernel([domain], instructions, data, name=kernel_name, target=lp.CTarget(), seq_dependencies=True)
 
     def f_mangler(target, name, arg_dtypes):
@@ -191,8 +192,12 @@ def statement_evaluate(leaf, ctx):
     if isinstance(expr, gem.ListTensor):
         ops = []
         var = ctx.pymbolic_variable(expr)
+        index = ()
+        if isinstance(var, p.Subscript):
+            # Probably can do this better
+            var, index = var.aggregate, var.index_tuple
         for multiindex, value in numpy.ndenumerate(expr.array):
-            ops.append(lp.Assignment(p.Subscript(var, multiindex), expression(value, ctx), within_inames=ctx.active_inames()))
+            ops.append(lp.Assignment(p.Subscript(var, index + multiindex), expression(value, ctx), within_inames=ctx.active_inames()))
         return ops
     elif isinstance(expr, gem.Constant):
         return []
@@ -340,6 +345,9 @@ def _expression_variable(expr, ctx):
 def _expression_indexed(expr, ctx):
     rank = ctx.pym_multiindex(expr.multiindex)
     var = expression(expr.children[0], ctx)
+    if isinstance(var, p.Subscript):
+        rank += var.index
+        var = var.aggregate
     return p.Subscript(var, rank)
 
 
