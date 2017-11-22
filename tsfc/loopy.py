@@ -27,11 +27,9 @@ from pytools import UniqueNameGenerator
 class LoopyContext(object):
     def __init__(self):
         self.domain = None
-        # gem index -> [pymbolic variables]
-        # use a stack to model the scope
-        self.index_variables = defaultdict(list)
-        self.index_extent = {}
-        self.gem_to_pymbolic = {}
+        self.active_indices = {}  # gem index -> pymbolic variable
+        self.index_extent = {}  # pymbolic variable for indices - > extent
+        self.gem_to_pymbolic = {}  # gem node -> pymbolic variable
         self.counter = itertools.count()
         self.name_gen = UniqueNameGenerator()
 
@@ -49,7 +47,7 @@ class LoopyContext(object):
             rank = []
             for index in self.indices[node]:
                 if isinstance(index, gem.Index):
-                    rank.append(self.index_variables[index][-1])
+                    rank.append(self.active_indices[index])
                 elif isinstance(index, gem.VariableIndex):
                     assert False
                     rank.append(expression(index.expression, self).gencode())
@@ -65,8 +63,7 @@ class LoopyContext(object):
 
     def active_inames(self):
         # Return all active indices
-        inames = [var[-1].name for var in self.index_variables.values() if var]
-        return frozenset(inames)
+        return frozenset([i.name for i in self.active_indices.values()])
 
 
 def generate(impero_c, args, precision, kernel_name="loopy_kernel"):
@@ -179,11 +176,12 @@ def statement_for(tree, ctx):
     extent = tree.index.extent
     assert extent
     idx = ctx.next_index_name()
-    ctx.index_variables[tree.index].append(p.Variable(idx))
+    ctx.active_indices[tree.index] = p.Variable(idx)
     ctx.index_extent[idx] = extent
 
     statements = statement(tree.children[0], ctx)
-    ctx.index_variables[tree.index].pop()
+
+    ctx.active_indices.pop(tree.index)
     return statements
 
 
@@ -390,7 +388,7 @@ def _expression_indexed(expr, ctx):
     rank = []
     for index in expr.multiindex:
         if isinstance(index, gem.Index):
-            rank.append(ctx.index_variables[index][-1])
+            rank.append(ctx.active_indices[index])
         elif isinstance(index, gem.VariableIndex):
             assert False
             rank.append(expression(index.expression, ctx).gencode())
@@ -412,7 +410,7 @@ def _expression_flexiblyindexed(expr, ctx):
 
         rank_ = [off]
         for index, stride in idxs:
-            rank_.append(p.Product((ctx.index_variables[index][-1], stride)))
+            rank_.append(p.Product((ctx.active_indices[index], stride)))
         rank.append(p.Sum(tuple(rank_)))
 
     return p.Subscript(var, tuple(rank))
