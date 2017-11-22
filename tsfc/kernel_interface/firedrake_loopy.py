@@ -64,12 +64,15 @@ class KernelBuilderBase(_KernelBuilderBase):
 
         # Cell orientation
         if self.interior_facet:
-            cell_orientations = gem.Variable("cell_orientations", (2, 1))
+            shape = (2, 1)
+            cell_orientations = gem.Variable("cell_orientations", shape)
             self._cell_orientations = (gem.Indexed(cell_orientations, (0, 0)),
                                        gem.Indexed(cell_orientations, (1, 0)))
         else:
-            cell_orientations = gem.Variable("cell_orientations", (1, 1))
+            shape = (1, 1)
+            cell_orientations = gem.Variable("cell_orientations", shape)
             self._cell_orientations = (gem.Indexed(cell_orientations, (0, 0)),)
+        self.cell_orientations_loopy_arg = lp.GlobalArg("cell_orientations", dtype=numpy.int32, shape=shape)
 
     def _coefficient(self, coefficient, name):
         """Prepare a coefficient. Adds glue code for the coefficient
@@ -138,7 +141,7 @@ class ExpressionKernelBuilder(KernelBuilderBase):
         """
         args = [return_arg] + self.kernel_args
         if self.oriented:
-            args.insert(1, cell_orientations_loopy_arg)
+            args.insert(1, self.cell_orientations_loopy_arg)
 
         loopy_kernel = generate_loopy(impero_c, args, precision, "expression_kernel")
         return ExpressionKernel(loopy_kernel, self.oriented, self.coefficients)
@@ -236,7 +239,7 @@ class KernelBuilder(KernelBuilderBase):
         """
         args = [self.local_tensor, self.coordinates_arg]
         if self.kernel.oriented:
-            args.append(cell_orientations_loopy_arg)
+            args.append(self.cell_orientations_loopy_arg)
         args.extend(self.coefficient_args)
         if self.kernel.integral_type in ["exterior_facet", "exterior_facet_vert"]:
             args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(1,)))
@@ -257,7 +260,7 @@ class KernelBuilder(KernelBuilderBase):
     def get_loopy_arguments(self):
         args = [self.local_tensor, self.coordinates_arg]
         if self.kernel.oriented:
-            args.append(cell_orientations_loopy_arg)
+            args.append(self.cell_orientations_loopy_arg)
         args.extend(self.coefficient_args)
         if self.kernel.integral_type in ["exterior_facet", "exterior_facet_vert"]:
             args.append(coffee.Decl("unsigned int",
@@ -363,6 +366,3 @@ def prepare_arguments(arguments, multiindices, interior_facet=False):
     varexp = gem.Variable("A", c_shape)
     expressions = [expression(gem.view(varexp, *slices)) for slices in slicez]
     return funarg, prune(expressions)
-
-
-cell_orientations_loopy_arg = lp.GlobalArg("cell_orientations", dtype=numpy.int32, shape=(1,))

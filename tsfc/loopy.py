@@ -105,12 +105,20 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel"):
         domain = isl.BasicSet("[] -> {[]}")
     knl = lp.make_kernel([domain], instructions, data, name=kernel_name, target=lp.CTarget(), seq_dependencies=True)
 
-    def mangler(target, name, arg_dtypes):
+    def f_mangler(target, name, arg_dtypes):
         if name == "fmin":
             return lp.CallMangleInfo("fmin", (lp.types.to_loopy_type(numpy.float64), ), arg_dtypes)
         return None
 
-    knl = lp.register_function_manglers(knl, [mangler])
+    knl = lp.register_function_manglers(knl, [f_mangler])
+
+    def s_mangler(target, name):
+        if name == "NAN":
+            return lp.types.to_loopy_type(numpy.float64), name
+        return None
+
+    knl = lp.register_symbol_manglers(knl, [s_mangler])
+
     print(knl)
     # iname_tag = dict((i, 'ord') for i in knl.all_inames())
     # knl = lp.tag_inames(knl, iname_tag)
