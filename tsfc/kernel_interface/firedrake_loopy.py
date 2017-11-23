@@ -10,8 +10,6 @@ import gem
 from gem.node import traversal
 from gem.optimise import remove_componenttensors as prune
 
-from finat import TensorFiniteElement
-
 import loopy as lp
 
 from tsfc.finatinterface import create_element
@@ -64,14 +62,14 @@ class KernelBuilderBase(_KernelBuilderBase):
 
         # Cell orientation
         if self.interior_facet:
-            shape = (2, 1)
+            shape = (2,)
             cell_orientations = gem.Variable("cell_orientations", shape)
-            self._cell_orientations = (gem.Indexed(cell_orientations, (0, 0)),
-                                       gem.Indexed(cell_orientations, (1, 0)))
+            self._cell_orientations = (gem.Indexed(cell_orientations, (0,)),
+                                       gem.Indexed(cell_orientations, (1,)))
         else:
-            shape = (1, 1)
+            shape = (1,)
             cell_orientations = gem.Variable("cell_orientations", shape)
-            self._cell_orientations = (gem.Indexed(cell_orientations, (0, 0)),)
+            self._cell_orientations = (gem.Indexed(cell_orientations, (0,)),)
         self.cell_orientations_loopy_arg = lp.GlobalArg("cell_orientations", dtype=numpy.int32, shape=shape)
 
     def _coefficient(self, coefficient, name):
@@ -296,29 +294,18 @@ def prepare_coefficient(coefficient, name, interior_facet=False):
 
     finat_element = create_element(coefficient.ufl_element())
 
-    if isinstance(finat_element, TensorFiniteElement):
-        scalar_shape = finat_element.base_element.index_shape
-        tensor_shape = finat_element.index_shape[len(scalar_shape):]
-    else:
-        scalar_shape = finat_element.index_shape
-        tensor_shape = ()
-    scalar_size = numpy.prod(scalar_shape, dtype=int)
-    tensor_size = numpy.prod(tensor_shape, dtype=int)
+    shape = finat_element.index_shape
+    size = numpy.prod(shape, dtype=int)
 
     if not interior_facet:
-        expression = gem.reshape(
-            gem.Variable(name, (scalar_size, tensor_size)),
-            scalar_shape, tensor_shape
-        )
-        shape = (scalar_size, tensor_size)
+        expression = gem.reshape(gem.Variable(name, (size,)), shape)
     else:
-        varexp = gem.Variable(name, (2 * scalar_size, tensor_size))
-        plus = gem.view(varexp, slice(scalar_size), slice(tensor_size))
-        minus = gem.view(varexp, slice(scalar_size, 2 * scalar_size), slice(tensor_size))
-        expression = (gem.reshape(plus, scalar_shape, tensor_shape),
-                      gem.reshape(minus, scalar_shape, tensor_shape))
-        shape = (scalar_size*2, tensor_size)
-    funarg = lp.GlobalArg(name, dtype=SCALAR_TYPE, shape=shape)
+        varexp = gem.Variable(name, (2*size,))
+        plus = gem.view(varexp, slice(size))
+        minus = gem.view(varexp, slice(size, 2*size))
+        expression = (gem.reshape(plus, shape), gem.reshape(minus, shape))
+        size = size * 2
+    funarg = lp.GlobalArg(name, dtype=SCALAR_TYPE, shape=(size,))
     return funarg, expression
 
 
