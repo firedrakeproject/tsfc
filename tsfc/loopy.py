@@ -109,6 +109,9 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel"):
     def f_mangler(target, name, arg_dtypes):
         if name == "fmin":
             return lp.CallMangleInfo("fmin", (lp.types.to_loopy_type(numpy.float64), ), arg_dtypes)
+        elif name == "fmax":
+            return lp.CallMangleInfo("fmax", (lp.types.to_loopy_type(numpy.float64),), arg_dtypes)
+
         return None
 
     knl = lp.register_function_manglers(knl, [f_mangler])
@@ -120,7 +123,7 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel"):
 
     knl = lp.register_symbol_manglers(knl, [s_mangler])
 
-    print(knl)
+    # print(knl)
     # iname_tag = dict((i, 'ord') for i in knl.all_inames())
     # knl = lp.tag_inames(knl, iname_tag)
     return knl
@@ -194,7 +197,7 @@ def statement_evaluate(leaf, ctx):
         var = ctx.pymbolic_variable(expr)
         index = ()
         if isinstance(var, p.Subscript):
-            # Probably can do this better
+            # TODO: Probably can do this better
             var, index = var.aggregate, var.index_tuple
         for multiindex, value in numpy.ndenumerate(expr.array):
             ops.append(lp.Assignment(p.Subscript(var, index + multiindex), expression(value, ctx), within_inames=ctx.active_inames()))
@@ -294,7 +297,7 @@ def _expression_minvalue(expr, ctx):
 
 @_expression.register(gem.MaxValue)
 def _expression_maxvalue(expr, ctx):
-    return p.Max(tuple([expression(c, ctx) for c in expr.children]))
+    return p.Variable("fmax")(*[expression(c, ctx) for c in expr.children])
 
 
 @_expression.register(gem.Comparison)
@@ -346,7 +349,7 @@ def _expression_indexed(expr, ctx):
     rank = ctx.pym_multiindex(expr.multiindex)
     var = expression(expr.children[0], ctx)
     if isinstance(var, p.Subscript):
-        rank += var.index
+        rank = var.index + rank
         var = var.aggregate
     return p.Subscript(var, rank)
 
