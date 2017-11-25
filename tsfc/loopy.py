@@ -114,14 +114,14 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel"):
 
         return None
 
-    knl = lp.register_function_manglers(knl, [f_mangler])
+    # knl = lp.register_function_manglers(knl, [f_mangler])
 
     def s_mangler(target, name):
         if name == "NAN":
             return lp.types.to_loopy_type(numpy.float64), name
         return None
 
-    knl = lp.register_symbol_manglers(knl, [s_mangler])
+    # knl = lp.register_symbol_manglers(knl, [s_mangler])
 
     # print(knl)
     # iname_tag = dict((i, 'ord') for i in knl.all_inames())
@@ -291,13 +291,15 @@ def _expression_mathfunction(expr, ctx):
 
 @_expression.register(gem.MinValue)
 def _expression_minvalue(expr, ctx):
+    return p.Min(tuple(expression(c, ctx) for c in expr.children))
     # loopy will translate p.Min to min() rather than fmin()
-    return p.Variable("fmin")(*[expression(c, ctx) for c in expr.children])
+    # return p.Variable("fmin")(*[expression(c, ctx) for c in expr.children])
 
 
 @_expression.register(gem.MaxValue)
 def _expression_maxvalue(expr, ctx):
-    return p.Variable("fmax")(*[expression(c, ctx) for c in expr.children])
+    return p.Max(tuple(expression(c, ctx) for c in expr.children))
+    # return p.Variable("fmax")(*[expression(c, ctx) for c in expr.children])
 
 
 @_expression.register(gem.Comparison)
@@ -329,14 +331,11 @@ def _expression_conditional(expr, ctx):
 @_expression.register(gem.Constant)
 def _expression_scalar(expr, parameters):
     assert not expr.shape
-    if isnan(expr.value):
-        return p.Variable("NAN")  # TODO: is this right?
-    else:
-        v = expr.value
-        r = round(v, 1)
-        if r and abs(v - r) < parameters.epsilon:
-            v = r  # round to nonzero
-        return v
+    v = expr.value
+    r = round(v, 1)
+    if r and abs(v - r) < parameters.epsilon:
+        return r
+    return v
 
 
 @_expression.register(gem.Variable)
