@@ -241,7 +241,7 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     # Construct kernel
     # body = generate_coffee(impero_c, index_names, parameters["precision"], expressions, split_argument_indices)
 
-    return builder.construct_kernel(kernel_name, impero_c, parameters["precision"])
+    return builder.construct_kernel(kernel_name, impero_c, parameters["precision"], index_names)
 
 
 def compile_expression_at_points(expression, points, coordinates, parameters=None):

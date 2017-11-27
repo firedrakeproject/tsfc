@@ -5,10 +5,10 @@ This is the final stage of code generation in TSFC."""
 from __future__ import absolute_import, print_function, division
 
 from math import isnan
-import itertools
 
 import numpy
 from singledispatch import singledispatch
+from collections import defaultdict
 
 from gem import gem, impero as imp
 
@@ -28,11 +28,7 @@ class LoopyContext(object):
         self.active_indices = {}  # gem index -> pymbolic variable
         self.index_extent = {}  # pymbolic variable for indices - > extent
         self.gem_to_pymbolic = {}  # gem node -> pymbolic variable
-        self.counter = itertools.count()
         self.name_gen = UniqueNameGenerator()
-
-    def next_index_name(self):
-        return "i_{0}".format(next(self.counter))
 
     def pym_multiindex(self, multiindex):
         rank = []
@@ -67,17 +63,19 @@ class LoopyContext(object):
         return frozenset([i.name for i in self.active_indices.values()])
 
 
-def generate(impero_c, args, precision, kernel_name="loopy_kernel"):
+def generate(impero_c, args, precision, kernel_name="loopy_kernel", index_names=[]):
     """Generates loopy code.
 
     :arg impero_c: ImperoC tuple with Impero AST and other data
     :arg args: list of loopy.GlobalArgs
-    :arg index_names: pre-assigned index names
     :arg precision: floating-point precision for printing
+    :arg kernel_name: function name of the kernel
+    :arg index_names: pre-assigned index names
     :returns: loopy kernel
     """
     ctx = LoopyContext()
     ctx.indices = impero_c.indices
+    ctx.index_names = defaultdict(lambda: "i", index_names)
     ctx.precision = precision
     ctx.epsilon = 10.0 ** (-precision)
 
@@ -135,7 +133,7 @@ def statement_block(tree, ctx):
 def statement_for(tree, ctx):
     extent = tree.index.extent
     assert extent
-    idx = ctx.next_index_name()
+    idx = ctx.name_gen(ctx.index_names[tree.index])
     ctx.active_indices[tree.index] = p.Variable(idx)
     ctx.index_extent[idx] = extent
 

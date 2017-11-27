@@ -226,12 +226,13 @@ class KernelBuilder(KernelBuilderBase):
         """Set that the kernel requires cell orientations."""
         self.kernel.oriented = True
 
-    def construct_kernel(self, name, impero_c, precision):
+    def construct_kernel(self, name, impero_c, precision, index_names):
         """Construct a fully built :class:`Kernel`.
 
         :arg name: function name
         :arg impero_c: gem.ImperoC object that represents the kernel
         :arg precision: floating point precision for code generation
+        :arg index_names: list of tuples (gem.Index, str)
         :returns: :class:`Kernel` object
         """
         args = [self.local_tensor, self.coordinates_arg]
@@ -243,7 +244,7 @@ class KernelBuilder(KernelBuilderBase):
         elif self.kernel.integral_type in ["interior_facet", "interior_facet_vert"]:
             args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(2,)))
 
-        self.kernel.ast = generate_loopy(impero_c, args, precision, name)
+        self.kernel.ast = generate_loopy(impero_c, args, precision, name, index_names)
         return self.kernel
 
     def construct_empty_kernel(self, name):
