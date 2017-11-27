@@ -7,18 +7,19 @@ import numpy
 import pytest
 
 import gem
-import tsfc
+import tsfc.loopy
 
+from pymbolic.mapper.evaluator import EvaluationMapper as EM
 
-parameters = tsfc.coffee.Bunch()
-parameters.names = {}
+parameters = tsfc.loopy.LoopyContext()
 
 
 def convert(expression, multiindex):
     assert not expression.free_indices
     element = gem.Indexed(expression, multiindex)
     element, = gem.optimise.remove_componenttensors((element,))
-    return tsfc.coffee.expression(element, parameters).rank
+    index = tsfc.loopy.expression(element, parameters).index_tuple
+    return EM()(index)
 
 
 @pytest.fixture(scope='module')

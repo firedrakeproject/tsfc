@@ -24,7 +24,7 @@ lp.CACHING_ENABLED = False
 
 class LoopyContext(object):
     def __init__(self):
-        self.domain = None
+        self.indices = {}
         self.active_indices = {}  # gem index -> pymbolic variable
         self.index_extent = {}  # pymbolic variable for indices - > extent
         self.gem_to_pymbolic = {}  # gem node -> pymbolic variable

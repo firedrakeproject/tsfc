@@ -2,13 +2,13 @@ from __future__ import absolute_import, print_function, division
 import numpy
 import pytest
 
-from coffee.visitors import EstimateFlops
-
 from ufl import (Mesh, FunctionSpace, VectorElement, TensorElement,
                  Coefficient, TestFunction, interval, indices, dx)
 from ufl.classes import IndexSum, Product, MultiIndex
 
 from tsfc import compile_form
+
+import loopy as lp
 
 
 def count_flops(n):
@@ -30,7 +30,11 @@ def count_flops(n):
                             MultiIndex((i,))), MultiIndex((j,))) * dx))
 
     kernel, = compile_form(L, parameters=dict(mode='spectral'))
-    return EstimateFlops().visit(kernel.ast)
+
+    op_map = lp.get_op_map(kernel.ast)
+    op_map.filter_by(dtype=[numpy.float], name=["add", "sub", "mul", "div"])
+
+    return op_map.sum().eval_with_dict({})
 
 
 def test_convergence():

@@ -3,6 +3,8 @@ import ufl
 from tsfc import compile_form
 import pytest
 
+import loopy as lp
+
 
 @pytest.fixture(params=[ufl.interval,
                         ufl.triangle,
@@ -62,7 +64,7 @@ def test_idempotency(form):
     k1 = compile_form(form)[0]
     k2 = compile_form(form)[0]
 
-    assert k1.ast.gencode() == k2.ast.gencode()
+    assert lp.generate_code_v2(k1.ast).device_code() == lp.generate_code_v2(k2.ast).device_code()
 
 
 if __name__ == "__main__":
