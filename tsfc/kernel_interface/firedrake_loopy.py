@@ -4,8 +4,6 @@ from itertools import chain, product
 
 from ufl import Coefficient, MixedElement as ufl_MixedElement, FunctionSpace
 
-import coffee.base as coffee
-
 import gem
 from gem.node import traversal
 from gem.optimise import remove_componenttensors as prune
@@ -25,7 +23,7 @@ ExpressionKernel = namedtuple('ExpressionKernel', ['ast', 'oriented', 'coefficie
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
                  "domain_number",
-                 "coefficient_numbers", "__weakref__", "_ir", "_argument_ordering", "_impero_c")
+                 "coefficient_numbers", "__weakref__")
     """A compiled Kernel object.
 
     :kwarg ast: The loopy kernel object.
@@ -78,7 +76,7 @@ class KernelBuilderBase(_KernelBuilderBase):
 
         :arg coefficient: :class:`ufl.Coefficient`
         :arg name: coefficient name
-        :returns: COFFEE function argument for the coefficient
+        :returns: loopy argument for the coefficient
         """
         funarg, expression = prepare_coefficient(coefficient, name, interior_facet=self.interior_facet)
         self.coefficient_map[coefficient] = expression
@@ -134,7 +132,8 @@ class ExpressionKernelBuilder(KernelBuilderBase):
         """Constructs an :class:`ExpressionKernel`.
 
         :arg return_arg: loopy.GlobalArg for the return value
-        :arg body: function body (:class:`coffee.Block` node)
+        :arg impero_c: gem.ImperoC object that represents the kernel
+        :arg precision: floating point precision for code generation
         :returns: :class:`ExpressionKernel` object
         """
         args = [return_arg] + self.kernel_args
@@ -231,8 +230,8 @@ class KernelBuilder(KernelBuilderBase):
         """Construct a fully built :class:`Kernel`.
 
         :arg name: function name
-        :arg body: function body (:class:`coffee.Block` node)
-        :arg knl: loopy kernel
+        :arg impero_c: gem.ImperoC object that represents the kernel
+        :arg precision: floating point precision for code generation
         :returns: :class:`Kernel` object
         """
         args = [self.local_tensor, self.coordinates_arg]
@@ -261,13 +260,9 @@ class KernelBuilder(KernelBuilderBase):
             args.append(self.cell_orientations_loopy_arg)
         args.extend(self.coefficient_args)
         if self.kernel.integral_type in ["exterior_facet", "exterior_facet_vert"]:
-            args.append(coffee.Decl("unsigned int",
-                                    coffee.Symbol("facet", rank=(1,)),
-                                    qualifiers=["const"]))
+            args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(1,)))
         elif self.kernel.integral_type in ["interior_facet", "interior_facet_vert"]:
-            args.append(coffee.Decl("unsigned int",
-                                    coffee.Symbol("facet", rank=(2,)),
-                                    qualifiers=["const"]))
+            args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(2,)))
 
 
 def prepare_coefficient(coefficient, name, interior_facet=False):

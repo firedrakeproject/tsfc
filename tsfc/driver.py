@@ -27,7 +27,6 @@ from finat.point_set import PointSet
 from finat.quadrature import AbstractQuadratureRule, make_quadrature
 
 from tsfc import fem, ufl_utils
-from tsfc.coffee import generate as generate_coffee
 from tsfc.fiatinterface import as_fiat_cell
 from tsfc.logging import logger
 from tsfc.parameters import default_parameters, SCALAR_TYPE
@@ -240,15 +239,9 @@ def compile_integral(integral_data, form_data, prefix, parameters,
         name_multiindex(multiindex, name)
 
     # Construct kernel
-    body = generate_coffee(impero_c, index_names, parameters["precision"], expressions, split_argument_indices)
-    # Build loopy kernel
-    # knl = generate_loopy(impero_c, parameters["precision"], kernel_name)
+    # body = generate_coffee(impero_c, index_names, parameters["precision"], expressions, split_argument_indices)
 
-    temp = builder.construct_kernel(kernel_name, impero_c, parameters["precision"])
-    temp._ir = assignments
-    temp._argument_ordering = split_argument_indices
-    temp._impero_c = impero_c
-    return temp
+    return builder.construct_kernel(kernel_name, impero_c, parameters["precision"])
 
 
 def compile_expression_at_points(expression, points, coordinates, parameters=None):

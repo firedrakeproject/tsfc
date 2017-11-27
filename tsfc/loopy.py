@@ -105,24 +105,6 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel"):
         domain = isl.BasicSet("[] -> {[]}")
 
     knl = lp.make_kernel([domain], instructions, data, name=kernel_name, target=lp.CTarget(), seq_dependencies=True)
-
-    def f_mangler(target, name, arg_dtypes):
-        if name == "fmin":
-            return lp.CallMangleInfo("fmin", (lp.types.to_loopy_type(numpy.float64), ), arg_dtypes)
-        elif name == "fmax":
-            return lp.CallMangleInfo("fmax", (lp.types.to_loopy_type(numpy.float64),), arg_dtypes)
-
-        return None
-
-    # knl = lp.register_function_manglers(knl, [f_mangler])
-
-    def s_mangler(target, name):
-        if name == "NAN":
-            return lp.types.to_loopy_type(numpy.float64), name
-        return None
-
-    # knl = lp.register_symbol_manglers(knl, [s_mangler])
-
     # print(knl)
     # iname_tag = dict((i, 'ord') for i in knl.all_inames())
     # knl = lp.tag_inames(knl, iname_tag)
@@ -274,32 +256,31 @@ def _expression_mathfunction(expr, ctx):
     name = name_map.get(expr.name, expr.name)
     if name == 'jn':
         assert False
-        # nu, arg = expr.children
-        # if nu == gem.Zero():
-        #     return coffee.FunCall('j0', expression(arg, parameters))
-        # elif nu == gem.one:
-        #     return coffee.FunCall('j1', expression(arg, parameters))
+        nu, arg = expr.children
+        if nu == gem.Zero():
+            return p.Variable("j0")(expression(arg, ctx))
+        elif nu == gem.one:
+            return p.Variable("j1")(expression(arg, ctx))
     if name == 'yn':
         assert False
-        # nu, arg = expr.children
-        # if nu == gem.Zero():
-        #     return coffee.FunCall('y0', expression(arg, parameters))
-        # elif nu == gem.one:
-        #     return coffee.FunCall('y1', expression(arg, parameters))
+        nu, arg = expr.children
+        if nu == gem.Zero():
+            return p.Variable("y0")(expression(arg, ctx))
+        elif nu == gem.one:
+            return p.Variable("y1")(expression(arg, ctx))
     return p.Variable(name)(*[expression(c, ctx) for c in expr.children])
 
 
 @_expression.register(gem.MinValue)
 def _expression_minvalue(expr, ctx):
-    return p.Min(tuple(expression(c, ctx) for c in expr.children))
+    # return p.Min(tuple(expression(c, ctx) for c in expr.children))
     # loopy will translate p.Min to min() rather than fmin()
-    # return p.Variable("fmin")(*[expression(c, ctx) for c in expr.children])
+    return p.Variable("min")(*[expression(c, ctx) for c in expr.children])
 
 
 @_expression.register(gem.MaxValue)
 def _expression_maxvalue(expr, ctx):
-    return p.Max(tuple(expression(c, ctx) for c in expr.children))
-    # return p.Variable("fmax")(*[expression(c, ctx) for c in expr.children])
+    return p.Variable("max")(*[expression(c, ctx) for c in expr.children])
 
 
 @_expression.register(gem.Comparison)
@@ -332,6 +313,8 @@ def _expression_conditional(expr, ctx):
 def _expression_scalar(expr, parameters):
     assert not expr.shape
     v = expr.value
+    if isnan(v):
+        return p.Variable("NAN")
     r = round(v, 1)
     if r and abs(v - r) < parameters.epsilon:
         return r
