@@ -32,7 +32,7 @@ def count_flops(n):
     kernel, = compile_form(L, parameters=dict(mode='spectral'))
 
     op_map = lp.get_op_map(kernel.ast)
-    op_map.filter_by(dtype=[numpy.float], name=["add", "sub", "mul", "div"])
+    op_map = op_map.filter_by(dtype=[numpy.float], name=["add", "sub", "mul", "div"])
 
     return op_map.sum().eval_with_dict({})
 

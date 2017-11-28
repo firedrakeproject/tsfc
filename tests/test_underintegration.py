@@ -6,7 +6,7 @@ from functools import reduce
 import numpy
 import pytest
 
-from coffee.visitors import EstimateFlops
+import loopy as lp
 
 from ufl import (Mesh, FunctionSpace, FiniteElement, VectorElement,
                  TestFunction, TrialFunction, TensorProductCell, dx,
@@ -59,7 +59,10 @@ def laplace(cell, degree):
 
 def count_flops(form):
     kernel, = compile_form(form, parameters=dict(mode='spectral'))
-    return EstimateFlops().visit(kernel.ast)
+
+    op_map = lp.get_op_map(kernel.ast)
+    op_map = op_map.filter_by(dtype=[numpy.float], name=["add", "sub", "mul", "div"])
+    return op_map.sum().eval_with_dict({})
 
 
 @pytest.mark.parametrize('form', [mass_cg, mass_dg])
