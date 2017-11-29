@@ -19,8 +19,6 @@ import pymbolic.primitives as p
 
 from pytools import UniqueNameGenerator
 
-lp.CACHING_ENABLED = False
-
 
 class LoopyContext(object):
     def __init__(self):
