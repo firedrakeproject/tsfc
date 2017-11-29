@@ -8,7 +8,7 @@ from math import isnan
 
 import numpy
 from singledispatch import singledispatch
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 
 from gem import gem, impero as imp
 
@@ -26,7 +26,7 @@ class LoopyContext(object):
     def __init__(self):
         self.indices = {}
         self.active_indices = {}  # gem index -> pymbolic variable
-        self.index_extent = {}  # pymbolic variable for indices - > extent
+        self.index_extent = OrderedDict()  # pymbolic variable for indices - > extent
         self.gem_to_pymbolic = {}  # gem node -> pymbolic variable
         self.name_gen = UniqueNameGenerator()
 
