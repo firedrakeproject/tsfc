@@ -107,7 +107,6 @@ def test_rhs(cell, order):
     assert (rates < order).all()
 
 
-@pytest.mark.skip(reason="skip due to loopy limitation")
 @pytest.mark.parametrize(('cell', 'order'),
                          [(quadrilateral, 5),
                           (TensorProductCell(interval, interval), 5),
@@ -125,7 +124,6 @@ def test_mixed_poisson(cell, order):
     assert (rates < order).all()
 
 
-@pytest.mark.skip(reason="skip due to loopy limitation")
 @pytest.mark.parametrize(('cell', 'order'),
                          [(quadrilateral, 3),
                           (TensorProductCell(interval, interval), 3),
@@ -143,7 +141,6 @@ def test_mixed_poisson_action(cell, order):
     assert (rates < order).all()
 
 
-@pytest.mark.skip(reason="skip due to loopy limitation")
 @pytest.mark.parametrize(('cell', 'order'),
                          [(quadrilateral, 5),
                           (TensorProductCell(interval, interval), 5),

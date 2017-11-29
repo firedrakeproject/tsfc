@@ -91,18 +91,16 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel", index_names=
 
     instructions = statement(impero_c.tree, ctx)
 
-    domain = None
-    inames = isl.make_zero_and_vars(list(ctx.index_extent.keys()))
-    for idx, extent in ctx.index_extent.items():
-        axis = ((inames[0].le_set(inames[idx])) & (inames[idx].lt_set(inames[0] + extent)))
-        if not domain:
-            domain = axis
-        else:
-            domain = domain & axis
-    if not domain:
-        domain = isl.BasicSet("[] -> {[]}")
+    domains = []
 
-    knl = lp.make_kernel([domain], instructions, data, name=kernel_name, target=lp.CTarget(), seq_dependencies=True)
+    for idx, extent in ctx.index_extent.items():
+        inames = isl.make_zero_and_vars([idx])
+        domains.append(((inames[0].le_set(inames[idx])) & (inames[idx].lt_set(inames[0] + extent))))
+
+    if not domains:
+        domains = [isl.BasicSet("[] -> {[]}")]
+
+    knl = lp.make_kernel(domains, instructions, data, name=kernel_name, target=lp.CTarget(), seq_dependencies=True)
     # print(knl)
     # iname_tag = dict((i, 'ord') for i in knl.all_inames())
     # knl = lp.tag_inames(knl, iname_tag)
