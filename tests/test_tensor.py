@@ -56,12 +56,11 @@ def count_flops(form):
     return op_map.sum().eval_with_dict({})
 
 
-@pytest.mark.skip(reason="skip due to loopy limitation")
 @pytest.mark.parametrize('form', [mass, poisson, helmholtz, elasticity])
 @pytest.mark.parametrize(('cell', 'order'),
-                         [(interval, 2),
-                          (triangle, 4),
-                          (tetrahedron, 6)])
+                         [(interval, 2.01),
+                          (triangle, 4.01),
+                          (tetrahedron, 6.01)])
 def test_bilinear(form, cell, order):
     degrees = numpy.arange(1, 9 - 2 * cell.topological_dimension())
     flops = [count_flops(form(cell, int(degree)))
@@ -70,11 +69,10 @@ def test_bilinear(form, cell, order):
     assert (rates < order).all()
 
 
-@pytest.mark.skip(reason="skip due to loopy limitation")
 @pytest.mark.parametrize(('cell', 'order'),
-                         [(interval, 1),
-                          (triangle, 2),
-                          (tetrahedron, 3)])
+                         [(interval, 1.01),
+                          (triangle, 2.01),
+                          (tetrahedron, 3.01)])
 def test_linear(cell, order):
     def form(cell, degree):
         m = Mesh(VectorElement('CG', cell, 1))
@@ -89,11 +87,10 @@ def test_linear(cell, order):
     assert (rates < order).all()
 
 
-@pytest.mark.skip(reason="skip due to loopy limitation")
 @pytest.mark.parametrize(('cell', 'order'),
-                         [(interval, 1),
-                          (triangle, 2),
-                          (tetrahedron, 3)])
+                         [(interval, 1.01),
+                          (triangle, 2.01),
+                          (tetrahedron, 3.01)])
 def test_functional(cell, order):
     def form(cell, degree):
         m = Mesh(VectorElement('CG', cell, 1))
@@ -102,7 +99,7 @@ def test_functional(cell, order):
         return div(f)*dx
 
     dim = cell.topological_dimension()
-    degrees = numpy.arange(1, 7 - dim) + (3 - dim)
+    degrees = numpy.arange(2, 8 - dim) + (3 - dim)
     flops = [count_flops(form(cell, int(degree)))
              for degree in degrees]
     rates = numpy.diff(numpy.log(flops)) / numpy.diff(numpy.log(degrees + 1))
