@@ -32,16 +32,18 @@ from tsfc.logging import logger
 from tsfc.parameters import default_parameters, SCALAR_TYPE
 
 import tsfc.kernel_interface.firedrake_loopy as firedrake_interface
+import tsfc.kernel_interface.firedrake as firedrake_interface_coffee
 
 import loopy as lp
 
 
-def compile_form(form, prefix="form", parameters=None):
+def compile_form(form, prefix="form", parameters=None, coffee=False):
     """Compiles a UFL form into a set of assembly kernels.
 
     :arg form: UFL form
     :arg prefix: kernel name will start with this string
     :arg parameters: parameters object
+    :arg coffee: compile coffee kernel instead of loopy kernel
     :returns: list of kernels
     """
     cpu_time = time.time()
@@ -52,9 +54,13 @@ def compile_form(form, prefix="form", parameters=None):
     logger.info(GREEN % "compute_form_data finished in %g seconds.", time.time() - cpu_time)
 
     kernels = []
+    if coffee:
+        interface = firedrake_interface_coffee
+    else:
+        interface = firedrake_interface
     for integral_data in fd.integral_data:
         start = time.time()
-        kernel = compile_integral(integral_data, fd, prefix, parameters)
+        kernel = compile_integral(integral_data, fd, prefix, parameters, interface)
         if kernel is not None:
             kernels.append(kernel)
         logger.info(GREEN % "compile_integral finished in %g seconds.", time.time() - start)
@@ -239,7 +245,10 @@ def compile_integral(integral_data, form_data, prefix, parameters,
         name_multiindex(multiindex, name)
 
     # Construct kernel
-    # body = generate_coffee(impero_c, index_names, parameters["precision"], expressions, split_argument_indices)
+    if interface == firedrake_interface_coffee:
+        from tsfc.coffee import generate as generate_coffee
+        body = generate_coffee(impero_c, index_names, parameters["precision"], expressions, split_argument_indices)
+        return builder.construct_kernel(kernel_name, body)
 
     return builder.construct_kernel(kernel_name, impero_c, parameters["precision"], index_names)
 
