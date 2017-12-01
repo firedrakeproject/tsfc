@@ -22,13 +22,11 @@ ExpressionKernel = namedtuple('ExpressionKernel', ['ast', 'oriented', 'coefficie
 
 
 class Kernel(object):
-    __slots__ = ("ast", "knl", "integral_type", "oriented", "subdomain_id",
-                 "domain_number",
-                 "coefficient_numbers", "__weakref__", "_ir", "_argument_ordering", "_impero_c")
+    __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
+                 "domain_number", "coefficient_numbers", "__weakref__")
     """A compiled Kernel object.
 
     :kwarg ast: The COFFEE ast for the kernel.
-    :kwarg knl: The loopy kernel.
     :kwarg integral_type: The type of integral.
     :kwarg oriented: Does the kernel require cell_orientations.
     :kwarg subdomain_id: What is the subdomain id for this kernel.

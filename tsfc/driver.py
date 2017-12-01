@@ -32,7 +32,7 @@ from tsfc.logging import logger
 from tsfc.parameters import default_parameters, SCALAR_TYPE
 
 import tsfc.kernel_interface.firedrake_loopy as firedrake_interface
-import tsfc.kernel_interface.firedrake as firedrake_interface_coffee
+import tsfc.kernel_interface.firedrake_coffee as firedrake_interface_coffee
 
 import loopy as lp
 
