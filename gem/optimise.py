@@ -4,11 +4,10 @@ expressions."""
 from __future__ import absolute_import, print_function, division
 
 from collections import OrderedDict, defaultdict
-from functools import partial, reduce
+from functools import singledispatch, partial, reduce
 from itertools import combinations, permutations, zip_longest
 
 import numpy
-from singledispatch import singledispatch
 
 from gem.utils import groupby
 from gem.node import (Memoizer, MemoizerArg, reuse_if_untouched,

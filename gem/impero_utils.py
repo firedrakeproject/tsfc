@@ -9,9 +9,8 @@ C code or a COFFEE AST.
 from __future__ import absolute_import, print_function, division
 
 import collections
+from functools import singledispatch
 from itertools import chain, groupby
-
-from singledispatch import singledispatch
 
 from gem.node import traversal, collect_refcount
 from gem import gem, impero as imp, optimise, scheduling

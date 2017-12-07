@@ -52,10 +52,10 @@ unconcatenation, and then add up the results.
 
 from __future__ import absolute_import, print_function, division
 
+from functools import singledispatch
 from itertools import chain
 
 import numpy
-from singledispatch import singledispatch
 
 from gem.node import Memoizer, reuse_if_untouched
 from gem.gem import (ComponentTensor, Concatenate, FlexiblyIndexed,

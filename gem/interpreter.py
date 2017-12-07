@@ -7,7 +7,7 @@ import numpy
 import operator
 import math
 from collections import OrderedDict
-from singledispatch import singledispatch
+from functools import singledispatch
 import itertools
 
 from gem import gem, node
