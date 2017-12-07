@@ -1,8 +1,6 @@
 """A set of routines implementing various transformations on GEM
 expressions."""
 
-from __future__ import absolute_import, print_function, division
-
 from collections import OrderedDict, defaultdict
 from functools import singledispatch, partial, reduce
 from itertools import combinations, permutations, zip_longest

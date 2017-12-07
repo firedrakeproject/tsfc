@@ -1,8 +1,6 @@
 """Data structures and algorithms for generic expansion and
 refactorisation."""
 
-from __future__ import absolute_import, print_function, division
-
 from collections import Counter, OrderedDict, defaultdict, namedtuple
 from itertools import product
 from sys import intern

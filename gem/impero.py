@@ -10,8 +10,6 @@ Trivia:
    (Command?) after clicking on them.
 """
 
-from __future__ import absolute_import, print_function, division
-
 from abc import ABCMeta, abstractmethod
 
 from gem.node import Node as NodeBase

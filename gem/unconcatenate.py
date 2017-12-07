@@ -50,8 +50,6 @@ and apply "matrix-vector multifunction" for each pair after
 unconcatenation, and then add up the results.
 """
 
-from __future__ import absolute_import, print_function, division
-
 from functools import singledispatch
 from itertools import chain
 

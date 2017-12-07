@@ -14,8 +14,6 @@ the Index objects in GEM, not on all the nodes that have those free
 indices.
 """
 
-from __future__ import absolute_import, print_function, division
-
 from abc import ABCMeta
 from itertools import chain
 from operator import attrgetter
