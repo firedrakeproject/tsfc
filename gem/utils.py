@@ -1,5 +1,4 @@
 from __future__ import absolute_import, print_function, division
-from six import viewitems
 
 import collections
 
@@ -36,7 +35,7 @@ def groupby(iterable, key=None):
     groups = collections.OrderedDict()
     for elem in iterable:
         groups.setdefault(key(elem), []).append(elem)
-    return viewitems(groups)
+    return groups.items()
 
 
 def make_proxy_class(name, cls):

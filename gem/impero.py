@@ -11,7 +11,6 @@ Trivia:
 """
 
 from __future__ import absolute_import, print_function, division
-from six import with_metaclass
 
 from abc import ABCMeta, abstractmethod
 
@@ -24,7 +23,7 @@ class Node(NodeBase):
     __slots__ = ()
 
 
-class Terminal(with_metaclass(ABCMeta, Node)):
+class Terminal(Node, metaclass=ABCMeta):
     """Abstract class for terminal Impero nodes"""
 
     __slots__ = ()

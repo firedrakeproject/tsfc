@@ -5,7 +5,6 @@ This file is NOT for code generation as a COFFEE AST.
 """
 
 from __future__ import absolute_import, print_function, division
-from six.moves import map, range
 
 from collections import OrderedDict
 import itertools

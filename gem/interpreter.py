@@ -2,7 +2,6 @@
 An interpreter for GEM trees.
 """
 from __future__ import absolute_import, print_function, division
-from six.moves import map
 
 import numpy
 import operator

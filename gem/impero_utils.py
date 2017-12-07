@@ -7,7 +7,6 @@ C code or a COFFEE AST.
 """
 
 from __future__ import absolute_import, print_function, division
-from six.moves import filter
 
 import collections
 from itertools import chain, groupby

@@ -51,7 +51,6 @@ unconcatenation, and then add up the results.
 """
 
 from __future__ import absolute_import, print_function, division
-from six.moves import map, range, zip
 
 from itertools import chain
 

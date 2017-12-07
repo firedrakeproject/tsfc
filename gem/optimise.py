@@ -2,11 +2,10 @@
 expressions."""
 
 from __future__ import absolute_import, print_function, division
-from six.moves import filter, map, zip, zip_longest
 
 from collections import OrderedDict, defaultdict
 from functools import partial, reduce
-from itertools import combinations, permutations
+from itertools import combinations, permutations, zip_longest
 
 import numpy
 from singledispatch import singledispatch
