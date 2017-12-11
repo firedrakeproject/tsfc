@@ -1,12 +1,9 @@
 """Data structures and algorithms for generic expansion and
 refactorisation."""
 
-from __future__ import absolute_import, print_function, division
-from six import iteritems
-from six.moves import intern, map
-
 from collections import Counter, OrderedDict, defaultdict, namedtuple
 from itertools import product
+from sys import intern
 
 from gem.node import Memoizer, traversal
 from gem.gem import Node, Zero, Product, Sum, Indexed, ListTensor, one
@@ -73,7 +70,7 @@ class MonomialSum(object):
         assert len(sum_indices) == len(sum_indices_set)
 
         atomics = tuple(atomics)
-        atomics_set = frozenset(iteritems(Counter(atomics)))
+        atomics_set = frozenset(Counter(atomics).items())
 
         assert isinstance(rest, Node)
 
@@ -83,7 +80,7 @@ class MonomialSum(object):
 
     def __iter__(self):
         """Iteration yields :py:class:`Monomial` objects"""
-        for key, (sum_indices, atomics) in iteritems(self.ordering):
+        for key, (sum_indices, atomics) in self.ordering.items():
             rest = self.monomials[key]
             yield Monomial(sum_indices, atomics, rest)
 
@@ -95,9 +92,9 @@ class MonomialSum(object):
             assert isinstance(arg, MonomialSum)
             # Optimised implementation: no need to decompose and
             # reconstruct key.
-            for key, rest in iteritems(arg.monomials):
+            for key, rest in arg.monomials.items():
                 result.monomials[key] = Sum(result.monomials[key], rest)
-            for key, value in iteritems(arg.ordering):
+            for key, value in arg.ordering.items():
                 result.ordering.setdefault(key, value)
         return result
 
