@@ -14,10 +14,6 @@ the Index objects in GEM, not on all the nodes that have those free
 indices.
 """
 
-from __future__ import absolute_import, print_function, division
-from six import with_metaclass
-from six.moves import range, zip
-
 from abc import ABCMeta
 from itertools import chain
 from operator import attrgetter
@@ -57,7 +53,7 @@ class NodeMeta(type):
         return obj
 
 
-class Node(with_metaclass(NodeMeta, NodeBase)):
+class Node(NodeBase, metaclass=NodeMeta):
     """Abstract GEM node class."""
 
     __slots__ = ('free_indices',)
@@ -380,7 +376,7 @@ class Conditional(Node):
         return self
 
 
-class IndexBase(with_metaclass(ABCMeta)):
+class IndexBase(metaclass=ABCMeta):
     """Abstract base class for indices."""
     pass
 
