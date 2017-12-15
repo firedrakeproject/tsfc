@@ -7,7 +7,7 @@ from __future__ import absolute_import, print_function, division
 from math import isnan
 
 import numpy
-from singledispatch import singledispatch
+from functools import singledispatch
 from collections import defaultdict, OrderedDict
 
 from gem import gem, impero as imp
