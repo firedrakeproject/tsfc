@@ -13,6 +13,7 @@ from gem.optimise import remove_componenttensors as prune
 
 from tsfc.finatinterface import create_element
 from tsfc.kernel_interface.common import KernelBuilderBase as _KernelBuilderBase
+from tsfc.coffee import generate as generate_coffee
 
 
 # Expression kernel description type
@@ -273,16 +274,21 @@ class KernelBuilder(KernelBuilderBase):
         """Set that the kernel requires cell sizes."""
         self.kernel.needs_cell_sizes = True
 
-    def construct_kernel(self, name, body):
+    def construct_kernel(self, name, impero_c, precision, index_names):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument
         list for assembly kernels.
 
         :arg name: function name
-        :arg body: function body (:class:`coffee.Block` node)
+        :arg impero_c: ImperoC tuple with Impero AST and other data
+        :arg precision: floating-point precision for printing
+        :arg index_names: pre-assigned index names
         :returns: :class:`Kernel` object
         """
+
+        body = generate_coffee(impero_c, index_names, precision)
+
         args = [self.local_tensor, self.coordinates_arg]
         if self.kernel.oriented:
             args.append(cell_orientations_coffee_arg)

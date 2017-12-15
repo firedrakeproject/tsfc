@@ -28,15 +28,17 @@ from tsfc.fiatinterface import as_fiat_cell
 from tsfc.logging import logger
 from tsfc.parameters import default_parameters, is_complex
 
-import tsfc.kernel_interface.firedrake as firedrake_interface
+import tsfc.kernel_interface.firedrake as firedrake_interface_coffee
+import tsfc.kernel_interface.firedrake_loopy as firedrake_interface_loopy
 
 
-def compile_form(form, prefix="form", parameters=None, interface=None):
+def compile_form(form, prefix="form", parameters=None, interface=None, coffee=True):
     """Compiles a UFL form into a set of assembly kernels.
 
     :arg form: UFL form
     :arg prefix: kernel name will start with this string
     :arg parameters: parameters object
+    :arg coffee: compile coffee kernel instead of loopy kernel
     :returns: list of kernels
     """
     cpu_time = time.time()
@@ -56,6 +58,10 @@ def compile_form(form, prefix="form", parameters=None, interface=None):
     logger.info(GREEN % "compute_form_data finished in %g seconds.", time.time() - cpu_time)
 
     kernels = []
+    if coffee:
+        interface = firedrake_interface_coffee
+    else:
+        interface = firedrake_interface_loopy
     for integral_data in fd.integral_data:
         start = time.time()
         kernel = compile_integral(integral_data, fd, prefix, parameters, interface=interface)
@@ -203,7 +209,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface):
         return_variables = []
         expressions = []
 
-    # Need optimised roots for COFFEE
+    # Need optimised roots
     options = dict(reduce(operator.and_,
                           [mode.finalise_options.items()
                            for mode in mode_irs.keys()]))
@@ -248,11 +254,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface):
     for multiindex, name in zip(argument_multiindices, ['j', 'k']):
         name_multiindex(multiindex, name)
 
-    # Construct kernel
-    body = generate_coffee(impero_c, index_names, parameters["precision"],
-                           parameters["scalar_type"], expressions, split_argument_indices)
-
-    return builder.construct_kernel(kernel_name, body)
+    return builder.construct_kernel(kernel_name, impero_c, parameters["precision"], parameters["scalar_type"], index_names)
 
 
 def compile_expression_at_points(expression, points, coordinates, parameters=None):
@@ -286,7 +288,7 @@ def compile_expression_at_points(expression, points, coordinates, parameters=Non
                                                  complex_mode=complex_mode)
 
     # Initialise kernel builder
-    builder = firedrake_interface.ExpressionKernelBuilder(parameters["scalar_type"])
+    builder = firedrake_interface_coffee.ExpressionKernelBuilder(parameters["scalar_type"])
 
     # Replace coordinates (if any)
     domain = expression.ufl_domain()
