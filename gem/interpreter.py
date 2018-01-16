@@ -178,13 +178,13 @@ def _(e, self):
     op = names[e.name]
     if e.name is 'imag':
         for idx in numpy.ndindex(result.tshape):
-            result[idx] = [o[o.filter(idx,result.fids)].imag for o in ops]
+            result[idx] = [o[o.filter(idx, result.fids)].imag for o in ops]
     elif e.name is 'conj':
         for idx in numpy.ndindex(result.tshape):
-            result[idx] = [o[o.filter(idx,result.fids)].conjugate() for o in ops]
+            result[idx] = [o[o.filter(idx, result.fids)].conjugate() for o in ops]
     elif e.name is 'real':
         for idx in numpy.ndindex(result.tshape):
-            result[idx] = [o[o.filter(idx,result.fids)].real for o in ops]
+            result[idx] = [o[o.filter(idx, result.fids)].real for o in ops]
     else:
         for idx in numpy.ndindex(result.tshape):
             result[idx] = op(*(o[o.filter(idx, result.fids)] for o in ops))
