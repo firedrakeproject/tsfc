@@ -81,7 +81,7 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel", index_names=
     for i, temp in enumerate(impero_c.temporaries):
         name = "t%d" % i
         if isinstance(temp, gem.Constant):
-            data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=temp.array.dtype, initializer=temp.array, scope=lp.temp_var_scope.LOCAL, read_only=True))
+            data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=temp.array.dtype, initializer=temp.array, scope=lp.temp_var_scope.GLOBAL, read_only=True))
         else:
             shape = tuple([i.extent for i in ctx.indices[temp]]) + temp.shape
             data.append(lp.TemporaryVariable(name, shape=shape, dtype=numpy.float64, initializer=None, scope=lp.temp_var_scope.LOCAL, read_only=False))
@@ -99,9 +99,9 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel", index_names=
         domains = [isl.BasicSet("[] -> {[]}")]
 
     knl = lp.make_kernel(domains, instructions, data, name=kernel_name, target=lp.CTarget(), seq_dependencies=True)
-    # print(knl)
-    # iname_tag = dict((i, 'ord') for i in knl.all_inames())
-    # knl = lp.tag_inames(knl, iname_tag)
+
+    # TODO: temporary fix to prevent loop transpose
+    knl = lp.prioritize_loops(knl, ",".join(ctx.index_extent.keys()))
     return knl
 
 
