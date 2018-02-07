@@ -80,14 +80,44 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel", index_names=
     data = list(args)
     for i, temp in enumerate(impero_c.temporaries):
         name = "t%d" % i
+        align = 64
         if isinstance(temp, gem.Constant):
-            data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=temp.array.dtype, initializer=temp.array, scope=lp.temp_var_scope.GLOBAL, read_only=True))
+            data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=temp.array.dtype, initializer=temp.array, scope=lp.temp_var_scope.GLOBAL, read_only=True, alignment=align))
         else:
             shape = tuple([i.extent for i in ctx.indices[temp]]) + temp.shape
-            data.append(lp.TemporaryVariable(name, shape=shape, dtype=numpy.float64, initializer=None, scope=lp.temp_var_scope.LOCAL, read_only=False))
+            data.append(lp.TemporaryVariable(name, shape=shape, dtype=numpy.float64, initializer=None, scope=lp.temp_var_scope.LOCAL, read_only=False, alignment=align))
         ctx.gem_to_pymbolic[temp] = p.Variable(name)
 
     instructions = statement(impero_c.tree, ctx)
+
+    # group instructions to speed up scheduling
+    if len(instructions) > 10000000:
+
+        def compatible(inst1, inst2):
+            return inst1.within_inames == inst2.within_inames
+
+        def create_instruction_group(instructions):
+            assert len(instructions) > 0
+            if len(instructions) > 1:
+                return lp.SequentialInstructionGroup(instructions, within_inames=instructions[0].within_inames)
+            return instructions[0]
+
+        instructions_group = []
+        current_group = []
+
+        for inst in instructions:
+            if not current_group:
+                current_group.append(inst)
+            else:
+                inst_pre = current_group[-1]
+                if compatible(inst_pre, inst):
+                    current_group.append(inst)
+                else:
+                    instructions_group.append(create_instruction_group(current_group))
+                    current_group = [inst]
+        instructions_group.append(create_instruction_group(current_group))
+
+        instructions = instructions_group
 
     domains = []
 
@@ -102,6 +132,7 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel", index_names=
 
     # TODO: temporary fix to prevent loop transpose
     knl = lp.prioritize_loops(knl, ",".join(ctx.index_extent.keys()))
+    print(knl)
     return knl
 
 
