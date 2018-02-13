@@ -4,9 +4,6 @@ algorithm operating on a GEM representation.
 This file is NOT for code generation as a COFFEE AST.
 """
 
-from __future__ import absolute_import, print_function, division
-from six.moves import map, range
-
 from collections import OrderedDict
 import itertools
 import logging
@@ -17,13 +14,6 @@ from gem.gem import IndexSum, one
 from gem.optimise import make_sum, make_product
 from gem.refactorise import Monomial
 from gem.utils import groupby
-
-
-try:
-    from firedrake import Citations
-    Citations().register("Luporini2016")
-except ImportError:
-    pass
 
 
 __all__ = ['optimise_monomial_sum']
