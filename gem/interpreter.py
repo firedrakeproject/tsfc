@@ -169,8 +169,8 @@ def _evaluate_operator(e, self):
     return result
 
 
-@_evaluate.register(gem.MathFunction)  # noqa: F811
-def _(e, self):
+@_evaluate.register(gem.MathFunction)
+def _evaluate_mathfunction(e, self):
     ops = [self(o) for o in e.children]
     result = Result.empty(*ops)
     names = {"abs": abs,
@@ -188,18 +188,6 @@ def _(e, self):
     else:
         for idx in numpy.ndindex(result.tshape):
             result[idx] = op(*(o[o.filter(idx, result.fids)] for o in ops))
-    return result
-
-
-@_evaluate.register(gem.MathFunction)
-def _evaluate_mathfunction(e, self):
-    ops = [self(o) for o in e.children]
-    result = Result.empty(*ops)
-    names = {"abs": abs,
-             "log": math.log}
-    op = names[e.name]
-    for idx in numpy.ndindex(result.tshape):
-        result[idx] = op(*(o[o.filter(idx, result.fids)] for o in ops))
     return result
 
 

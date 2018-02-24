@@ -105,7 +105,7 @@ class Constant(Terminal):
 
     Convention:
      - array: numpy array of values
-     - value: complex value (scalars only)
+     - value: float or complex value (scalars only)
     """
     __slots__ = ()
 
@@ -158,7 +158,10 @@ class Literal(Constant):
             return super(Literal, cls).__new__(cls)
 
     def __init__(self, array):
-        self.array = asarray(array, dtype=float) if asarray(array).dtype is numpy.dtype('int') else asarray(array)
+        try:
+            array = asarray(array, dtype=float)
+        except TypeError:
+            array = asarray(array, dtype=complex)
 
     def is_equal(self, other):
         if type(self) != type(other):
@@ -172,7 +175,10 @@ class Literal(Constant):
 
     @property
     def value(self):
-        return self.array
+        try:
+            return float(array)
+        except TypeError:
+            return complex(array)
 
     @property
     def shape(self):
@@ -291,8 +297,9 @@ class MathFunction(Scalar):
         assert all(arg.shape == () for arg in args)
 
         if name in {'conj', 'real', 'imag'}:
-            if isinstance(args[0], Zero):
-                return args[0]
+            arg, = args
+            if isinstance(arg, Zero):
+                return arg
 
         self = super(MathFunction, cls).__new__(cls)
         self.name = name
