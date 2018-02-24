@@ -159,9 +159,9 @@ class Literal(Constant):
 
     def __init__(self, array):
         try:
-            array = asarray(array, dtype=float)
+            self.array = asarray(array, dtype=float)
         except TypeError:
-            array = asarray(array, dtype=complex)
+            self.array = asarray(array, dtype=complex)
 
     def is_equal(self, other):
         if type(self) != type(other):
@@ -176,9 +176,9 @@ class Literal(Constant):
     @property
     def value(self):
         try:
-            return float(array)
+            return float(self.array)
         except TypeError:
-            return complex(array)
+            return complex(self.array)
 
     @property
     def shape(self):
