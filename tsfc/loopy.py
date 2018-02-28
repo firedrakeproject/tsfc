@@ -1,4 +1,4 @@
-"""Generate loopy Loop from ImperoC tuple data.
+"""Generate loopy kernel from ImperoC tuple data.
 
 This is the final stage of code generation in TSFC."""
 
@@ -77,50 +77,22 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel", index_names=
     ctx.precision = precision
     ctx.epsilon = 10.0 ** (-precision)
 
+    # Create arguments
     data = list(args)
     for i, temp in enumerate(impero_c.temporaries):
         name = "t%d" % i
-        align = 64
         if isinstance(temp, gem.Constant):
-            data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=temp.array.dtype, initializer=temp.array, scope=lp.temp_var_scope.GLOBAL, read_only=True, alignment=align))
+            data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=temp.array.dtype, initializer=temp.array, scope=lp.temp_var_scope.GLOBAL, read_only=True))
         else:
             shape = tuple([i.extent for i in ctx.indices[temp]]) + temp.shape
-            data.append(lp.TemporaryVariable(name, shape=shape, dtype=numpy.float64, initializer=None, scope=lp.temp_var_scope.LOCAL, read_only=False, alignment=align))
+            data.append(lp.TemporaryVariable(name, shape=shape, dtype=numpy.float64, initializer=None, scope=lp.temp_var_scope.LOCAL, read_only=False))
         ctx.gem_to_pymbolic[temp] = p.Variable(name)
 
+    # Create instructions
     instructions = statement(impero_c.tree, ctx)
 
-    # group instructions to speed up scheduling
-    if len(instructions) > 10000000:
-
-        def compatible(inst1, inst2):
-            return inst1.within_inames == inst2.within_inames
-
-        def create_instruction_group(instructions):
-            assert len(instructions) > 0
-            if len(instructions) > 1:
-                return lp.SequentialInstructionGroup(instructions, within_inames=instructions[0].within_inames)
-            return instructions[0]
-
-        instructions_group = []
-        current_group = []
-
-        for inst in instructions:
-            if not current_group:
-                current_group.append(inst)
-            else:
-                inst_pre = current_group[-1]
-                if compatible(inst_pre, inst):
-                    current_group.append(inst)
-                else:
-                    instructions_group.append(create_instruction_group(current_group))
-                    current_group = [inst]
-        instructions_group.append(create_instruction_group(current_group))
-
-        instructions = instructions_group
-
+    # Create domains
     domains = []
-
     for idx, extent in ctx.index_extent.items():
         inames = isl.make_zero_and_vars([idx])
         domains.append(((inames[0].le_set(inames[idx])) & (inames[idx].lt_set(inames[0] + extent))))
@@ -128,11 +100,18 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel", index_names=
     if not domains:
         domains = [isl.BasicSet("[] -> {[]}")]
 
+    # Create loopy kernel
     knl = lp.make_kernel(domains, instructions, data, name=kernel_name, target=lp.CTarget(), seq_dependencies=True)
 
-    # TODO: temporary fix to prevent loop transpose
+    # Prevent loopy interchange by loopy
     knl = lp.prioritize_loops(knl, ",".join(ctx.index_extent.keys()))
-    print(knl)
+
+    # Help loopy in scheduling by assigning priority to instructions
+    insn_new = []
+    for i, insn in enumerate(knl.instructions):
+        insn_new.append(insn.copy(priority=len(knl.instructions) - i))
+    knl = knl.copy(instructions=insn_new)
+
     return knl
 
 
@@ -204,7 +183,6 @@ def statement_evaluate(leaf, ctx):
         var = ctx.pymbolic_variable(expr)
         index = ()
         if isinstance(var, p.Subscript):
-            # TODO: Probably can do this better
             var, index = var.aggregate, var.index_tuple
         for multiindex, value in numpy.ndenumerate(expr.array):
             ops.append(lp.Assignment(p.Subscript(var, index + multiindex), expression(value, ctx), within_inames=ctx.active_inames()))
@@ -223,7 +201,6 @@ def expression(expr, ctx, top=False):
     :arg top: do not generate temporary reference for the root node
     :returns: pymbolic expression
     """
-    # TODO: fix top
     if not top and expr in ctx.gem_to_pymbolic:
         return ctx.pymbolic_variable(expr)
     else:
@@ -265,29 +242,16 @@ def _expression_power(expr, ctx):
 def _expression_mathfunction(expr, ctx):
     name_map = {
         'abs': 'fabs',
-        'ln': 'log',
-
-        # Bessel functions
-        'cyl_bessel_j': 'jn',
-        'cyl_bessel_y': 'yn',
-
-        # Modified Bessel functions (C++ only)
-        #
-        # These mappings work for FEniCS only, and fail with Firedrake
-        # since no Boost available.
-        'cyl_bessel_i': 'boost::math::cyl_bessel_i',
-        'cyl_bessel_k': 'boost::math::cyl_bessel_k',
+        'ln': 'log'
     }
     name = name_map.get(expr.name, expr.name)
     if name == 'jn':
-        assert False
         nu, arg = expr.children
         if nu == gem.Zero():
             return p.Variable("j0")(expression(arg, ctx))
         elif nu == gem.one:
             return p.Variable("j1")(expression(arg, ctx))
     if name == 'yn':
-        assert False
         nu, arg = expr.children
         if nu == gem.Zero():
             return p.Variable("y0")(expression(arg, ctx))
@@ -298,8 +262,6 @@ def _expression_mathfunction(expr, ctx):
 
 @_expression.register(gem.MinValue)
 def _expression_minvalue(expr, ctx):
-    # return p.Min(tuple(expression(c, ctx) for c in expr.children))
-    # loopy will translate p.Min to min() rather than fmin()
     return p.Variable("min")(*[expression(c, ctx) for c in expr.children])
 
 
