@@ -75,10 +75,6 @@ def _ref_symbol(expr, parameters):
     return _coffee_symbol(parameters.names[expr], rank=tuple(rank))
 
 
-def _root_pragma(expr, parameters):
-    return None
-
-
 @singledispatch
 def statement(tree, parameters):
     """Translates an Impero (sub)tree into a COFFEE AST corresponding
@@ -122,26 +118,20 @@ def statement_initialise(leaf, parameters):
 
 @statement.register(imp.Accumulate)
 def statement_accumulate(leaf, parameters):
-    pragma = _root_pragma(leaf.indexsum, parameters)
     return coffee.Incr(_ref_symbol(leaf.indexsum, parameters),
-                       expression(leaf.indexsum.children[0], parameters),
-                       pragma=pragma)
+                       expression(leaf.indexsum.children[0], parameters))
 
 
 @statement.register(imp.Return)
 def statement_return(leaf, parameters):
-    pragma = _root_pragma(leaf.expression, parameters)
     return coffee.Incr(expression(leaf.variable, parameters),
-                       expression(leaf.expression, parameters),
-                       pragma=pragma)
+                       expression(leaf.expression, parameters))
 
 
 @statement.register(imp.ReturnAccumulate)
 def statement_returnaccumulate(leaf, parameters):
-    pragma = _root_pragma(leaf.indexsum, parameters)
     return coffee.Incr(expression(leaf.variable, parameters),
-                       expression(leaf.indexsum.children[0], parameters),
-                       pragma=pragma)
+                       expression(leaf.indexsum.children[0], parameters))
 
 
 @statement.register(imp.Evaluate)
