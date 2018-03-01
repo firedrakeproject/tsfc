@@ -22,23 +22,23 @@ from pytools import UniqueNameGenerator
 
 class LoopyContext(object):
     def __init__(self):
-        self.indices = {}
+        self.indices = {}  # indices for declarations and referencing values, from ImperoC
         self.active_indices = {}  # gem index -> pymbolic variable
-        self.index_extent = OrderedDict()  # pymbolic variable for indices - > extent
+        self.index_extent = OrderedDict()  # pymbolic variable for indices -> extent
         self.gem_to_pymbolic = {}  # gem node -> pymbolic variable
         self.name_gen = UniqueNameGenerator()
 
     def pym_multiindex(self, multiindex):
-        rank = []
+        indices = []
         for index in multiindex:
             if isinstance(index, gem.Index):
-                rank.append(self.active_indices[index])
+                indices.append(self.active_indices[index])
             elif isinstance(index, gem.VariableIndex):
-                rank.append(expression(index.expression, self))
+                indices.append(expression(index.expression, self))
             else:
                 assert isinstance(index, int)
-                rank.append(index)
-        return tuple(rank)
+                indices.append(index)
+        return tuple(indices)
 
     def pymbolic_variable(self, node):
         try:
@@ -48,11 +48,9 @@ class LoopyContext(object):
             pym = p.Variable(name)
             self.gem_to_pymbolic[node] = pym
         if node in self.indices:
-            rank = self.pym_multiindex(self.indices[node])
-            if rank:
-                return p.Subscript(pym, rank)
-            else:
-                return pym
+            indices = self.pym_multiindex(self.indices[node])
+            if indices:
+                return p.Subscript(pym, indices)
         else:
             return pym
 
