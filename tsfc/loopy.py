@@ -51,6 +51,8 @@ class LoopyContext(object):
             indices = self.pym_multiindex(self.indices[node])
             if indices:
                 return p.Subscript(pym, indices)
+            else:
+                return pym
         else:
             return pym
 
