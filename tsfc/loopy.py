@@ -2,8 +2,6 @@
 
 This is the final stage of code generation in TSFC."""
 
-from __future__ import absolute_import, print_function, division
-
 from math import isnan
 
 import numpy
