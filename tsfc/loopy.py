@@ -101,7 +101,7 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel", index_names=
         domains = [isl.BasicSet("[] -> {[]}")]
 
     # Create loopy kernel
-    knl = lp.make_kernel(domains, instructions, data, name=kernel_name, target=lp.CTarget(), seq_dependencies=True)
+    knl = lp.make_kernel(domains, instructions, data, name=kernel_name, target=lp.CTarget(), seq_dependencies=True, lang_version=(2018, 1))
 
     # Prevent loopy interchange by loopy
     knl = lp.prioritize_loops(knl, ",".join(ctx.index_extent.keys()))
