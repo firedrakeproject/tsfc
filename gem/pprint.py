@@ -1,11 +1,8 @@
 """Pretty-printing GEM expressions."""
-
-from __future__ import absolute_import, print_function, division
-
 from collections import defaultdict
 import itertools
 
-from singledispatch import singledispatch
+from functools import singledispatch
 
 from gem import gem
 from gem.node import collect_refcount, post_traversal
