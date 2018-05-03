@@ -127,19 +127,20 @@ class ExpressionKernelBuilder(KernelBuilderBase):
         """Set that the kernel requires cell orientations."""
         self.oriented = True
 
-    def construct_kernel(self, return_arg, impero_c, precision):
+    def construct_kernel(self, return_arg, impero_c, precision, index_names):
         """Constructs an :class:`ExpressionKernel`.
 
         :arg return_arg: loopy.GlobalArg for the return value
         :arg impero_c: gem.ImperoC object that represents the kernel
         :arg precision: floating point precision for code generation
+        :arg index_names: pre-assigned index names
         :returns: :class:`ExpressionKernel` object
         """
         args = [return_arg] + self.kernel_args
         if self.oriented:
             args.insert(1, self.cell_orientations_loopy_arg)
 
-        loopy_kernel = generate_loopy(impero_c, args, precision, "expression_kernel")
+        loopy_kernel = generate_loopy(impero_c, args, precision, "expression_kernel", index_names)
         return ExpressionKernel(loopy_kernel, self.oriented, self.coefficients)
 
 
