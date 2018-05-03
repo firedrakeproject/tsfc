@@ -258,16 +258,6 @@ class KernelBuilder(KernelBuilderBase):
         """
         return None
 
-    def get_loopy_arguments(self):
-        args = [self.local_tensor, self.coordinates_arg]
-        if self.kernel.oriented:
-            args.append(self.cell_orientations_loopy_arg)
-        args.extend(self.coefficient_args)
-        if self.kernel.integral_type in ["exterior_facet", "exterior_facet_vert"]:
-            args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(1,)))
-        elif self.kernel.integral_type in ["interior_facet", "interior_facet_vert"]:
-            args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(2,)))
-
 
 def prepare_coefficient(coefficient, name, interior_facet=False):
     """Bridges the kernel interface and the GEM abstraction for
