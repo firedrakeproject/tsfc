@@ -127,10 +127,8 @@ def statement(tree, ctx):
 
 @statement.register(imp.Block)
 def statement_block(tree, ctx):
-    statements = []
-    for child in tree.children:
-        statements.extend(statement(child, ctx))
-    return statements
+    from itertools import chain
+    return list(chain(*(statement(child, ctx) for child in tree.children)))
 
 
 @statement.register(imp.For)
@@ -217,29 +215,28 @@ def _expression_failure(expr, parameters):
 
 @_expression.register(gem.Product)
 def _expression_product(expr, ctx):
-    return p.Product(tuple([expression(c, ctx) for c in expr.children]))
+    return p.Product(tuple(expression(c, ctx) for c in expr.children))
 
 
 @_expression.register(gem.Sum)
 def _expression_sum(expr, ctx):
-    return p.Sum(tuple([expression(c, ctx) for c in expr.children]))
+    return p.Sum(tuple(expression(c, ctx) for c in expr.children))
 
 
 @_expression.register(gem.Division)
 def _expression_division(expr, ctx):
-    return p.Quotient(*[expression(c, ctx) for c in expr.children])
+    return p.Quotient(*(expression(c, ctx) for c in expr.children))
 
 
 @_expression.register(gem.Power)
 def _expression_power(expr, ctx):
-    base, exponent = expr.children
-    return p.Power(expression(base, ctx), expression(exponent, ctx))
+    return p.Power(*(expression(c, ctx) for c in expr.children))
 
 
 @_expression.register(gem.MathFunction)
 def _expression_mathfunction(expr, ctx):
     name_map = {
-        'abs': 'fabs',
+        'abs': 'abs',
         'ln': 'log'
     }
     name = name_map.get(expr.name, expr.name)
