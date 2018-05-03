@@ -23,7 +23,7 @@ from finat.point_set import PointSet
 from finat.quadrature import AbstractQuadratureRule, make_quadrature
 
 from tsfc import fem, ufl_utils
-from tsfc.coffee import SCALAR_TYPE, generate as generate_coffee
+from tsfc.coffee import SCALAR_TYPE
 from tsfc.fiatinterface import as_fiat_cell
 from tsfc.logging import logger
 from tsfc.parameters import default_parameters
@@ -241,7 +241,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface):
     return builder.construct_kernel(kernel_name, impero_c, parameters["precision"], index_names)
 
 
-def compile_expression_at_points(expression, points, coordinates, parameters=None):
+def compile_expression_at_points(expression, points, coordinates, parameters=None, coffee=True):
     """Compiles a UFL expression to be evaluated at compile-time known
     reference points.  Useful for interpolating UFL expressions onto
     function spaces with only point evaluation nodes.
@@ -250,8 +250,10 @@ def compile_expression_at_points(expression, points, coordinates, parameters=Non
     :arg points: reference coordinates of the evaluation points
     :arg coordinates: the coordinate function
     :arg parameters: parameters object
+    :arg coffee: compile coffee kernel instead of loopy kernel
     """
     import coffee.base as ast
+    import loopy as lp
 
     if parameters is None:
         parameters = default_parameters()
@@ -268,7 +270,10 @@ def compile_expression_at_points(expression, points, coordinates, parameters=Non
     expression = ufl_utils.preprocess_expression(expression)
 
     # Initialise kernel builder
-    builder = firedrake_interface_coffee.ExpressionKernelBuilder()
+    if coffee:
+        builder = firedrake_interface_coffee.ExpressionKernelBuilder()
+    else:
+        builder = firedrake_interface_loopy.ExpressionKernelBuilder()
 
     # Replace coordinates (if any)
     domain = expression.ufl_domain()
@@ -303,19 +308,21 @@ def compile_expression_at_points(expression, points, coordinates, parameters=Non
     return_shape = (len(points),) + value_shape
     return_indices = point_set.indices + tensor_indices
     return_var = gem.Variable('A', return_shape)
-    return_arg = ast.Decl(SCALAR_TYPE, ast.Symbol('A', rank=return_shape))
+    if coffee:
+        return_arg = ast.Decl(SCALAR_TYPE, ast.Symbol('A', rank=return_shape))
+    else:
+        return_arg = lp.GlobalArg("A", dtype=SCALAR_TYPE, shape=return_shape)
     return_expr = gem.Indexed(return_var, return_indices)
     ir, = impero_utils.preprocess_gem([ir])
     impero_c = impero_utils.compile_gem([(return_expr, ir)], return_indices)
     point_index, = point_set.indices
-    body = generate_coffee(impero_c, {point_index: 'p'}, parameters["precision"])
 
     # Handle cell orientations
     if builder.needs_cell_orientations([ir]):
         builder.require_cell_orientations()
 
     # Build kernel tuple
-    return builder.construct_kernel(return_arg, body)
+    return builder.construct_kernel(return_arg, impero_c, parameters["precision"], {point_index: 'p'})
 
 
 def lower_integral_type(fiat_cell, integral_type):

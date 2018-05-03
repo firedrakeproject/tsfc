@@ -124,16 +124,20 @@ class ExpressionKernelBuilder(KernelBuilderBase):
         """Set that the kernel requires cell orientations."""
         self.oriented = True
 
-    def construct_kernel(self, return_arg, body):
+    def construct_kernel(self, return_arg, impero_c, precision, index_names):
         """Constructs an :class:`ExpressionKernel`.
 
         :arg return_arg: COFFEE argument for the return value
         :arg body: function body (:class:`coffee.Block` node)
         :returns: :class:`ExpressionKernel` object
         """
+        from tsfc.coffee import generate as generate_coffee
+
         args = [return_arg] + self.kernel_args
         if self.oriented:
             args.insert(1, cell_orientations_coffee_arg)
+
+        body = generate_coffee(impero_c, index_names, precision)
 
         kernel_code = super(ExpressionKernelBuilder, self).construct_kernel("expression_kernel", args, body)
         return ExpressionKernel(kernel_code, self.oriented, self.coefficients)
