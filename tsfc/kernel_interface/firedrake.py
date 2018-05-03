@@ -154,19 +154,24 @@ class ExpressionKernelBuilder(KernelBuilderBase):
     def require_cell_sizes(self):
         self.cell_sizes = True
 
-    def construct_kernel(self, return_arg, body):
+    def construct_kernel(self, return_arg, impero_c, precision, index_names):
         """Constructs an :class:`ExpressionKernel`.
 
         :arg return_arg: COFFEE argument for the return value
         :arg body: function body (:class:`coffee.Block` node)
         :returns: :class:`ExpressionKernel` object
         """
-        args = [return_arg]
+
+        from tsfc.coffee import generate as generate_coffee
+
+        args = [return_arg] + self.kernel_args
         if self.oriented:
             args.append(cell_orientations_coffee_arg)
         if self.cell_sizes:
             args.append(self.cell_sizes_arg)
         args.extend(self.kernel_args)
+
+        body = generate_coffee(impero_c, index_names, precision)
 
         kernel_code = super(ExpressionKernelBuilder, self).construct_kernel("expression_kernel", args, body)
         return ExpressionKernel(kernel_code, self.oriented, self.cell_sizes, self.coefficients)
