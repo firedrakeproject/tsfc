@@ -253,7 +253,7 @@ class KernelBuilder(KernelBuilderBase):
             args.append(coffee.Decl("unsigned int",
                                     coffee.Symbol("facet", rank=(2,)),
                                     qualifiers=["const"]))
-                                    
+
         for name_, shape in self.tabulations:
             args.append(coffee.Decl(SCALAR_TYPE, coffee.Symbol(
                 name_, rank=shape), qualifiers=["const"]))
@@ -288,8 +288,8 @@ def prepare_coefficient(coefficient, name, interior_facet=False):
 
     if coefficient.ufl_element().family() == 'Real':
         # Constant
-        funarg = coffee.Decl(SCALAR_TYPE,  coffee.Symbol(name, rank=(1,)),
-                             #pointers=[("restrict",)],
+        funarg = coffee.Decl(SCALAR_TYPE, coffee.Symbol(name, rank=(1,)),
+                             # pointers=[("restrict",)],
                              qualifiers=["const"])
 
         expression = gem.reshape(gem.Variable(name, (None,)),
@@ -301,8 +301,8 @@ def prepare_coefficient(coefficient, name, interior_facet=False):
     shape = finat_element.index_shape
     size = numpy.prod(shape, dtype=int)
 
-	#THIS IS MISSING THE OLD TENSOR_SHAPE ARGUMENT FOR THE RANK
-	#IS THIS OK? ONLY MATTERS FOR TENSOR FINITE ELEMENTS I THINK?
+# THIS IS MISSING THE OLD TENSOR_SHAPE ARGUMENT FOR THE RANK
+# IS THIS OK? ONLY MATTERS FOR TENSOR FINITE ELEMENTS I THINK?
     if not interior_facet:
         funarg = coffee.Decl(SCALAR_TYPE, coffee.Symbol(name, rank=(size,)), qualifiers=["const"])
     else:
