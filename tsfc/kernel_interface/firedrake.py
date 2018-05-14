@@ -21,8 +21,8 @@ ExpressionKernel = namedtuple('ExpressionKernel', ['ast', 'oriented', 'coefficie
 
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
-                 "domain_number",
-                 "coefficient_numbers", "__weakref__")
+                 "domain_number", "tabulations",
+                 "coefficient_numbers", "__weakref__", "quad")
     """A compiled Kernel object.
 
     :kwarg ast: The COFFEE ast for the kernel.
@@ -34,9 +34,10 @@ class Kernel(object):
         original_form.ufl_domains() to get the correct domain).
     :kwarg coefficient_numbers: A list of which coefficients from the
         form the kernel needs.
+    :kwarg quadrule: The finat quadrature rule used to generate this kernel
     """
     def __init__(self, ast=None, integral_type=None, oriented=False,
-                 subdomain_id=None, domain_number=None,
+                 subdomain_id=None, domain_number=None, quadrule=None,
                  coefficient_numbers=()):
         # Defaults
         self.ast = ast
@@ -45,6 +46,7 @@ class Kernel(object):
         self.domain_number = domain_number
         self.subdomain_id = subdomain_id
         self.coefficient_numbers = coefficient_numbers
+        self.quad = quadrule
         super(Kernel, self).__init__()
 
 
@@ -221,7 +223,15 @@ class KernelBuilder(KernelBuilderBase):
         """Set that the kernel requires cell orientations."""
         self.kernel.oriented = True
 
-    def construct_kernel(self, name, body):
+    def register_tabulations(self, expressions):
+        tabulations = {}
+        for node in traversal(expressions):
+            if isinstance(node, gem.Variable) and node.name.startswith("rt_"):
+                tabulations[node.name] = node.shape
+        self.tabulations = tuple(sorted(tabulations.items()))
+        self.kernel.tabulations = tuple(sorted(tabulations))
+
+    def construct_kernel(self, name, body, quadrule):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument
@@ -243,6 +253,12 @@ class KernelBuilder(KernelBuilderBase):
             args.append(coffee.Decl("unsigned int",
                                     coffee.Symbol("facet", rank=(2,)),
                                     qualifiers=["const"]))
+                                    
+        for name_, shape in self.tabulations:
+            args.append(coffee.Decl(SCALAR_TYPE, coffee.Symbol(
+                name_, rank=shape), qualifiers=["const"]))
+
+        self.kernel.quad = quadrule
 
         self.kernel.ast = KernelBuilderBase.construct_kernel(self, name, args, body)
         return self.kernel
@@ -272,8 +288,8 @@ def prepare_coefficient(coefficient, name, interior_facet=False):
 
     if coefficient.ufl_element().family() == 'Real':
         # Constant
-        funarg = coffee.Decl(SCALAR_TYPE, coffee.Symbol(name),
-                             pointers=[("restrict",)],
+        funarg = coffee.Decl(SCALAR_TYPE,  coffee.Symbol(name, rank=(1,)),
+                             #pointers=[("restrict",)],
                              qualifiers=["const"])
 
         expression = gem.reshape(gem.Variable(name, (None,)),
@@ -285,9 +301,16 @@ def prepare_coefficient(coefficient, name, interior_facet=False):
     shape = finat_element.index_shape
     size = numpy.prod(shape, dtype=int)
 
-    funarg = coffee.Decl(SCALAR_TYPE, coffee.Symbol(name),
-                         pointers=[("restrict",)],
-                         qualifiers=["const"])
+	#THIS IS MISSING THE OLD TENSOR_SHAPE ARGUMENT FOR THE RANK
+	#IS THIS OK? ONLY MATTERS FOR TENSOR FINITE ELEMENTS I THINK?
+    if not interior_facet:
+        funarg = coffee.Decl(SCALAR_TYPE, coffee.Symbol(name, rank=(size,)), qualifiers=["const"])
+    else:
+        funarg = coffee.Decl(SCALAR_TYPE, coffee.Symbol(name, rank=(2*size,)), qualifiers=["const"])
+
+#    funarg = coffee.Decl(SCALAR_TYPE, coffee.Symbol(name),
+#                        pointers=[("restrict",)],
+#                         qualifiers=["const"])
 
     if not interior_facet:
         expression = gem.reshape(gem.Variable(name, (size,)), shape)

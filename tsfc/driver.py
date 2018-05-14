@@ -198,6 +198,8 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     expressions = impero_utils.preprocess_gem(expressions, **options)
     assignments = list(zip(return_variables, expressions))
 
+    builder.register_tabulations(expressions)
+
     # Look for cell orientations in the IR
     if builder.needs_cell_orientations(expressions):
         builder.require_cell_orientations()
@@ -236,7 +238,7 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     # Construct kernel
     body = generate_coffee(impero_c, index_names, parameters["precision"], expressions, split_argument_indices)
 
-    return builder.construct_kernel(kernel_name, body)
+    return builder.construct_kernel(kernel_name, body, quad_rule)
 
 
 def compile_expression_at_points(expression, points, coordinates, parameters=None):
