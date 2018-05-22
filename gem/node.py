@@ -99,7 +99,7 @@ class Node(object):
         return hash((type(self),) + self._cons_args(self.children))
 
 
-def traversal(expression_dags):
+def pre_traversal(expression_dags):
     """Pre-order traversal of the nodes of expression DAGs."""
     seen = set()
     lifo = []
@@ -118,6 +118,35 @@ def traversal(expression_dags):
             if child not in seen:
                 seen.add(child)
                 lifo.append(child)
+
+
+def post_traversal(expression_dags):
+    """Post-order traversal of the nodes of expression DAGs."""
+    seen = set()
+    lifo = []
+    # Some roots might be same, but they must be visited only once.
+    # Keep the original ordering of roots, for deterministic code
+    # generation.
+    for root in expression_dags:
+        if root not in seen:
+            seen.add(root)
+            lifo.append((root, list(root.children)))
+
+    while lifo:
+        node, deps = lifo[-1]
+        for i, dep in enumerate(deps):
+            if dep is not None and dep not in seen:
+                lifo.append((dep, list(dep.children)))
+                deps[i] = None
+                break
+        else:
+            yield node
+            seen.add(node)
+            lifo.pop()
+
+
+# Default to the more efficient pre-order traversal
+traversal = pre_traversal
 
 
 def collect_refcount(expression_dags):
