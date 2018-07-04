@@ -70,6 +70,29 @@ class Node(NodeBase, metaclass=NodeMeta):
             self.children = other.children
         return result
 
+    def __getitem__(self, indices):
+        try:
+            indices = tuple(indices)
+        except TypeError:
+            indices = (indices, )
+        return Indexed(self, indices)
+
+    def __add__(self, other):
+        assert isinstance(other, Node)
+        return Sum(self, other)
+
+    def __sub__(self, other):
+        assert isinstance(other, Node)
+        return Sum(self, Product(Literal(-1), other))
+
+    def __mul__(self, other):
+        assert isinstance(other, Node)
+        return Product(self, other)
+
+    def __truediv__(self, other):
+        assert isinstance(other, Node)
+        return Division(self, other)
+
 
 class Terminal(Node):
     """Abstract class for terminal GEM nodes."""
