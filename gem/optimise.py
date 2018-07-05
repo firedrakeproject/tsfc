@@ -172,7 +172,8 @@ def _select_expression(expressions, index):
     types = set(map(type, expressions))
     if types <= {Indexed, Zero}:
         multiindex, = set(e.multiindex for e in expressions if isinstance(e, Indexed))
-        shape = tuple(i.extent for i in multiindex)
+        # Shape only determined by free indices
+        shape = tuple(i.extent for i in multiindex if isinstance(i, Index))
 
         def child(expression):
             if isinstance(expression, Indexed):
