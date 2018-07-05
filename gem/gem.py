@@ -17,7 +17,7 @@ indices.
 from abc import ABCMeta
 from itertools import chain
 from operator import attrgetter
-from numbers import Integral
+from numbers import Integral, Number
 
 import numpy
 from numpy import asarray
@@ -31,7 +31,8 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
            'IndexSum', 'ListTensor', 'Concatenate', 'Delta',
-           'index_sum', 'partial_indexed', 'reshape', 'view']
+           'index_sum', 'partial_indexed', 'reshape', 'view',
+           'indices', 'as_gem']
 
 
 class NodeMeta(type):
@@ -69,6 +70,37 @@ class Node(NodeBase, metaclass=NodeMeta):
         if result:
             self.children = other.children
         return result
+
+    def __getitem__(self, indices):
+        try:
+            indices = tuple(indices)
+        except TypeError:
+            indices = (indices, )
+        return Indexed(self, indices)
+
+    def __add__(self, other):
+        return Sum(self, as_gem(other))
+
+    def __radd__(self, other):
+        return as_gem(other).__add__(self)
+
+    def __sub__(self, other):
+        return Sum(self, Product(Literal(-1), as_gem(other)))
+
+    def __rsub__(self, other):
+        return as_gem(other).__sub__(self)
+
+    def __mul__(self, other):
+        return Product(self, as_gem(other))
+
+    def __rmul__(self, other):
+        return as_gem(other).__mul__(self)
+
+    def __truediv__(self, other):
+        return Division(self, as_gem(other))
+
+    def __rtruediv__(self, other):
+        return as_gem(other).__truediv__(self)
 
 
 class Terminal(Node):
@@ -878,3 +910,28 @@ def view(expression, *slices):
 
 # Static one object for quicker constant folding
 one = Literal(1)
+
+
+# Syntax sugar
+def indices(n):
+    """Make some :class:`Index` objects.
+
+    :arg n: The number of indices to make.
+    :returns: A tuple of `n` :class:`Index` objects.
+    """
+    return tuple(Index() for _ in range(n))
+
+
+def as_gem(expr):
+    """Attempt to convert an expression into GEM.
+
+    :arg expr: The expression.
+    :returns: A GEM representation of the expression.
+    :raises ValueError: if conversion was not possible.
+    """
+    if isinstance(expr, Node):
+        return expr
+    elif isinstance(expr, Number):
+        return Literal(expr)
+    else:
+        raise ValueError("Do not know how to convert %r to GEM" % expr)
