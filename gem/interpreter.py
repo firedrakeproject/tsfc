@@ -3,7 +3,6 @@ An interpreter for GEM trees.
 """
 import numpy
 import operator
-import math
 from collections import OrderedDict
 from functools import singledispatch
 import itertools
@@ -175,7 +174,7 @@ def _evaluate_mathfunction(e, self):
     result = Result.empty(*ops)
     names = {
         "abs": abs,
-        "log": math.log,
+        "log": numpy.log,
         "real": operator.attrgetter("real"),
         "imag": operator.attrgetter("imag"),
         "conj": operator.methodcaller("conjugate"),
