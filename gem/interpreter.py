@@ -60,7 +60,7 @@ class Result(object):
         return tuple(idx[fids.index(i)] for i in self.fids) + idx[len(fids):]
 
     def __getitem__(self, idx):
-        return self.arr[idx]
+        return self.arr[tuple(idx)]
 
     def __setitem__(self, idx, val):
         self.arr[idx] = val
