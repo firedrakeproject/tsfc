@@ -212,6 +212,8 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     index_ordering = tuple(quadrature_indices) + split_argument_indices
     try:
         impero_c = impero_utils.compile_gem(assignments, index_ordering, remove_zeros=True)
+        if parameters.get("return_impero"):
+            return impero_c
     except impero_utils.NoopError:
         # No operations, construct empty kernel
         return builder.construct_empty_kernel(kernel_name)
