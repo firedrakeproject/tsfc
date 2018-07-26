@@ -212,8 +212,6 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     index_ordering = tuple(quadrature_indices) + split_argument_indices
     try:
         impero_c = impero_utils.compile_gem(assignments, index_ordering, remove_zeros=True)
-        if parameters.get("return_impero"):
-            return impero_c
     except impero_utils.NoopError:
         # No operations, construct empty kernel
         return builder.construct_empty_kernel(kernel_name)
@@ -238,6 +236,10 @@ def compile_integral(integral_data, form_data, prefix, parameters,
     name_multiindex(quadrature_indices, 'ip')
     for multiindex, name in zip(argument_multiindices, ['j', 'k']):
         name_multiindex(multiindex, name)
+
+    if parameters.get("return_impero"):
+        return impero_c, index_names
+
 
     # Construct kernel
     body = generate_coffee(impero_c, index_names, parameters["precision"], expressions, split_argument_indices)
