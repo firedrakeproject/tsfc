@@ -173,7 +173,7 @@ class ExpressionKernelBuilder(KernelBuilderBase):
 
         from tsfc.coffee import generate as generate_coffee
 
-        args = [return_arg] + self.kernel_args
+        args = [return_arg]
         if self.oriented:
             args.append(cell_orientations_coffee_arg)
         if self.cell_sizes:
