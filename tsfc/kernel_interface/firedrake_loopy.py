@@ -2,7 +2,7 @@ import numpy
 from collections import namedtuple
 from itertools import chain, product
 
-from ufl import Coefficient, MixedElement as ufl_MixedElement, FunctionSpace
+from ufl import Coefficient, MixedElement as ufl_MixedElement, FunctionSpace, FiniteElement
 
 import gem
 from gem.node import traversal
@@ -17,12 +17,13 @@ from tsfc.loopy import generate as generate_loopy
 
 
 # Expression kernel description type
-ExpressionKernel = namedtuple('ExpressionKernel', ['ast', 'oriented', 'coefficients'])
+ExpressionKernel = namedtuple('ExpressionKernel', ['ast', 'oriented', 'needs_cell_sizes', 'coefficients'])
 
 
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
-                 "domain_number", "coefficient_numbers", "__weakref__")
+                 "domain_number", "needs_cell_sizes",
+                 "coefficient_numbers", "__weakref__")
     """A compiled Kernel object.
 
     :kwarg ast: The loopy kernel object.
@@ -34,10 +35,12 @@ class Kernel(object):
         original_form.ufl_domains() to get the correct domain).
     :kwarg coefficient_numbers: A list of which coefficients from the
         form the kernel needs.
+    :kwarg needs_cell_sizes: Does the kernel require cell sizes.
     """
     def __init__(self, ast=None, integral_type=None, oriented=False,
                  subdomain_id=None, domain_number=None,
-                 coefficient_numbers=()):
+                 coefficient_numbers=(),
+                 needs_cell_sizes=False):
         # Defaults
         self.ast = ast
         self.integral_type = integral_type
@@ -45,6 +48,7 @@ class Kernel(object):
         self.domain_number = domain_number
         self.subdomain_id = subdomain_id
         self.coefficient_numbers = coefficient_numbers
+        self.needs_cell_sizes = needs_cell_sizes
         super(Kernel, self).__init__()
 
 
@@ -81,12 +85,35 @@ class KernelBuilderBase(_KernelBuilderBase):
         self.coefficient_map[coefficient] = expression
         return funarg
 
+    def set_cell_sizes(self, domain):
+        """Setup a fake coefficient for "cell sizes".
+
+        :arg domain: The domain of the integral.
+
+        This is required for scaling of derivative basis functions on
+        physically mapped elements (Argyris, Bell, etc...).  We need a
+        measure of the mesh size around each vertex (hence this lives
+        in P1).
+        """
+        f = Coefficient(FunctionSpace(domain, FiniteElement("P", domain.ufl_cell(), 1)))
+        funarg, expression = prepare_coefficient(f, "cell_sizes", interior_facet=self.interior_facet)
+        self.cell_sizes_arg = funarg
+        self._cell_sizes = expression
+
     @staticmethod
     def needs_cell_orientations(ir):
         """Does a multi-root GEM expression DAG references cell
         orientations?"""
         for node in traversal(ir):
             if isinstance(node, gem.Variable) and node.name == "cell_orientations":
+                return True
+        return False
+
+    @staticmethod
+    def needs_cell_sizes(ir):
+        """Does a multi-root GEM expression DAG reference cell sizes?"""
+        for node in traversal(ir):
+            if isinstance(node, gem.Variable) and node.name == "cell_sizes":
                 return True
         return False
 
@@ -102,6 +129,7 @@ class ExpressionKernelBuilder(KernelBuilderBase):
     def __init__(self):
         super(ExpressionKernelBuilder, self).__init__()
         self.oriented = False
+        self.cell_sizes = False
 
     def set_coefficients(self, coefficients):
         """Prepare the coefficients of the expression.
@@ -127,6 +155,9 @@ class ExpressionKernelBuilder(KernelBuilderBase):
         """Set that the kernel requires cell orientations."""
         self.oriented = True
 
+    def require_cell_sizes(self):
+        self.cell_sizes = True
+
     def construct_kernel(self, return_arg, impero_c, precision, index_names):
         """Constructs an :class:`ExpressionKernel`.
 
@@ -136,12 +167,15 @@ class ExpressionKernelBuilder(KernelBuilderBase):
         :arg index_names: pre-assigned index names
         :returns: :class:`ExpressionKernel` object
         """
-        args = [return_arg] + self.kernel_args
+        args = [return_arg]
         if self.oriented:
-            args.insert(1, self.cell_orientations_loopy_arg)
+            args.append(self.cell_orientations_loopy_arg)
+        if self.cell_sizes:
+            args.append(self.cell_sizes_arg)
+        args.extend(self.kernel_args)
 
         loopy_kernel = generate_loopy(impero_c, args, precision, "expression_kernel", index_names)
-        return ExpressionKernel(loopy_kernel, self.oriented, self.coefficients)
+        return ExpressionKernel(loopy_kernel, self.oriented, self.cell_sizes, self.coefficients)
 
 
 class KernelBuilder(KernelBuilderBase):
@@ -226,6 +260,10 @@ class KernelBuilder(KernelBuilderBase):
         """Set that the kernel requires cell orientations."""
         self.kernel.oriented = True
 
+    def require_cell_sizes(self):
+        """Set that the kernel requires cell sizes."""
+        self.kernel.needs_cell_sizes = True
+
     def construct_kernel(self, name, impero_c, precision, index_names):
         """Construct a fully built :class:`Kernel`.
 
@@ -242,6 +280,8 @@ class KernelBuilder(KernelBuilderBase):
         args = [self.local_tensor, self.coordinates_arg]
         if self.kernel.oriented:
             args.append(self.cell_orientations_loopy_arg)
+        if self.kernel.needs_cell_sizes:
+            args.append(self.cell_sizes_arg)
         args.extend(self.coefficient_args)
         if self.kernel.integral_type in ["exterior_facet", "exterior_facet_vert"]:
             args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(1,)))
