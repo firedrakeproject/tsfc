@@ -372,10 +372,10 @@ def make_rename_map():
 
 
 def make_renamer(rename_map):
-    """Creates a function for renaming indices when expanding products of
+    r"""Creates a function for renaming indices when expanding products of
     IndexSums, i.e. applying to following rule:
 
-        (sum_i a_i)*(sum_i b_i) ===> \sum_{i,i'} a_i*b_{i'}
+        (\sum_i a_i)*(\sum_i b_i) ===> \sum_{i,i'} a_i*b_{i'}
 
     :arg rename_map: An rename map for renaming indices the same way
                      as functions returned by other calls of this
