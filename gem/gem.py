@@ -137,7 +137,7 @@ class Constant(Terminal):
 
     Convention:
      - array: numpy array of values
-     - value: float value (scalars only)
+     - value: float or complex value (scalars only)
     """
     __slots__ = ()
 
@@ -190,7 +190,10 @@ class Literal(Constant):
             return super(Literal, cls).__new__(cls)
 
     def __init__(self, array):
-        self.array = asarray(array, dtype=float)
+        try:
+            self.array = asarray(array, dtype=float)
+        except TypeError:
+            self.array = asarray(array, dtype=complex)
 
     def is_equal(self, other):
         if type(self) != type(other):
@@ -204,7 +207,10 @@ class Literal(Constant):
 
     @property
     def value(self):
-        return float(self.array)
+        try:
+            return float(self.array)
+        except TypeError:
+            return complex(self.array)
 
     @property
     def shape(self):
@@ -318,12 +324,19 @@ class MathFunction(Scalar):
     __slots__ = ('name', 'children')
     __front__ = ('name',)
 
-    def __init__(self, name, *args):
+    def __new__(cls, name, *args):
         assert isinstance(name, str)
         assert all(arg.shape == () for arg in args)
 
+        if name in {'conj', 'real', 'imag'}:
+            arg, = args
+            if isinstance(arg, Zero):
+                return arg
+
+        self = super(MathFunction, cls).__new__(cls)
         self.name = name
         self.children = args
+        return self
 
 
 class MinValue(Scalar):

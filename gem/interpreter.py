@@ -3,7 +3,6 @@ An interpreter for GEM trees.
 """
 import numpy
 import operator
-import math
 from collections import OrderedDict
 from functools import singledispatch
 import itertools
@@ -173,8 +172,13 @@ def _evaluate_operator(e, self):
 def _evaluate_mathfunction(e, self):
     ops = [self(o) for o in e.children]
     result = Result.empty(*ops)
-    names = {"abs": abs,
-             "log": math.log}
+    names = {
+        "abs": abs,
+        "log": numpy.log,
+        "real": operator.attrgetter("real"),
+        "imag": operator.attrgetter("imag"),
+        "conj": operator.methodcaller("conjugate"),
+    }
     op = names[e.name]
     for idx in numpy.ndindex(result.tshape):
         result[idx] = op(*(o[o.filter(idx, result.fids)] for o in ops))
