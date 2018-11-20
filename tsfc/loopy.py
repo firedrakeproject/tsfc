@@ -80,10 +80,10 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel", index_names=
     for i, temp in enumerate(impero_c.temporaries):
         name = "t%d" % i
         if isinstance(temp, gem.Constant):
-            data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=temp.array.dtype, initializer=temp.array, scope=lp.temp_var_scope.GLOBAL, read_only=True))
+            data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=temp.array.dtype, initializer=temp.array, scope=lp.AddressSpace.GLOBAL, read_only=True))
         else:
             shape = tuple([i.extent for i in ctx.indices[temp]]) + temp.shape
-            data.append(lp.TemporaryVariable(name, shape=shape, dtype=numpy.float64, initializer=None, scope=lp.temp_var_scope.LOCAL, read_only=False))
+            data.append(lp.TemporaryVariable(name, shape=shape, dtype=numpy.float64, initializer=None, scope=lp.AddressSpace.LOCAL, read_only=False))
         ctx.gem_to_pymbolic[temp] = p.Variable(name)
 
     # Create instructions
@@ -99,9 +99,8 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel", index_names=
         domains = [isl.BasicSet("[] -> {[]}")]
 
     # Create loopy kernel
-    knl = lp.make_kernel(domains, instructions, data, name=kernel_name, target=lp.CTarget(),
-                         seq_dependencies=True, lang_version=(2018, 2),
-                         silenced_warnings=["summing_if_branches_ops"])
+    knl = lp.make_function(domains, instructions, data, name=kernel_name, target=lp.CTarget(),
+                           seq_dependencies=True,  silenced_warnings=["summing_if_branches_ops"])
 
     # Prevent loopy interchange by loopy
     knl = lp.prioritize_loops(knl, ",".join(ctx.index_extent.keys()))
