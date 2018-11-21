@@ -23,11 +23,6 @@ from finat.point_set import PointSet
 from finat.quadrature import AbstractQuadratureRule, make_quadrature
 
 from tsfc import fem, ufl_utils
-<<<<<<< HEAD
-from tsfc.coffee import generate as generate_coffee
-=======
-from tsfc.coffee import SCALAR_TYPE
->>>>>>> use loopy for expressions
 from tsfc.fiatinterface import as_fiat_cell
 from tsfc.logging import logger
 from tsfc.parameters import default_parameters, is_complex
