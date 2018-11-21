@@ -54,12 +54,16 @@ class Kernel(object):
 
 class KernelBuilderBase(_KernelBuilderBase):
 
-    def __init__(self, interior_facet=False):
+    def __init__(self, scalar_type=None, interior_facet=False):
         """Initialise a kernel builder.
 
         :arg interior_facet: kernel accesses two cells
         """
-        super(KernelBuilderBase, self).__init__(interior_facet=interior_facet)
+        if scalar_type is None:
+            from tsfc.parameters import SCALAR_TYPE
+            scalar_type = SCALAR_TYPE
+        super(KernelBuilderBase, self).__init__(scalar_type=scalar_type,
+                                                interior_facet=interior_facet)
 
         # Cell orientation
         if self.interior_facet:
@@ -126,8 +130,8 @@ class KernelBuilderBase(_KernelBuilderBase):
 class ExpressionKernelBuilder(KernelBuilderBase):
     """Builds expression kernels for UFL interpolation in Firedrake."""
 
-    def __init__(self):
-        super(ExpressionKernelBuilder, self).__init__()
+    def __init__(self, scalar_type=None):
+        super(ExpressionKernelBuilder, self).__init__(scalar_type=None)
         self.oriented = False
         self.cell_sizes = False
 
@@ -158,12 +162,13 @@ class ExpressionKernelBuilder(KernelBuilderBase):
     def require_cell_sizes(self):
         self.cell_sizes = True
 
-    def construct_kernel(self, return_arg, impero_c, precision, index_names):
+    def construct_kernel(self, return_arg, impero_c, precision, scalar_type, index_names):
         """Constructs an :class:`ExpressionKernel`.
 
         :arg return_arg: loopy.GlobalArg for the return value
         :arg impero_c: gem.ImperoC object that represents the kernel
         :arg precision: floating point precision for code generation
+        :arg scalar_type: type of scalars as C typename string
         :arg index_names: pre-assigned index names
         :returns: :class:`ExpressionKernel` object
         """
@@ -174,16 +179,16 @@ class ExpressionKernelBuilder(KernelBuilderBase):
             args.append(self.cell_sizes_arg)
         args.extend(self.kernel_args)
 
-        loopy_kernel = generate_loopy(impero_c, args, precision, "expression_kernel", index_names)
+        loopy_kernel = generate_loopy(impero_c, args, precision, "expression_kernel", index_names, scalar_type)
         return ExpressionKernel(loopy_kernel, self.oriented, self.cell_sizes, self.coefficients)
 
 
 class KernelBuilder(KernelBuilderBase):
     """Helper class for building a :class:`Kernel` object."""
 
-    def __init__(self, integral_type, subdomain_id, domain_number):
+    def __init__(self, integral_type, subdomain_id, domain_number, scalar_type=None):
         """Initialise a kernel builder."""
-        super(KernelBuilder, self).__init__(integral_type.startswith("interior_facet"))
+        super(KernelBuilder, self).__init__(scalar_type, integral_type.startswith("interior_facet"))
 
         self.kernel = Kernel(integral_type=integral_type, subdomain_id=subdomain_id,
                              domain_number=domain_number)
@@ -264,7 +269,7 @@ class KernelBuilder(KernelBuilderBase):
         """Set that the kernel requires cell sizes."""
         self.kernel.needs_cell_sizes = True
 
-    def construct_kernel(self, name, impero_c, precision, index_names):
+    def construct_kernel(self, name, impero_c, precision, scalar_type, index_names):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument
@@ -273,6 +278,7 @@ class KernelBuilder(KernelBuilderBase):
         :arg name: function name
         :arg impero_c: ImperoC tuple with Impero AST and other data
         :arg precision: floating-point precision for printing
+        :arg scalar_type: type of scalars as C typename string
         :arg index_names: pre-assigned index names
         :returns: :class:`Kernel` object
         """
@@ -288,7 +294,7 @@ class KernelBuilder(KernelBuilderBase):
         elif self.kernel.integral_type in ["interior_facet", "interior_facet_vert"]:
             args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(2,)))
 
-        self.kernel.ast = generate_loopy(impero_c, args, precision, name, index_names)
+        self.kernel.ast = generate_loopy(impero_c, args, precision, name, index_names, scalar_type)
         return self.kernel
 
     def construct_empty_kernel(self, name):
