@@ -17,6 +17,9 @@ import pymbolic.primitives as p
 
 from pytools import UniqueNameGenerator
 
+from tsfc.parameters import is_complex
+
+# Satisfy import demands until complex branch is merged in Firedrake
 from tsfc.parameters import SCALAR_TYPE
 
 
@@ -238,26 +241,77 @@ def _expression_power(expr, ctx):
     return p.Power(*(expression(c, ctx) for c in expr.children))
 
 
+# Table of handled math functions in real and complex modes
+# Copied from FFCX (ffc/language/ufl_to_cnodes.py), except changing fabs to abs for real absolute value
+math_table = {
+    'sqrt': ('sqrt', 'csqrt'),
+    'abs': ('abs', 'cabs'),
+    'cos': ('cos', 'ccos'),
+    'sin': ('sin', 'csin'),
+    'tan': ('tan', 'ctan'),
+    'acos': ('acos', 'cacos'),
+    'asin': ('asin', 'casin'),
+    'atan': ('atan', 'catan'),
+    'cosh': ('cosh', 'ccosh'),
+    'sinh': ('sinh', 'csinh'),
+    'tanh': ('tanh', 'ctanh'),
+    'acosh': ('acosh', 'cacosh'),
+    'asinh': ('asinh', 'casinh'),
+    'atanh': ('atanh', 'catanh'),
+    'exp': ('exp', 'cexp'),
+    'ln': ('log', 'clog'),
+    'real': (None, 'creal'),
+    'imag': (None, 'cimag'),
+    'conj': (None, 'conj'),
+    'erf': ('erf', None),
+    'atan_2': ('atan2', None),
+    'atan2': ('atan2', None),
+}
+
+
 @_expression.register(gem.MathFunction)
 def _expression_mathfunction(expr, ctx):
-    name_map = {
-        'abs': 'abs',
-        'ln': 'log'
-    }
-    name = name_map.get(expr.name, expr.name)
-    if name == 'jn':
+    complex_mode = int(is_complex(ctx.scalar_type))
+
+    # Bessel functions
+    if expr.name.startswith('cyl_bessel_'):
+        if complex_mode:
+            msg = "Bessel functions for complex numbers: missing implementation"
+            raise NotImplementedError(msg)
         nu, arg = expr.children
-        if nu == gem.Zero():
-            return p.Variable("j0")(expression(arg, ctx))
-        elif nu == gem.one:
-            return p.Variable("j1")(expression(arg, ctx))
-    if name == 'yn':
-        nu, arg = expr.children
-        if nu == gem.Zero():
-            return p.Variable("y0")(expression(arg, ctx))
-        elif nu == gem.one:
-            return p.Variable("y1")(expression(arg, ctx))
-    return p.Variable(name)(*[expression(c, ctx) for c in expr.children])
+        nu_thunk = lambda: expression(nu, ctx)
+        arg_loopy = expression(arg, ctx)
+        if expr.name == 'cyl_bessel_j':
+            if nu == gem.Zero():
+                return p.Variable("j0")(arg_loopy)
+            elif nu == gem.one:
+                return p.Variable("j1")(arg_loopy)
+            else:
+                return p.Variable("jn")(nu_thunk(), arg_loopy)
+        if expr.name == 'cyl_bessel_y':
+            if nu == gem.Zero():
+                return p.Variable("y0")(arg_loopy)
+            elif nu == gem.one:
+                return p.Variable("y1")(arg_loopy)
+            else:
+                return p.Variable("yn")(nu_thunk(), arg_loopy)
+
+        # Modified Bessel functions (C++ only)
+        #
+        # These mappings work for FEniCS only, and fail with Firedrake
+        # since no Boost available.
+        if expr.name in ['cyl_bessel_i', 'cyl_bessel_k']:
+            name = 'boost::math::' + expr.name
+            return p.Variable(name)(nu_thunk(), arg_loopy)
+
+        assert False, "Unknown Bessel function: {}".format(expr.name)
+
+    # Other math functions
+    name = math_table[expr.name][complex_mode]
+    if name is None:
+        raise RuntimeError("{} not supported in complex mode".format(expr.name))
+
+    return p.Variable(expr.name)(*[expression(c, ctx) for c in expr.children])
 
 
 @_expression.register(gem.MinValue)
