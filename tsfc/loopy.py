@@ -241,36 +241,14 @@ def _expression_power(expr, ctx):
     return p.Power(*(expression(c, ctx) for c in expr.children))
 
 
-# Table of handled math functions in real and complex modes
-# Copied from FFCX (ffc/language/ufl_to_cnodes.py), except changing fabs to abs for real absolute value
-math_table = {
-    'sqrt': ('sqrt', 'csqrt'),
-    'abs': ('abs', 'cabs'),
-    'cos': ('cos', 'ccos'),
-    'sin': ('sin', 'csin'),
-    'tan': ('tan', 'ctan'),
-    'acos': ('acos', 'cacos'),
-    'asin': ('asin', 'casin'),
-    'atan': ('atan', 'catan'),
-    'cosh': ('cosh', 'ccosh'),
-    'sinh': ('sinh', 'csinh'),
-    'tanh': ('tanh', 'ctanh'),
-    'acosh': ('acosh', 'cacosh'),
-    'asinh': ('asinh', 'casinh'),
-    'atanh': ('atanh', 'catanh'),
-    'exp': ('exp', 'cexp'),
-    'ln': ('log', 'clog'),
-    'real': (None, 'creal'),
-    'imag': (None, 'cimag'),
-    'conj': (None, 'conj'),
-    'erf': ('erf', None),
-    'atan_2': ('atan2', None),
-    'atan2': ('atan2', None),
-}
-
-
 @_expression.register(gem.MathFunction)
 def _expression_mathfunction(expr, ctx):
+
+    from tsfc.coffee import math_table
+
+    math_table = math_table.copy()
+    math_table['abs'] = ('abs', 'cabs')
+
     complex_mode = int(is_complex(ctx.scalar_type))
 
     # Bessel functions
@@ -311,7 +289,7 @@ def _expression_mathfunction(expr, ctx):
     if name is None:
         raise RuntimeError("{} not supported in complex mode".format(expr.name))
 
-    return p.Variable(expr.name)(*[expression(c, ctx) for c in expr.children])
+    return p.Variable(name)(*[expression(c, ctx) for c in expr.children])
 
 
 @_expression.register(gem.MinValue)
