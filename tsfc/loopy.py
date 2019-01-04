@@ -90,7 +90,8 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel", index_names=
             data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=temp.array.dtype, initializer=temp.array, address_space=lp.AddressSpace.GLOBAL, read_only=True))
         else:
             shape = tuple([i.extent for i in ctx.indices[temp]]) + temp.shape
-            data.append(lp.TemporaryVariable(name, shape=shape, dtype=numpy.float64, initializer=None, address_space=lp.AddressSpace.LOCAL, read_only=False))
+            data.append(lp.TemporaryVariable(name, shape=shape,
+                dtype=numpy.float64, initializer=None, read_only=False))
         ctx.gem_to_pymbolic[temp] = p.Variable(name)
 
     # Create instructions
@@ -176,7 +177,8 @@ def statement_return(leaf, ctx):
 def statement_returnaccumulate(leaf, ctx):
     lhs = expression(leaf.variable, ctx)
     rhs = lhs + expression(leaf.indexsum.children[0], ctx)
-    return [lp.Assignment(lhs, rhs, within_inames=ctx.active_inames())]
+    return [lp.Assignment(lhs, rhs, within_inames=ctx.active_inames(),
+        tags=frozenset(['tsfc_return_accumulate']))]
 
 
 @statement.register(imp.Evaluate)
