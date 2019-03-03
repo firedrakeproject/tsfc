@@ -408,7 +408,7 @@ class Conditional(Node):
 
     def __new__(cls, condition, then, else_):
         assert not condition.shape
-        assert then.shape == else_.shape
+        assert then.shape == else_.shape == ()
 
         # If both branches are the same, just return one of them.  In
         # particular, this will help constant-fold zeros.

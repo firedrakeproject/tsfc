@@ -2,14 +2,16 @@
 refactorisation."""
 
 from collections import Counter, OrderedDict, defaultdict, namedtuple
+from functools import singledispatch
 from itertools import product
 from sys import intern
 
 from gem.node import Memoizer, traversal
-from gem.gem import Node, Zero, Product, Sum, Indexed, ListTensor, one
+from gem.gem import (Node, Conditional, Zero, Product, Sum, Indexed,
+                     ListTensor, one)
 from gem.optimise import (remove_componenttensors, sum_factorise,
                           traverse_product, traverse_sum, unroll_indexsum,
-                          expand_conditional, make_rename_map, make_renamer)
+                          make_rename_map, make_renamer)
 
 
 # Refactorisation labels
@@ -127,6 +129,7 @@ class FactorisationError(Exception):
     pass
 
 
+@singledispatch
 def _collect_monomials(expression, self):
     """Refactorises an expression into a sum-of-products form, using
     distributivity rules (i.e. a*(b + c) -> a*b + a*c).  Expansion
@@ -166,7 +169,7 @@ def _collect_monomials(expression, self):
     sums = []
     for expr in compounds:
         summands = traverse_sum(expr, stop_at=stop_at)
-        if len(summands) <= 1:
+        if len(summands) <= 1 and not isinstance(expr, Conditional):
             # Compound term is not an addition, avoid infinite
             # recursion and fail gracefully raising an exception.
             raise FactorisationError(expr)
@@ -208,6 +211,38 @@ def _collect_monomials(expression, self):
     return result
 
 
+@_collect_monomials.register(Conditional)
+def _collect_monomials_conditional(expression, self):
+    """Refactorises a conditional expression into a sum-of-products form,
+    pulling only "atomics" out of conditional expressions.
+
+    :arg expression: a GEM expression to refactorise
+    :arg self: function for recursive calls
+
+    :returns: :py:class:`MonomialSum`
+    """
+    condition, then, else_ = expression.children
+    # Recursively refactorise both branches to `MonomialSum`s
+    then_ms = self(then)
+    else_ms = self(else_)
+
+    result = MonomialSum()
+    # For each set of atomics, create a new Conditional node.  Atomics
+    # are considered safe to be pulled out of conditionals, but other
+    # expressions remain inside conditional branches.
+    zero = Zero()
+    for k in then_ms.monomials.keys() | else_ms.monomials.keys():
+        _then = then_ms.monomials.get(k, zero)
+        _else = else_ms.monomials.get(k, zero)
+        result.monomials[k] = Conditional(condition, _then, _else)
+
+    # Construct a deterministic ordering
+    result.ordering = then_ms.ordering.copy()
+    for k, v in else_ms.ordering.items():
+        result.ordering.setdefault(k, v)
+    return result
+
+
 def collect_monomials(expressions, classifier):
     """Refactorises expressions into a sum-of-products form, using
     distributivity rules (i.e. a*(b + c) -> a*b + a*c).  Expansion
@@ -238,10 +273,6 @@ def collect_monomials(expressions, classifier):
         expressions = unroll_indexsum(expressions,
                                       predicate=lambda i: i in must_unroll)
         expressions = remove_componenttensors(expressions)
-
-    # Expand Conditional nodes which are COMPOUND
-    conditional_predicate = lambda node: classifier(node) == COMPOUND
-    expressions = expand_conditional(expressions, conditional_predicate)
 
     # Finally, refactorise expressions
     mapper = Memoizer(_collect_monomials)
