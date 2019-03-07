@@ -58,9 +58,9 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
 
     kernels = []
     if coffee:
-        interface = firedrake_interface_coffee
+        interface = firedrake_interface_coffee.KernelBuilder
     else:
-        interface = firedrake_interface_loopy
+        interface = firedrake_interface_loopy.KernelBuilder
     for integral_data in fd.integral_data:
         start = time.time()
         kernel = compile_integral(integral_data, fd, prefix, parameters, interface=interface)
@@ -89,7 +89,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface):
         _.update(parameters)
         parameters = _
     if interface is None:
-        interface = firedrake_interface.KernelBuilder
+        interface = firedrake_interface_loopy
 
     # Remove these here, they're handled below.
     if parameters.get("quadrature_degree") in ["auto", "default", None, -1, "-1"]:

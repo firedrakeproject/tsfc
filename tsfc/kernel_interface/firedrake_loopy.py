@@ -1,6 +1,7 @@
 import numpy
 from collections import namedtuple
 from itertools import chain, product
+from functools import partial
 
 from ufl import Coefficient, MixedElement as ufl_MixedElement, FunctionSpace, FiniteElement
 
@@ -18,6 +19,10 @@ from tsfc.loopy import generate as generate_loopy
 
 # Expression kernel description type
 ExpressionKernel = namedtuple('ExpressionKernel', ['ast', 'oriented', 'needs_cell_sizes', 'coefficients'])
+
+
+def make_builder(*args, **kwargs):
+    return partial(KernelBuilder, *args, **kwargs)
 
 
 class Kernel(object):
@@ -186,7 +191,7 @@ class ExpressionKernelBuilder(KernelBuilderBase):
 class KernelBuilder(KernelBuilderBase):
     """Helper class for building a :class:`Kernel` object."""
 
-    def __init__(self, integral_type, subdomain_id, domain_number, scalar_type=None):
+    def __init__(self, integral_type, subdomain_id, domain_number, scalar_type=None, dont_split=()):
         """Initialise a kernel builder."""
         super(KernelBuilder, self).__init__(scalar_type, integral_type.startswith("interior_facet"))
 
@@ -196,6 +201,7 @@ class KernelBuilder(KernelBuilderBase):
         self.coordinates_arg = None
         self.coefficient_args = []
         self.coefficient_split = {}
+        self.dont_split = frozenset(dont_split)
 
         # Facet number
         if integral_type in ['exterior_facet', 'exterior_facet_vert']:
@@ -243,12 +249,17 @@ class KernelBuilder(KernelBuilderBase):
         # of reduced_coefficients the integral requires.
         for i in range(len(integral_data.enabled_coefficients)):
             if integral_data.enabled_coefficients[i]:
-                coefficient = form_data.function_replace_map[form_data.reduced_coefficients[i]]
+                original = form_data.reduced_coefficients[i]
+                coefficient = form_data.function_replace_map[original]
                 if type(coefficient.ufl_element()) == ufl_MixedElement:
-                    split = [Coefficient(FunctionSpace(coefficient.ufl_domain(), element))
-                             for element in coefficient.ufl_element().sub_elements()]
-                    coefficients.extend(split)
-                    self.coefficient_split[coefficient] = split
+                    if original in self.dont_split:
+                        coefficients.append(coefficient)
+                        self.coefficient_split[coefficient] = [coefficient]
+                    else:
+                        split = [Coefficient(FunctionSpace(coefficient.ufl_domain(), element))
+                                 for element in coefficient.ufl_element().sub_elements()]
+                        coefficients.extend(split)
+                        self.coefficient_split[coefficient] = split
                 else:
                     coefficients.append(coefficient)
                 # This is which coefficient in the original form the
