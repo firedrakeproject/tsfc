@@ -90,7 +90,7 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel", index_names=
             data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=temp.array.dtype, initializer=temp.array, address_space=lp.AddressSpace.GLOBAL, read_only=True))
         else:
             shape = tuple([i.extent for i in ctx.indices[temp]]) + temp.shape
-            data.append(lp.TemporaryVariable(name, shape=shape, dtype=numpy.float64, initializer=None, address_space=lp.AddressSpace.LOCAL, read_only=False))
+            data.append(lp.TemporaryVariable(name, shape=shape, dtype=numpy.float64, initializer=None, read_only=False))
         ctx.gem_to_pymbolic[temp] = p.Variable(name)
 
     # Create instructions
@@ -155,14 +155,14 @@ def statement_for(tree, ctx):
 
 @statement.register(imp.Initialise)
 def statement_initialise(leaf, ctx):
-    return [lp.Assignment(expression(leaf.indexsum, ctx), 0.0, within_inames=ctx.active_inames())]
+    return [lp.Assignment(expression(leaf.indexsum, ctx), 0.0, within_inames=ctx.active_inames(), tags=frozenset(['quadrature']))]
 
 
 @statement.register(imp.Accumulate)
 def statement_accumulate(leaf, ctx):
     lhs = expression(leaf.indexsum, ctx)
     rhs = lhs + expression(leaf.indexsum.children[0], ctx)
-    return [lp.Assignment(lhs, rhs, within_inames=ctx.active_inames())]
+    return [lp.Assignment(lhs, rhs, within_inames=ctx.active_inames(), tags=frozenset(['quadrature']))]
 
 
 @statement.register(imp.Return)
@@ -176,7 +176,7 @@ def statement_return(leaf, ctx):
 def statement_returnaccumulate(leaf, ctx):
     lhs = expression(leaf.variable, ctx)
     rhs = lhs + expression(leaf.indexsum.children[0], ctx)
-    return [lp.Assignment(lhs, rhs, within_inames=ctx.active_inames())]
+    return [lp.Assignment(lhs, rhs, within_inames=ctx.active_inames(), tags=frozenset(['basis']))]
 
 
 @statement.register(imp.Evaluate)
@@ -194,7 +194,7 @@ def statement_evaluate(leaf, ctx):
     elif isinstance(expr, gem.Constant):
         return []
     else:
-        return [lp.Assignment(ctx.pymbolic_variable(expr), expression(expr, ctx, top=True), within_inames=ctx.active_inames())]
+        return [lp.Assignment(ctx.pymbolic_variable(expr), expression(expr, ctx, top=True), within_inames=ctx.active_inames(), tags=(['quadrature']))]
 
 
 def expression(expr, ctx, top=False):
