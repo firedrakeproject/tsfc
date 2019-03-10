@@ -89,7 +89,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface):
         _.update(parameters)
         parameters = _
     if interface is None:
-        interface = firedrake_interface_loopy
+        interface = firedrake_interface_loopy.KernelBuilder
 
     # Remove these here, they're handled below.
     if parameters.get("quadrature_degree") in ["auto", "default", None, -1, "-1"]:
