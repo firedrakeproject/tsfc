@@ -169,7 +169,7 @@ def statement_accumulate(leaf, ctx):
 def statement_return(leaf, ctx):
     lhs = expression(leaf.variable, ctx)
     rhs = lhs + expression(leaf.expression, ctx)
-    return [lp.Assignment(lhs, rhs, within_inames=ctx.active_inames())]
+    return [lp.Assignment(lhs, rhs, within_inames=ctx.active_inames(), tags=frozenset(['basis']))]
 
 
 @statement.register(imp.ReturnAccumulate)
