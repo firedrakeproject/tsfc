@@ -238,7 +238,7 @@ def _expression_division(expr, ctx):
 
 @_expression.register(gem.Power)
 def _expression_power(expr, ctx):
-    return p.Power(*(expression(c, ctx) for c in expr.children))
+    return p.Variable("pow")(*(expression(c, ctx) for c in expr.children))
 
 
 @_expression.register(gem.MathFunction)
