@@ -214,15 +214,10 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     expressions = impero_utils.preprocess_gem(expressions, **options)
     assignments = list(zip(return_variables, expressions))
 
-    # Register tabulations for runtime tabulated elements (used by Themis)
-    builder.register_tabulations(expressions)
-
-    # Look for cell orientations in the IR
-    if builder.needs_cell_orientations(expressions):
-        builder.require_cell_orientations()
-
-    if builder.needs_cell_sizes(expressions):
-        builder.require_cell_sizes()
+    # Let the kernel interface inspect the optimised IR to register
+    # what kind of external data is required (e.g., cell orientations,
+    # cell sizes, etc.).
+    builder.register_requirements(expressions)
 
     # Construct ImperoC
     split_argument_indices = tuple(chain(*[var.index_ordering()
@@ -331,9 +326,6 @@ def compile_expression_at_points(expression, points, coordinates, interface=None
     if value_shape:
         ir = gem.Indexed(ir, tensor_indices)
 
-    # Register tabulations for runtime tabulated elements (used by Themis)
-    builder.register_tabulations([ir])
-
     # Build kernel body
     return_shape = (len(points),) + value_shape
     return_indices = point_set.indices + tensor_indices
@@ -348,12 +340,8 @@ def compile_expression_at_points(expression, points, coordinates, interface=None
     impero_c = impero_utils.compile_gem([(return_expr, ir)], return_indices)
     point_index, = point_set.indices
 
-    # Handle cell orientations
-    if builder.needs_cell_orientations([ir]):
-        builder.require_cell_orientations()
-    # Handle cell sizes (physically mapped elements)
-    if builder.needs_cell_sizes([ir]):
-        builder.require_cell_sizes()
+    # Handle kernel interface requirements
+    builder.register_requirements([ir])
     # Build kernel tuple
     return builder.construct_kernel(return_arg, impero_c, parameters["precision"], parameters["scalar_type"], {point_index: 'p'})
 

@@ -6,13 +6,13 @@ from functools import partial
 from ufl import Coefficient, MixedElement as ufl_MixedElement, FunctionSpace, FiniteElement
 
 import gem
-from gem.node import traversal
 from gem.optimise import remove_componenttensors as prune
 
 import loopy as lp
 
 from tsfc.finatinterface import create_element
 from tsfc.kernel_interface.common import KernelBuilderBase as _KernelBuilderBase
+from tsfc.kernel_interface.firedrake import check_requirements
 from tsfc.parameters import SCALAR_TYPE
 from tsfc.loopy import generate as generate_loopy
 
@@ -109,23 +109,6 @@ class KernelBuilderBase(_KernelBuilderBase):
         self.cell_sizes_arg = funarg
         self._cell_sizes = expression
 
-    @staticmethod
-    def needs_cell_orientations(ir):
-        """Does a multi-root GEM expression DAG references cell
-        orientations?"""
-        for node in traversal(ir):
-            if isinstance(node, gem.Variable) and node.name == "cell_orientations":
-                return True
-        return False
-
-    @staticmethod
-    def needs_cell_sizes(ir):
-        """Does a multi-root GEM expression DAG reference cell sizes?"""
-        for node in traversal(ir):
-            if isinstance(node, gem.Variable) and node.name == "cell_sizes":
-                return True
-        return False
-
     def create_element(self, element, **kwargs):
         """Create a FInAT element (suitable for tabulating with) given
         a UFL element."""
@@ -160,12 +143,10 @@ class ExpressionKernelBuilder(KernelBuilderBase):
                 self.coefficients.append(coefficient)
                 self.kernel_args.append(self._coefficient(coefficient, "w_%d" % (i,)))
 
-    def require_cell_orientations(self):
-        """Set that the kernel requires cell orientations."""
-        self.oriented = True
-
-    def require_cell_sizes(self):
-        self.cell_sizes = True
+    def register_requirements(self, ir):
+        """Inspect what is referenced by the IR that needs to be
+        provided by the kernel interface."""
+        self.oriented, self.cell_sizes, self.tabulations = check_requirements(ir)
 
     def construct_kernel(self, return_arg, impero_c, precision, scalar_type, index_names):
         """Constructs an :class:`ExpressionKernel`.
@@ -272,13 +253,11 @@ class KernelBuilder(KernelBuilderBase):
                 self._coefficient(coefficient, "w_%d" % i))
         self.kernel.coefficient_numbers = tuple(coefficient_numbers)
 
-    def require_cell_orientations(self):
-        """Set that the kernel requires cell orientations."""
-        self.kernel.oriented = True
-
-    def require_cell_sizes(self):
-        """Set that the kernel requires cell sizes."""
-        self.kernel.needs_cell_sizes = True
+    def register_requirements(self, ir):
+        """Inspect what is referenced by the IR that needs to be
+        provided by the kernel interface."""
+        knl = self.kernel
+        knl.oriented, knl.needs_cell_sizes, knl.tabulations = check_requirements(ir)
 
     def construct_kernel(self, name, impero_c, precision, scalar_type, index_names):
         """Construct a fully built :class:`Kernel`.
