@@ -57,13 +57,9 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
     logger.info(GREEN % "compute_form_data finished in %g seconds.", time.time() - cpu_time)
 
     kernels = []
-    if coffee:
-        interface = firedrake_interface_coffee.KernelBuilder
-    else:
-        interface = firedrake_interface_loopy.KernelBuilder
     for integral_data in fd.integral_data:
         start = time.time()
-        kernel = compile_integral(integral_data, fd, prefix, parameters, interface=interface)
+        kernel = compile_integral(integral_data, fd, prefix, parameters, interface=interface, coffee=coffee)
         if kernel is not None:
             kernels.append(kernel)
         logger.info(GREEN % "compile_integral finished in %g seconds.", time.time() - start)
@@ -72,7 +68,7 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
     return kernels
 
 
-def compile_integral(integral_data, form_data, prefix, parameters, interface):
+def compile_integral(integral_data, form_data, prefix, parameters, interface, coffee):
     """Compiles a UFL integral into an assembly kernel.
 
     :arg integral_data: UFL integral data
@@ -89,7 +85,10 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface):
         _.update(parameters)
         parameters = _
     if interface is None:
-        interface = firedrake_interface_loopy.KernelBuilder
+        if coffee:
+            interface = firedrake_interface_coffee.KernelBuilder
+        else:
+            interface = firedrake_interface_loopy.KernelBuilder
 
     # Remove these here, they're handled below.
     if parameters.get("quadrature_degree") in ["auto", "default", None, -1, "-1"]:
