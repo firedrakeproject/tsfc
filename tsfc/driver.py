@@ -250,7 +250,6 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     for multiindex, name in zip(argument_multiindices, ['j', 'k']):
         name_multiindex(multiindex, name)
 
-
     return builder.construct_kernel(kernel_name, impero_c, parameters["precision"], parameters["scalar_type"], index_names, quad_rule)
 
 
