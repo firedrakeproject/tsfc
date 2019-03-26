@@ -17,7 +17,7 @@ from tsfc.coffee import generate as generate_coffee
 
 
 # Expression kernel description type
-ExpressionKernel = namedtuple('ExpressionKernel', ['ast', 'oriented', 'needs_cell_sizes', 'coefficients'])
+ExpressionKernel = namedtuple('ExpressionKernel', ['ast', 'oriented', 'needs_cell_sizes', 'coefficients', 'tabulations'])
 
 
 def make_builder(*args, **kwargs):
@@ -26,7 +26,7 @@ def make_builder(*args, **kwargs):
 
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
-                 "domain_number", "needs_cell_sizes",
+                 "domain_number", "needs_cell_sizes", "tabulations", "quadrature_rule",
                  "coefficient_numbers", "__weakref__")
     """A compiled Kernel object.
 
@@ -39,10 +39,12 @@ class Kernel(object):
         original_form.ufl_domains() to get the correct domain).
     :kwarg coefficient_numbers: A list of which coefficients from the
         form the kernel needs.
+    :kwarg quadrature_rule: The finat quadrature rule used to generate this kernel
+    :kwarg tabulations: The runtime tabulations this kernel requires
     :kwarg needs_cell_sizes: Does the kernel require cell sizes.
     """
     def __init__(self, ast=None, integral_type=None, oriented=False,
-                 subdomain_id=None, domain_number=None,
+                 subdomain_id=None, domain_number=None, quadrature_rule=None,
                  coefficient_numbers=(),
                  needs_cell_sizes=False):
         # Defaults
@@ -156,6 +158,13 @@ class ExpressionKernelBuilder(KernelBuilderBase):
                 self.coefficients.append(coefficient)
                 self.kernel_args.append(self._coefficient(coefficient, "w_%d" % (i,)))
 
+    def register_tabulations(self, expressions):
+        tabulations = {}
+        for node in traversal(expressions):
+            if isinstance(node, gem.Variable) and node.name.startswith("rt_"):
+                tabulations[node.name] = node.shape
+        self.tabulations = tuple(sorted(tabulations.items()))
+
     def require_cell_orientations(self):
         """Set that the kernel requires cell orientations."""
         self.oriented = True
@@ -182,8 +191,12 @@ class ExpressionKernelBuilder(KernelBuilderBase):
 
         body = generate_coffee(impero_c, index_names, precision)
 
+        for name_, shape in self.tabulations:
+            args.append(coffee.Decl(self.scalar_type, coffee.Symbol(
+                name_, rank=shape), qualifiers=["const"]))
+
         kernel_code = super(ExpressionKernelBuilder, self).construct_kernel("expression_kernel", args, body)
-        return ExpressionKernel(kernel_code, self.oriented, self.cell_sizes, self.coefficients)
+        return ExpressionKernel(kernel_code, self.oriented, self.cell_sizes, self.coefficients, self.tabulations)
 
 
 class KernelBuilder(KernelBuilderBase):
@@ -271,6 +284,13 @@ class KernelBuilder(KernelBuilderBase):
                 self._coefficient(coefficient, "w_%d" % i))
         self.kernel.coefficient_numbers = tuple(coefficient_numbers)
 
+    def register_tabulations(self, expressions):
+        tabulations = {}
+        for node in traversal(expressions):
+            if isinstance(node, gem.Variable) and node.name.startswith("rt_"):
+                tabulations[node.name] = node.shape
+        self.kernel.tabulations = tuple(sorted(tabulations.items()))
+
     def require_cell_orientations(self):
         """Set that the kernel requires cell orientations."""
         self.kernel.oriented = True
@@ -279,7 +299,7 @@ class KernelBuilder(KernelBuilderBase):
         """Set that the kernel requires cell sizes."""
         self.kernel.needs_cell_sizes = True
 
-    def construct_kernel(self, name, impero_c, precision, scalar_type, index_names):
+    def construct_kernel(self, name, impero_c, precision, scalar_type, index_names, quadrature_rule):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument
@@ -288,8 +308,10 @@ class KernelBuilder(KernelBuilderBase):
         :arg name: function name
         :arg impero_c: ImperoC tuple with Impero AST and other data
         :arg precision: floating-point precision for printing
-        :arg index_names: pre-assigned index names
         :arg scalar_type: type of scalars as C typename string
+        :arg index_names: pre-assigned index names
+        :arg quadrature rule: quadrature rule
+
         :returns: :class:`Kernel` object
         """
 
@@ -309,6 +331,12 @@ class KernelBuilder(KernelBuilderBase):
             args.append(coffee.Decl("unsigned int",
                                     coffee.Symbol("facet", rank=(2,)),
                                     qualifiers=["const"]))
+
+        for name_, shape in self.kernel.tabulations:
+            args.append(coffee.Decl(self.scalar_type, coffee.Symbol(
+                name_, rank=shape), qualifiers=["const"]))
+
+        self.kernel.quadrature_rule = quadrature_rule
 
         self.kernel.ast = KernelBuilderBase.construct_kernel(self, name, args, body)
         return self.kernel
