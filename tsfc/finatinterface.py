@@ -66,6 +66,7 @@ supported_elements = {
     "NCE": None,
     "NCF": None,
     "Real": finat.DiscontinuousLagrange,
+    "WuXu": finat.WuXu
 }
 """A :class:`.dict` mapping UFL element family names to their
 FInAT-equivalent constructors.  If the value is ``None``, the UFL
