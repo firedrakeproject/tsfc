@@ -261,7 +261,7 @@ class KernelBuilder(KernelBuilderBase):
         knl = self.kernel
         knl.oriented, knl.needs_cell_sizes, knl.tabulations = check_requirements(ir)
 
-    def construct_kernel(self, name, impero_c, precision, scalar_type, index_names, quadrature_rule):
+    def construct_kernel(self, name, impero_c, precision, index_names, quadrature_rule):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument
@@ -270,13 +270,12 @@ class KernelBuilder(KernelBuilderBase):
         :arg name: function name
         :arg impero_c: ImperoC tuple with Impero AST and other data
         :arg precision: floating-point precision for printing
-        :arg scalar_type: type of scalars as C typename string
         :arg index_names: pre-assigned index names
         :arg quadrature rule: quadrature rule
 
         :returns: :class:`Kernel` object
         """
-        body = generate_coffee(impero_c, index_names, precision, scalar_type)
+        body = generate_coffee(impero_c, index_names, precision, self.scalar_type)
 
         args = [self.local_tensor, self.coordinates_arg]
         if self.kernel.oriented:

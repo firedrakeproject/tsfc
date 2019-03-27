@@ -22,7 +22,7 @@ create_element = functools.partial(_create_element, shape_innermost=False)
 class KernelBuilder(KernelBuilderBase):
     """Helper class for building a :class:`Kernel` object."""
 
-    def __init__(self, integral_type, subdomain_id, domain_number, scalar_type):
+    def __init__(self, integral_type, subdomain_id, domain_number, scalar_type=None):
         """Initialise a kernel builder."""
         super(KernelBuilder, self).__init__(scalar_type, integral_type.startswith("interior_facet"))
         self.integral_type = integral_type
@@ -116,7 +116,7 @@ class KernelBuilder(KernelBuilderBase):
         :returns: a COFFEE function definition object
         """
         from tsfc.coffee import generate as generate_coffee
-        body = generate_coffee(impero_c, index_names, precision)
+        body = generate_coffee(impero_c, index_names, precision, scalar_type=self.scalar_type)
         return self._construct_kernel_from_body(name, body)
 
     def _construct_kernel_from_body(self, name, body, quadrature_rule):

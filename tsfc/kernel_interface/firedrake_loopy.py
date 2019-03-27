@@ -162,11 +162,11 @@ class ExpressionKernelBuilder(KernelBuilderBase):
         if self.cell_sizes:
             args.append(self.cell_sizes_arg)
         args.extend(self.kernel_args)
-        for name_, shape in self.kernel.tabulations:
+        for name_, shape in self.tabulations:
             args.append(lp.GlobalArg(name_, dtype=self.scalar_type, shape=shape))
 
         loopy_kernel = generate_loopy(impero_c, args, precision, "expression_kernel", index_names, self.scalar_type)
-        return ExpressionKernel(loopy_kernel, self.oriented, self.cell_sizes, self.coefficients)
+        return ExpressionKernel(loopy_kernel, self.oriented, self.cell_sizes, self.coefficients, self.tabulations)
 
 
 class KernelBuilder(KernelBuilderBase):
@@ -259,7 +259,7 @@ class KernelBuilder(KernelBuilderBase):
         knl = self.kernel
         knl.oriented, knl.needs_cell_sizes, knl.tabulations = check_requirements(ir)
 
-    def construct_kernel(self, name, impero_c, precision, scalar_type, index_names, quadrature_rule):
+    def construct_kernel(self, name, impero_c, precision, index_names, quadrature_rule):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument
@@ -268,7 +268,6 @@ class KernelBuilder(KernelBuilderBase):
         :arg name: function name
         :arg impero_c: ImperoC tuple with Impero AST and other data
         :arg precision: floating-point precision for printing
-        :arg scalar_type: type of scalars as C typename string
         :arg index_names: pre-assigned index names
         :returns: :class:`Kernel` object
         """

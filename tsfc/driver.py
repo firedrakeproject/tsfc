@@ -250,7 +250,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     for multiindex, name in zip(argument_multiindices, ['j', 'k']):
         name_multiindex(multiindex, name)
 
-    return builder.construct_kernel(kernel_name, impero_c, parameters["precision"], parameters["scalar_type"], index_names, quad_rule)
+    return builder.construct_kernel(kernel_name, impero_c, parameters["precision"], index_names, quad_rule)
 
 
 def compile_expression_at_points(expression, points, coordinates, interface=None, parameters=None, coffee=True):
@@ -342,7 +342,7 @@ def compile_expression_at_points(expression, points, coordinates, interface=None
     # Handle kernel interface requirements
     builder.register_requirements([ir])
     # Build kernel tuple
-    return builder.construct_kernel(return_arg, impero_c, parameters["precision"], parameters["scalar_type"], {point_index: 'p'})
+    return builder.construct_kernel(return_arg, impero_c, parameters["precision"], {point_index: 'p'})
 
 
 def lower_integral_type(fiat_cell, integral_type):
