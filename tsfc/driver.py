@@ -2,6 +2,7 @@ import collections
 import operator
 import string
 import time
+import sys
 from functools import reduce
 from itertools import chain
 
@@ -29,6 +30,9 @@ from tsfc.parameters import default_parameters, is_complex
 
 import tsfc.kernel_interface.firedrake as firedrake_interface_coffee
 import tsfc.kernel_interface.firedrake_loopy as firedrake_interface_loopy
+
+# To handle big forms. The various transformations might need a deeper stack
+sys.setrecursionlimit(3000)
 
 
 def compile_form(form, prefix="form", parameters=None, interface=None, coffee=True):
