@@ -42,7 +42,6 @@ supported_elements = {
     "FacetBubble": FIAT.FacetBubble,
     "Crouzeix-Raviart": FIAT.CrouzeixRaviart,
     "Discontinuous Lagrange": FIAT.DiscontinuousLagrange,
-    "S": FIAT.Serendipity,
     "DPC": FIAT.DPC,
     "Discontinuous Taylor": FIAT.DiscontinuousTaylor,
     "Discontinuous Raviart-Thomas": FIAT.DiscontinuousRaviartThomas,

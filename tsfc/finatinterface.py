@@ -64,7 +64,7 @@ supported_elements = {
     "Q": None,
     "RTCE": None,
     "RTCF": None,
-    "S2": finat.S2,
+    "Serendipity 2": finat.S2,
     "NCE": None,
     "NCF": None,
     "Real": finat.DiscontinuousLagrange,
