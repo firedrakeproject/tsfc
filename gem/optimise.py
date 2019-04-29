@@ -625,37 +625,3 @@ def aggressive_unroll(expression):
     expression, = unroll_indexsum((expression,), predicate=lambda index: True)
     expression, = remove_componenttensors((expression,))
     return expression
-
-
-@singledispatch
-def _expand_conditional(node, self):
-    raise AssertionError("cannot handle type %s" % type(node))
-
-
-_expand_conditional.register(Node)(reuse_if_untouched)
-
-
-@_expand_conditional.register(Conditional)
-def _expand_conditional_conditional(node, self):
-    if self.predicate(node):
-        condition, then, else_ = map(self, node.children)
-        return Sum(Product(Conditional(condition, one, Zero()), then),
-                   Product(Conditional(condition, Zero(), one), else_))
-    else:
-        return reuse_if_untouched(node, self)
-
-
-def expand_conditional(expressions, predicate):
-    """Applies the following substitution rule on selected :py:class:`Conditional`s:
-
-        Conditional(a, b, c) => Conditional(a, 1, 0)*b + Conditional(a, 0, 1)*c
-
-    :arg expressions: expression DAG roots
-    :arg predicate: a predicate function on :py:class:`Conditional`s to determine
-                    whether to apply the substitution rule or not
-
-    :returns: expression DAG roots with some :py:class:`Conditional` nodes expanded
-    """
-    mapper = Memoizer(_expand_conditional)
-    mapper.predicate = predicate
-    return list(map(mapper, expressions))
