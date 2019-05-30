@@ -53,6 +53,8 @@ supported_elements = {
     "HDiv Trace": FIAT.HDivTrace,
     "Regge": FIAT.Regge,
     "Hellan-Herrmann-Johnson": FIAT.HellanHerrmannJohnson,
+    "DPC": FIAT.DPC,
+    "S": FIAT.Serendipity
     # These require special treatment below
     "DQ": None,
     "Q": None,
@@ -60,8 +62,6 @@ supported_elements = {
     "RTCF": None,
     "NCE": None,
     "NCF": None,
-    "DPC": FIAT.DPC,
-    "S": FIAT.Serendipity
 }
 """A :class:`.dict` mapping UFL element family names to their
 FIAT-equivalent constructors.  If the value is ``None``, the UFL
@@ -140,16 +140,6 @@ def convert_finiteelement(element, vector_is_mixed):
             lmbda = FIAT.GaussLegendre
         else:
             raise ValueError("Variant %r not supported on %s" % (kind, element.cell()))
-    elif element.family() == "DPC":
-        if element.cell().geometric_dimension() == 2:
-            element = element.reconstruct(cell=ufl.hypercube(2))
-        elif element.cell.geometric_dimension() == 3:
-            element = element.reconstruct(cell=ufl.hypercube(3))
-    elif element.family() == "S":
-        if element.cell().geometric_dimension() == 2:
-            element = element.reconstruct(cell=ufl.hypercube(2))
-        elif element.cell().geometric_dimension() == 3:
-            element = element.reconstruct(cell=ufl.hypercube(3))
     return lmbda(cell, element.degree())
 
 

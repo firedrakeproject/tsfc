@@ -57,6 +57,8 @@ supported_elements = {
     "Nedelec 2nd kind H(curl)": finat.NedelecSecondKind,
     "Raviart-Thomas": finat.RaviartThomas,
     "Regge": finat.Regge,
+    "DPC": finat.DPC,
+    "S": finat.Serendipity
     # These require special treatment below
     "DQ": None,
     "Q": None,
@@ -65,8 +67,6 @@ supported_elements = {
     "NCE": None,
     "NCF": None,
     "Real": finat.DiscontinuousLagrange,
-    "DPC": finat.DPC,
-    "S": finat.Serendipity
 }
 """A :class:`.dict` mapping UFL element family names to their
 FInAT-equivalent constructors.  If the value is ``None``, the UFL
@@ -153,16 +153,6 @@ def convert_finiteelement(element, **kwargs):
             return finat.RuntimeTabulated(cell, degree, variant=kind, shift_axes=shift_axes, restriction=restriction, continuous=False), deps
         else:
             raise ValueError("Variant %r not supported on %s" % (kind, element.cell()))
-    elif element.family() == "DPC":
-        if element.cell().geometric_dimension() == 2:
-            element = element.reconstruct(cell=ufl.cell.hypercube(2))
-        elif element.cell().geometric_dimension() == 3:
-            element = element.reconstruct(cell=ufl.cell.hypercube(3))
-    elif element.family() == "S":
-        if element.cell().geometric_dimension() == 2:
-            element = element.reconstruct(cell=ufl.cell.hypercube(2))
-        elif element.cell().geometric_dimension() == 3:
-            element = element.reconstruct(cell=ufl.cell.hypercube(3))
     return lmbda(cell, element.degree()), set()
 
 
