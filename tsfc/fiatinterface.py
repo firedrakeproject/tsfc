@@ -54,14 +54,14 @@ supported_elements = {
     "Regge": FIAT.Regge,
     "Hellan-Herrmann-Johnson": FIAT.HellanHerrmannJohnson,
     "DPC": FIAT.DPC,
-    "S": FIAT.Serendipity
+    "S": FIAT.Serendipity,
     # These require special treatment below
     "DQ": None,
     "Q": None,
     "RTCE": None,
     "RTCF": None,
     "NCE": None,
-    "NCF": None,
+    "NCF": None
 }
 """A :class:`.dict` mapping UFL element family names to their
 FIAT-equivalent constructors.  If the value is ``None``, the UFL

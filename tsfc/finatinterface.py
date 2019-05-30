@@ -58,7 +58,7 @@ supported_elements = {
     "Raviart-Thomas": finat.RaviartThomas,
     "Regge": finat.Regge,
     "DPC": finat.DPC,
-    "S": finat.Serendipity
+    "S": finat.Serendipity,
     # These require special treatment below
     "DQ": None,
     "Q": None,
@@ -66,7 +66,7 @@ supported_elements = {
     "RTCF": None,
     "NCE": None,
     "NCF": None,
-    "Real": finat.DiscontinuousLagrange,
+    "Real": finat.DiscontinuousLagrange
 }
 """A :class:`.dict` mapping UFL element family names to their
 FInAT-equivalent constructors.  If the value is ``None``, the UFL
