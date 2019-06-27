@@ -80,10 +80,16 @@ def test_interval_variant_default(family, expected_cls):
 @pytest.mark.parametrize(('family', 'variant', 'expected_cls'),
                          [('P', 'equispaced', finat.Lagrange),
                           ('P', 'spectral', finat.GaussLobattoLegendre),
+                          ('P', 'mse', finat.GaussLobattoLegendre),
+                          ('P', 'dualmse', finat.ExtendedGaussLegendre),
                           ('DP', 'equispaced', finat.DiscontinuousLagrange),
                           ('DP', 'spectral', finat.GaussLegendre),
+                          ('DP', 'mse', finat.EdgeGaussLobattoLegendre),
+                          ('DP', 'dualmse', finat.EdgeExtendedGaussLegendre),
                           ('DP L2', 'equispaced', finat.DiscontinuousLagrange),
-                          ('DP L2', 'spectral', finat.GaussLegendre)])
+                          ('DP L2', 'spectral', finat.GaussLegendre),
+                          ('DP L2', 'mse', finat.EdgeGaussLobattoLegendre),
+                          ('DP L2', 'dualmse', finat.EdgeExtendedGaussLegendre)])
 def test_interval_variant(family, variant, expected_cls):
     ufl_element = ufl.FiniteElement(family, ufl.interval, 3, variant=variant)
     assert isinstance(create_element(ufl_element), expected_cls)
@@ -117,6 +123,74 @@ def test_quadrilateral_variant_spectral_dq_l2():
     element = create_element(ufl.FiniteElement('DQ L2', ufl.quadrilateral, 1, variant='spectral'))
     assert isinstance(element.product.factors[0], finat.GaussLegendre)
     assert isinstance(element.product.factors[1], finat.GaussLegendre)
+
+
+def test_quadrilateral_variant_mse_q():
+    element = create_element(ufl.FiniteElement('Q', ufl.quadrilateral, 3, variant='mse'))
+    assert isinstance(element.product.factors[0], finat.GaussLobattoLegendre)
+    assert isinstance(element.product.factors[1], finat.GaussLobattoLegendre)
+
+
+def test_quadrilateral_variant_dualmse_q():
+    element = create_element(ufl.FiniteElement('Q', ufl.quadrilateral, 3, variant='dualmse'))
+    assert isinstance(element.product.factors[0], finat.ExtendedGaussLegendre)
+    assert isinstance(element.product.factors[1], finat.ExtendedGaussLegendre)
+
+
+def test_quadrilateral_variant_mse_dq():
+    element = create_element(ufl.FiniteElement('DQ', ufl.quadrilateral, 1, variant='mse'))
+    assert isinstance(element.product.factors[0], finat.EdgeGaussLobattoLegendre)
+    assert isinstance(element.product.factors[1], finat.EdgeGaussLobattoLegendre)
+
+
+def test_quadrilateral_variant_mse_dq_l2():
+    element = create_element(ufl.FiniteElement('DQ L2', ufl.quadrilateral, 1, variant='mse'))
+    assert isinstance(element.product.factors[0], finat.EdgeGaussLobattoLegendre)
+    assert isinstance(element.product.factors[1], finat.EdgeGaussLobattoLegendre)
+
+
+def test_quadrilateral_variant_dualmse_dq():
+    element = create_element(ufl.FiniteElement('DQ', ufl.quadrilateral, 1, variant='dualmse'))
+    assert isinstance(element.product.factors[0], finat.EdgeExtendedGaussLegendre)
+    assert isinstance(element.product.factors[1], finat.EdgeExtendedGaussLegendre)
+
+
+def test_quadrilateral_variant_dualmse_dq_l2():
+    element = create_element(ufl.FiniteElement('DQ L2', ufl.quadrilateral, 1, variant='dualmse'))
+    assert isinstance(element.product.factors[0], finat.EdgeExtendedGaussLegendre)
+    assert isinstance(element.product.factors[1], finat.EdgeExtendedGaussLegendre)
+
+
+def test_quadrilateral_variant_mse_rtcf():
+    element = create_element(ufl.FiniteElement('RTCF', ufl.quadrilateral, 2, variant='mse'))
+    assert isinstance(element.product.elements[0].wrappee.factors[0], finat.GaussLobattoLegendre)
+    assert isinstance(element.product.elements[0].wrappee.factors[1], finat.EdgeGaussLobattoLegendre)
+    assert isinstance(element.product.elements[1].wrappee.factors[0], finat.EdgeGaussLobattoLegendre)
+    assert isinstance(element.product.elements[1].wrappee.factors[1], finat.GaussLobattoLegendre)
+
+
+def test_quadrilateral_variant_mse_rtce():
+    element = create_element(ufl.FiniteElement('RTCE', ufl.quadrilateral, 2, variant='mse'))
+    assert isinstance(element.product.elements[0].wrappee.factors[0], finat.GaussLobattoLegendre)
+    assert isinstance(element.product.elements[0].wrappee.factors[1], finat.EdgeGaussLobattoLegendre)
+    assert isinstance(element.product.elements[1].wrappee.factors[0], finat.EdgeGaussLobattoLegendre)
+    assert isinstance(element.product.elements[1].wrappee.factors[1], finat.GaussLobattoLegendre)
+
+
+def test_quadrilateral_variant_dualmse_rtcf():
+    element = create_element(ufl.FiniteElement('RTCF', ufl.quadrilateral, 2, variant='dualmse'))
+    assert isinstance(element.product.elements[0].wrappee.factors[0], finat.ExtendedGaussLegendre)
+    assert isinstance(element.product.elements[0].wrappee.factors[1], finat.EdgeExtendedGaussLegendre)
+    assert isinstance(element.product.elements[1].wrappee.factors[0], finat.EdgeExtendedGaussLegendre)
+    assert isinstance(element.product.elements[1].wrappee.factors[1], finat.ExtendedGaussLegendre)
+
+
+def test_quadrilateral_variant_dualmse_rtce():
+    element = create_element(ufl.FiniteElement('RTCE', ufl.quadrilateral, 2, variant='dualmse'))
+    assert isinstance(element.product.elements[0].wrappee.factors[0], finat.ExtendedGaussLegendre)
+    assert isinstance(element.product.elements[0].wrappee.factors[1], finat.EdgeExtendedGaussLegendre)
+    assert isinstance(element.product.elements[1].wrappee.factors[0], finat.EdgeExtendedGaussLegendre)
+    assert isinstance(element.product.elements[1].wrappee.factors[1], finat.ExtendedGaussLegendre)
 
 
 def test_cache_hit(ufl_element):
