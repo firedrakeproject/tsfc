@@ -58,6 +58,7 @@ supported_elements = {
     "Raviart-Thomas": finat.RaviartThomas,
     "Regge": finat.Regge,
     "DPC": finat.DPC,
+    "BDMCE": finat.BrezziDouglasMariniCube,
     "S": finat.Serendipity,
     # These require special treatment below
     "DQ": None,
