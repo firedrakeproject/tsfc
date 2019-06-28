@@ -66,7 +66,16 @@ supported_elements = {
     "NCF": None,
     "Real": finat.DiscontinuousLagrange,
     "DPC": finat.DPC,
-    "S": finat.Serendipity
+    "S": finat.Serendipity,
+    "DPC L2": finat.DPC,
+    "Discontinuous Lagrange L2": finat.DiscontinuousLagrange,
+    "Gauss-Legendre L2": finat.GaussLegendre,
+    "DQ L2": None,
+    "Extended-Gauss-Legendre": finat.ExtendedGaussLegendre,
+    "Gauss-Lobatto-Legendre Edge": finat.EdgeGaussLobattoLegendre,
+    "Gauss-Lobatto-Legendre Edge L2": finat.EdgeGaussLobattoLegendre,
+    "Extended-Gauss-Legendre Edge": finat.EdgeExtendedGaussLegendre,
+    "Extended-Gauss-Legendre Edge L2": finat.EdgeExtendedGaussLegendre
 }
 """A :class:`.dict` mapping UFL element family names to their
 FInAT-equivalent constructors.  If the value is ``None``, the UFL
@@ -131,7 +140,11 @@ def convert_finiteelement(element, **kwargs):
             lmbda = finat.Lagrange
         elif kind == 'spectral' and element.cell().cellname() == 'interval':
             lmbda = finat.GaussLobattoLegendre
-        elif kind in ['mgd', 'feec', 'qb', 'mse']:
+        elif kind == 'mse' and element.cell().cellname() == 'interval':
+            lmbda = finat.GaussLobattoLegendre
+        elif kind == 'dualmse' and element.cell().cellname() == 'interval':
+            lmbda = finat.ExtendedGaussLegendre
+        elif kind in ['mgd', 'feec', 'qb', 'mse-themis']:
             degree = element.degree()
             shift_axes = kwargs["shift_axes"]
             restriction = kwargs["restriction"]
@@ -139,13 +152,17 @@ def convert_finiteelement(element, **kwargs):
             return finat.RuntimeTabulated(cell, degree, variant=kind, shift_axes=shift_axes, restriction=restriction), deps
         else:
             raise ValueError("Variant %r not supported on %s" % (kind, element.cell()))
-    elif element.family() == "Discontinuous Lagrange":
+    elif element.family() in ["Discontinuous Lagrange", "Discontinuous Lagrange L2"]:
         kind = element.variant() or 'equispaced'
         if kind == 'equispaced':
             lmbda = finat.DiscontinuousLagrange
         elif kind == 'spectral' and element.cell().cellname() == 'interval':
             lmbda = finat.GaussLegendre
-        elif kind in ['mgd', 'feec', 'qb', 'mse']:
+        elif kind == 'mse' and element.cell().cellname() == 'interval':
+            lmbda = finat.EdgeGaussLobattoLegendre
+        elif kind == 'dualmse' and element.cell().cellname() == 'interval':
+            lmbda = finat.EdgeExtendedGaussLegendre
+        elif kind in ['mgd', 'feec', 'qb', 'mse-themis']:
             degree = element.degree()
             shift_axes = kwargs["shift_axes"]
             restriction = kwargs["restriction"]
@@ -153,7 +170,7 @@ def convert_finiteelement(element, **kwargs):
             return finat.RuntimeTabulated(cell, degree, variant=kind, shift_axes=shift_axes, restriction=restriction, continuous=False), deps
         else:
             raise ValueError("Variant %r not supported on %s" % (kind, element.cell()))
-    elif element.family() == "DPC":
+    elif element.family() == ["DPC", "DPC L2"]:
         if element.cell().geometric_dimension() == 2:
             element = element.reconstruct(cell=ufl.cell.hypercube(2))
         elif element.cell().geometric_dimension() == 3:

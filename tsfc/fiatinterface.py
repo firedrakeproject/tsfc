@@ -61,7 +61,16 @@ supported_elements = {
     "NCE": None,
     "NCF": None,
     "DPC": FIAT.DPC,
-    "S": FIAT.Serendipity
+    "S": FIAT.Serendipity,
+    "DPC L2": FIAT.DPC,
+    "Discontinuous Lagrange L2": FIAT.DiscontinuousLagrange,
+    "Gauss-Legendre L2": FIAT.GaussLegendre,
+    "DQ L2": None,
+    "Extended-Gauss-Legendre": FIAT.ExtendedGaussLegendre,
+    "Gauss-Lobatto-Legendre Edge": FIAT.EdgeGaussLobattoLegendre,
+    "Gauss-Lobatto-Legendre Edge L2": FIAT.EdgeGaussLobattoLegendre,
+    "Extended-Gauss-Legendre Edge": FIAT.EdgeExtendedGaussLegendre,
+    "Extended-Gauss-Legendre Edge L2": FIAT.EdgeExtendedGaussLegendre
 }
 """A :class:`.dict` mapping UFL element family names to their
 FIAT-equivalent constructors.  If the value is ``None``, the UFL
@@ -131,16 +140,24 @@ def convert_finiteelement(element, vector_is_mixed):
             lmbda = FIAT.Lagrange
         elif kind == 'spectral' and element.cell().cellname() == 'interval':
             lmbda = FIAT.GaussLobattoLegendre
+        elif kind == 'mse' and element.cell().cellname() == 'interval':
+            lmbda = FIAT.GaussLobattoLegendre
+        elif kind == 'dualmse' and element.cell().cellname() == 'interval':
+            lmbda = FIAT.ExtendedGaussLegendre
         else:
             raise ValueError("Variant %r not supported on %s" % (kind, element.cell()))
-    elif element.family() == "Discontinuous Lagrange":
+    elif element.family() in ["Discontinuous Lagrange", "Discontinuous Lagrange L2"]:
         if kind == 'equispaced':
             lmbda = FIAT.DiscontinuousLagrange
         elif kind == 'spectral' and element.cell().cellname() == 'interval':
             lmbda = FIAT.GaussLegendre
+        elif kind == 'mse' and element.cell().cellname() == 'interval':
+            lmbda = FIAT.EdgeGaussLobattoLegendre
+        elif kind == 'dualmse' and element.cell().cellname() == 'interval':
+            lmbda = FIAT.EdgeExtendedGaussLegendre
         else:
             raise ValueError("Variant %r not supported on %s" % (kind, element.cell()))
-    elif element.family() == "DPC":
+    elif element.family() in ["DPC", "DPC L2"]:
         if element.cell().geometric_dimension() == 2:
             element = element.reconstruct(cell=ufl.hypercube(2))
         elif element.cell.geometric_dimension() == 3:
