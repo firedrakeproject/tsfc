@@ -31,4 +31,4 @@ def default_parameters():
 
 def is_complex(scalar_type):
     """Decides complex mode based on scalar type."""
-    return scalar_type and 'complex' in scalar_type
+    return scalar_type and (isinstance(scalar_type, numpy.dtype) and scalar_type.kind == 'c')
