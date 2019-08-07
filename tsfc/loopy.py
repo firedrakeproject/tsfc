@@ -247,7 +247,7 @@ def _expression_mathfunction(expr, ctx):
     from tsfc.coffee import math_table
 
     math_table = math_table.copy()
-    math_table['abs'] = ('abs', 'cabs')
+    math_table['abs'] = ('abs', 'abs')
 
     complex_mode = int(is_complex(ctx.scalar_type))
 
