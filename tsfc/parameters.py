@@ -14,15 +14,15 @@ PARAMETERS = {
     # that makes compilation time much shorter.
     "unroll_indexsum": 3,
 
-    # Scalar type (C typename string)
-    "scalar_type": "double",
+    # Scalar type numpy dtype
+    "scalar_type": numpy.float64,
 
     # Precision of float printing (number of digits)
     "precision": numpy.finfo(numpy.dtype("double")).precision,
 }
 
 # Satisfy import demands until complex branch is merged in Firedrake
-SCALAR_TYPE = PARAMETERS["scalar_type"]
+SCALAR_TYPE = "double"
 
 
 def default_parameters():
@@ -31,4 +31,5 @@ def default_parameters():
 
 def is_complex(scalar_type):
     """Decides complex mode based on scalar type."""
-    return scalar_type and (isinstance(scalar_type, numpy.dtype) and scalar_type.kind == 'c')
+    return scalar_type and (isinstance(scalar_type, numpy.dtype) and scalar_type.kind == 'c') \
+        or (isinstance(scalar_type, str) and "complex" in scalar_type)

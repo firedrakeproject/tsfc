@@ -89,10 +89,12 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
         if coffee:
             import tsfc.kernel_interface.firedrake as firedrake_interface_coffee
             interface = firedrake_interface_coffee.KernelBuilder
+            scalar_type = parameters["scalar_type_c"]
         else:
             # Delayed import, loopy is a runtime dependency
             import tsfc.kernel_interface.firedrake_loopy as firedrake_interface_loopy
             interface = firedrake_interface_loopy.KernelBuilder
+            scalar_type = parameters["scalar_type"]
 
     # Remove these here, they're handled below.
     if parameters.get("quadrature_degree") in ["auto", "default", None, -1, "-1"]:
@@ -118,7 +120,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     domain_numbering = form_data.original_form.domain_numbering()
     builder = interface(integral_type, integral_data.subdomain_id,
                         domain_numbering[integral_data.domain],
-                        parameters["scalar_type"])
+                        scalar_type)
     argument_multiindices = tuple(builder.create_element(arg.ufl_element()).get_indices()
                                   for arg in arguments)
     return_variables = builder.set_arguments(arguments, argument_multiindices)
