@@ -54,8 +54,8 @@ supported_elements = {
     "Regge": FIAT.Regge,
     "Hellan-Herrmann-Johnson": FIAT.HellanHerrmannJohnson,
     "DPC": FIAT.DPC,
-    "BDMCE": FIAT.BrezziDouglasMariniCube.BrezziDouglasMariniCubeEdge,
-    "BDMCF": FIAT.BrezziDouglasMariniCube.BrezziDouglasMariniCubeFace,
+    "BDMCE": FIAT.BrezziDouglasMariniCubeEdge,
+    "BDMCF": FIAT.BrezziDouglasMariniCubeFace,
     "S": FIAT.Serendipity,
     # These require special treatment below
     "DQ": None,
