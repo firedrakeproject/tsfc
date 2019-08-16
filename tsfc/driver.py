@@ -306,9 +306,9 @@ def compile_expression_at_points(expression, points, coordinates, interface=None
     builder = interface(parameters["scalar_type"])
 
     # Replace coordinates (if any)
-    domain = expression.ufl_domain()
+    domain = expression.ufl_domain().ufl_base()
     if domain:
-        assert coordinates.ufl_domain() == domain
+        assert coordinates.ufl_domain().ufl_base() == domain
         builder.domain_coordinate[domain] = coordinates
         builder.set_cell_sizes(domain)
 
