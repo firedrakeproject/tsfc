@@ -106,6 +106,7 @@ class KernelBuilderBase(_KernelBuilderBase):
         in P1).
         """
         domain = domain.ufl_base()
+        print("KernelBuilderBase: ", domain)
         f = Coefficient(FunctionSpace(domain, FiniteElement("P", domain.ufl_cell(), 1)))
         funarg, expression = prepare_coefficient(f, "cell_sizes", self.scalar_type, interior_facet=self.interior_facet)
         self.cell_sizes_arg = funarg
@@ -217,6 +218,7 @@ class KernelBuilder(KernelBuilderBase):
         :arg domain: :class:`ufl.Domain`
         """
         domain = domain.ufl_base()
+        print("KernelBuilder(loopy): ", domain)
         # Create a fake coordinate coefficient for a domain.
         f = Coefficient(FunctionSpace(domain, domain.ufl_coordinate_element()))
         self.domain_coordinate[domain] = f

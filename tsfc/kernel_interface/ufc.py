@@ -65,6 +65,8 @@ class KernelBuilder(KernelBuilderBase):
 
         :arg domain: :class:`ufl.Domain`
         """
+        domain = domain.ufl_base()
+        print("KernelBuilder(ufc): ", domain)
         # Create a fake coordinate coefficient for a domain.
         f = ufl.Coefficient(ufl.FunctionSpace(domain, domain.ufl_coordinate_element()))
         self.domain_coordinate[domain] = f

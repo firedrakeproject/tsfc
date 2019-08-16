@@ -123,6 +123,9 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
                                   for arg in arguments)
     return_variables = builder.set_arguments(arguments, argument_multiindices)
 
+    print(mesh.ufl_base())
+    import sys
+    sys.stdout.flush()
     builder.set_coordinates(mesh)
     builder.set_cell_sizes(mesh)
 

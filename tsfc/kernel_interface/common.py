@@ -36,6 +36,7 @@ class KernelBuilderBase(KernelInterface):
 
     def coordinate(self, domain):
         domain = domain.ufl_base()
+        print("kernel_interface.common: ", domain, self.domain_coordinate)
         return self.domain_coordinate[domain]
 
     def coefficient(self, ufl_coefficient, restriction):

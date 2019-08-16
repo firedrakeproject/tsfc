@@ -421,6 +421,7 @@ def translate_facet_coordinate(terminal, mt, ctx):
 @translate.register(SpatialCoordinate)
 def translate_spatialcoordinate(terminal, mt, ctx):
     # Replace terminal with a Coefficient
+    print("fem: ", terminal.ufl_domain())
     terminal = ctx.coordinate(terminal.ufl_domain())
     # Get back to reference space
     terminal = preprocess_expression(terminal)
