@@ -120,7 +120,7 @@ class ExpressionKernelBuilder(KernelBuilderBase):
     """Builds expression kernels for UFL interpolation in Firedrake."""
 
     def __init__(self, scalar_type=None):
-        super(ExpressionKernelBuilder, self).__init__(scalar_type=None)
+        super(ExpressionKernelBuilder, self).__init__(scalar_type=scalar_type)
         self.oriented = False
         self.cell_sizes = False
 
