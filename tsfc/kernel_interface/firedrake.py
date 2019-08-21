@@ -17,7 +17,7 @@ from tsfc.coffee import generate as generate_coffee
 
 
 # Expression kernel description type
-ExpressionKernel = namedtuple('ExpressionKernel', ['ast', 'oriented', 'needs_cell_sizes', 'coefficients'])
+ExpressionKernel = namedtuple('ExpressionKernel', ['ast', 'oriented', 'needs_cell_sizes', 'coefficients', 'tabulations'])
 
 
 def make_builder(*args, **kwargs):
@@ -26,7 +26,7 @@ def make_builder(*args, **kwargs):
 
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
-                 "domain_number", "needs_cell_sizes",
+                 "domain_number", "needs_cell_sizes", "tabulations", "quadrature_rule",
                  "coefficient_numbers", "__weakref__")
     """A compiled Kernel object.
 
@@ -39,10 +39,12 @@ class Kernel(object):
         original_form.ufl_domains() to get the correct domain).
     :kwarg coefficient_numbers: A list of which coefficients from the
         form the kernel needs.
+    :kwarg quadrature_rule: The finat quadrature rule used to generate this kernel
+    :kwarg tabulations: The runtime tabulations this kernel requires
     :kwarg needs_cell_sizes: Does the kernel require cell sizes.
     """
     def __init__(self, ast=None, integral_type=None, oriented=False,
-                 subdomain_id=None, domain_number=None,
+                 subdomain_id=None, domain_number=None, quadrature_rule=None,
                  coefficient_numbers=(),
                  needs_cell_sizes=False):
         # Defaults
@@ -105,23 +107,6 @@ class KernelBuilderBase(_KernelBuilderBase):
         self.cell_sizes_arg = funarg
         self._cell_sizes = expression
 
-    @staticmethod
-    def needs_cell_orientations(ir):
-        """Does a multi-root GEM expression DAG references cell
-        orientations?"""
-        for node in traversal(ir):
-            if isinstance(node, gem.Variable) and node.name == "cell_orientations":
-                return True
-        return False
-
-    @staticmethod
-    def needs_cell_sizes(ir):
-        """Does a multi-root GEM expression DAG reference cell sizes?"""
-        for node in traversal(ir):
-            if isinstance(node, gem.Variable) and node.name == "cell_sizes":
-                return True
-        return False
-
     def create_element(self, element, **kwargs):
         """Create a FInAT element (suitable for tabulating with) given
         a UFL element."""
@@ -156,12 +141,10 @@ class ExpressionKernelBuilder(KernelBuilderBase):
                 self.coefficients.append(coefficient)
                 self.kernel_args.append(self._coefficient(coefficient, "w_%d" % (i,)))
 
-    def require_cell_orientations(self):
-        """Set that the kernel requires cell orientations."""
-        self.oriented = True
-
-    def require_cell_sizes(self):
-        self.cell_sizes = True
+    def register_requirements(self, ir):
+        """Inspect what is referenced by the IR that needs to be
+        provided by the kernel interface."""
+        self.oriented, self.cell_sizes, self.tabulations = check_requirements(ir)
 
     def construct_kernel(self, return_arg, impero_c, precision, index_names):
         """Constructs an :class:`ExpressionKernel`.
@@ -182,8 +165,12 @@ class ExpressionKernelBuilder(KernelBuilderBase):
 
         body = generate_coffee(impero_c, index_names, precision)
 
+        for name_, shape in self.tabulations:
+            args.append(coffee.Decl(self.scalar_type, coffee.Symbol(
+                name_, rank=shape), qualifiers=["const"]))
+
         kernel_code = super(ExpressionKernelBuilder, self).construct_kernel("expression_kernel", args, body)
-        return ExpressionKernel(kernel_code, self.oriented, self.cell_sizes, self.coefficients)
+        return ExpressionKernel(kernel_code, self.oriented, self.cell_sizes, self.coefficients, self.tabulations)
 
 
 class KernelBuilder(KernelBuilderBase):
@@ -271,15 +258,13 @@ class KernelBuilder(KernelBuilderBase):
                 self._coefficient(coefficient, "w_%d" % i))
         self.kernel.coefficient_numbers = tuple(coefficient_numbers)
 
-    def require_cell_orientations(self):
-        """Set that the kernel requires cell orientations."""
-        self.kernel.oriented = True
+    def register_requirements(self, ir):
+        """Inspect what is referenced by the IR that needs to be
+        provided by the kernel interface."""
+        knl = self.kernel
+        knl.oriented, knl.needs_cell_sizes, knl.tabulations = check_requirements(ir)
 
-    def require_cell_sizes(self):
-        """Set that the kernel requires cell sizes."""
-        self.kernel.needs_cell_sizes = True
-
-    def construct_kernel(self, name, impero_c, precision, scalar_type, index_names):
+    def construct_kernel(self, name, impero_c, precision, index_names, quadrature_rule):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument
@@ -289,11 +274,11 @@ class KernelBuilder(KernelBuilderBase):
         :arg impero_c: ImperoC tuple with Impero AST and other data
         :arg precision: floating-point precision for printing
         :arg index_names: pre-assigned index names
-        :arg scalar_type: type of scalars as C typename string
+        :arg quadrature rule: quadrature rule
+
         :returns: :class:`Kernel` object
         """
-
-        body = generate_coffee(impero_c, index_names, precision, scalar_type)
+        body = generate_coffee(impero_c, index_names, precision, self.scalar_type)
 
         args = [self.local_tensor, self.coordinates_arg]
         if self.kernel.oriented:
@@ -310,6 +295,12 @@ class KernelBuilder(KernelBuilderBase):
                                     coffee.Symbol("facet", rank=(2,)),
                                     qualifiers=["const"]))
 
+        for name_, shape in self.kernel.tabulations:
+            args.append(coffee.Decl(self.scalar_type, coffee.Symbol(
+                name_, rank=shape), qualifiers=["const"]))
+
+        self.kernel.quadrature_rule = quadrature_rule
+
         self.kernel.ast = KernelBuilderBase.construct_kernel(self, name, args, body)
         return self.kernel
 
@@ -320,6 +311,23 @@ class KernelBuilder(KernelBuilderBase):
         :returns: None
         """
         return None
+
+
+def check_requirements(ir):
+    """Look for cell orientations, cell sizes, and collect tabulations
+    in one pass."""
+    cell_orientations = False
+    cell_sizes = False
+    rt_tabs = {}
+    for node in traversal(ir):
+        if isinstance(node, gem.Variable):
+            if node.name == "cell_orientations":
+                cell_orientations = True
+            elif node.name == "cell_sizes":
+                cell_sizes = True
+            elif node.name.startswith("rt_"):
+                rt_tabs[node.name] = node.shape
+    return cell_orientations, cell_sizes, tuple(sorted(rt_tabs.items()))
 
 
 def prepare_coefficient(coefficient, name, scalar_type, interior_facet=False):
