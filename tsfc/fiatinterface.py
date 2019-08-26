@@ -42,10 +42,12 @@ supported_elements = {
     "FacetBubble": FIAT.FacetBubble,
     "Crouzeix-Raviart": FIAT.CrouzeixRaviart,
     "Discontinuous Lagrange": FIAT.DiscontinuousLagrange,
+    "Discontinuous Lagrange L2": FIAT.DiscontinuousLagrange,
     "Discontinuous Taylor": FIAT.DiscontinuousTaylor,
     "Discontinuous Raviart-Thomas": FIAT.DiscontinuousRaviartThomas,
     "Gauss-Lobatto-Legendre": FIAT.GaussLobattoLegendre,
     "Gauss-Legendre": FIAT.GaussLegendre,
+    "Gauss-Legendre L2": FIAT.GaussLegendre,
     "Lagrange": FIAT.Lagrange,
     "Nedelec 1st kind H(curl)": FIAT.Nedelec,
     "Nedelec 2nd kind H(curl)": FIAT.NedelecSecondKind,
@@ -54,16 +56,18 @@ supported_elements = {
     "Regge": FIAT.Regge,
     "Hellan-Herrmann-Johnson": FIAT.HellanHerrmannJohnson,
     "DPC": FIAT.DPC,
+    "DPC L2": FIAT.DPC,
     "BDMCE": FIAT.BrezziDouglasMariniCubeEdge,
     "BDMCF": FIAT.BrezziDouglasMariniCubeFace,
     "S": FIAT.Serendipity,
     # These require special treatment below
     "DQ": None,
+    "DQ L2": None,
     "Q": None,
     "RTCE": None,
     "RTCF": None,
     "NCE": None,
-    "NCF": None
+    "NCF": None,
 }
 """A :class:`.dict` mapping UFL element family names to their
 FIAT-equivalent constructors.  If the value is ``None``, the UFL
@@ -135,7 +139,7 @@ def convert_finiteelement(element, vector_is_mixed):
             lmbda = FIAT.GaussLobattoLegendre
         else:
             raise ValueError("Variant %r not supported on %s" % (kind, element.cell()))
-    elif element.family() == "Discontinuous Lagrange":
+    elif element.family() in ["Discontinuous Lagrange", "Discontinuous Lagrange L2"]:
         if kind == 'equispaced':
             lmbda = FIAT.DiscontinuousLagrange
         elif kind == 'spectral' and element.cell().cellname() == 'interval':

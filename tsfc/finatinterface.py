@@ -42,9 +42,11 @@ supported_elements = {
     "FacetBubble": finat.FacetBubble,
     "Crouzeix-Raviart": finat.CrouzeixRaviart,
     "Discontinuous Lagrange": finat.DiscontinuousLagrange,
+    "Discontinuous Lagrange L2": finat.DiscontinuousLagrange,
     "Discontinuous Raviart-Thomas": lambda c, d: finat.DiscontinuousElement(finat.RaviartThomas(c, d)),
     "Discontinuous Taylor": finat.DiscontinuousTaylor,
     "Gauss-Legendre": finat.GaussLegendre,
+    "Gauss-Legendre L2": finat.GaussLegendre,
     "Gauss-Lobatto-Legendre": finat.GaussLobattoLegendre,
     "HDiv Trace": finat.HDivTrace,
     "Hellan-Herrmann-Johnson": finat.HellanHerrmannJohnson,
@@ -58,9 +60,11 @@ supported_elements = {
     "Raviart-Thomas": finat.RaviartThomas,
     "Regge": finat.Regge,
     "DPC": finat.DPC,
+    "DPC L2": finat.DPC,
     "BDMCE": finat.BrezziDouglasMariniCubeEdge,
     "BDMCF": finat.BrezziDouglasMariniCubeFace,
     "S": finat.Serendipity,
+    "Real": finat.DiscontinuousLagrange,
     # These require special treatment below
     "DQ": None,
     "Q": None,
@@ -68,7 +72,7 @@ supported_elements = {
     "RTCF": None,
     "NCE": None,
     "NCF": None,
-    "Real": finat.DiscontinuousLagrange
+    "DQ L2": None,
 }
 """A :class:`.dict` mapping UFL element family names to their
 FInAT-equivalent constructors.  If the value is ``None``, the UFL
@@ -141,7 +145,7 @@ def convert_finiteelement(element, **kwargs):
             return finat.RuntimeTabulated(cell, degree, variant=kind, shift_axes=shift_axes, restriction=restriction), deps
         else:
             raise ValueError("Variant %r not supported on %s" % (kind, element.cell()))
-    elif element.family() == "Discontinuous Lagrange":
+    elif element.family() in ["Discontinuous Lagrange", "Discontinuous Lagrange L2"]:
         kind = element.variant() or 'equispaced'
         if kind == 'equispaced':
             lmbda = finat.DiscontinuousLagrange
