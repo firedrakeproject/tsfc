@@ -153,8 +153,7 @@ def construct_modified_terminal(mt, terminal):
     """Construct a modified terminal given terminal modifiers from an
     analysed modified terminal and a terminal."""
     expr = terminal
-
-    if mt.reference_value:
+    if mt.reference_value and not is_cellwise_constant(expr):
         expr = ReferenceValue(expr)
 
     dim = expr.ufl_domain().topological_dimension()

@@ -123,11 +123,8 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
                                   for arg in arguments)
     return_variables = builder.set_arguments(arguments, argument_multiindices)
 
-    print(mesh.ufl_base())
-    import sys
-    sys.stdout.flush()
-    builder.set_coordinates(mesh)
-    builder.set_cell_sizes(mesh)
+    builder.set_coordinates(mesh.ufl_base())
+    builder.set_cell_sizes(mesh.ufl_base())
 
     builder.set_coefficients(integral_data, form_data)
 
@@ -163,6 +160,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
         integrand = ufl.replace(integral.integrand(), form_data.function_replace_map)
         integrand = ufl_utils.split_coefficients(integrand, builder.coefficient_split)
 
+
         # Check if the integral has a quad degree attached, otherwise use
         # the estimated polynomial degree attached by compute_form_data
         quadrature_degree = params.get("quadrature_degree",
@@ -171,7 +169,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
             quadrature_degree = params["quadrature_degree"]
         except KeyError:
             quadrature_degree = params["estimated_polynomial_degree"]
-            functions = list(arguments) + [builder.coordinate(mesh)] + list(integral_data.integral_coefficients)
+            functions = list(arguments) + [builder.coordinate(mesh.ufl_base())] + list(integral_data.integral_coefficients)
             function_degrees = [f.ufl_function_space().ufl_element().degree() for f in functions]
             if all((asarray(quadrature_degree) > 10 * asarray(degree)).all()
                    for degree in function_degrees):
@@ -306,9 +304,11 @@ def compile_expression_at_points(expression, points, coordinates, interface=None
     builder = interface(parameters["scalar_type"])
 
     # Replace coordinates (if any)
-    domain = expression.ufl_domain().ufl_base()
+    #domain = expression.ufl_domain().ufl_base()
+    domain = expression.ufl_domain()
     if domain:
-        assert coordinates.ufl_domain().ufl_base() == domain
+        #assert coordinates.ufl_domain().ufl_base() == domain
+        assert coordinates.ufl_domain() == domain
         builder.domain_coordinate[domain] = coordinates
         builder.set_cell_sizes(domain)
 

@@ -102,7 +102,7 @@ class KernelBuilderBase(_KernelBuilderBase):
         measure of the mesh size around each vertex (hence this lives
         in P1).
         """
-        domain = domain.ufl_base()
+        #domain = domain.ufl_base()
         print("KernelBuilder(coffee): ", domain)
         f = Coefficient(FunctionSpace(domain, FiniteElement("P", domain.ufl_cell(), 1)))
         funarg, expression = prepare_coefficient(f, "cell_sizes", self.scalar_type, interior_facet=self.interior_facet)
@@ -217,7 +217,7 @@ class KernelBuilder(KernelBuilderBase):
 
         :arg domain: :class:`ufl.Domain`
         """
-        domain = domain.ufl_base()
+        #domain = domain.ufl_base()
         print("KernelBuilder(coffee): ", domain)
         # Create a fake coordinate coefficient for a domain.
         f = Coefficient(FunctionSpace(domain, domain.ufl_coordinate_element()))

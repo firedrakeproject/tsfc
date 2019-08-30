@@ -4,6 +4,7 @@ from itertools import chain, product
 from functools import partial
 
 from ufl import Coefficient, MixedElement as ufl_MixedElement, FunctionSpace, FiniteElement
+from ufl.constantvalue import Zero
 
 import gem
 from gem.optimise import remove_componenttensors as prune
@@ -27,7 +28,7 @@ def make_builder(*args, **kwargs):
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
                  "domain_number", "needs_cell_sizes", "tabulations", "quadrature_rule",
-                 "coefficient_numbers", "__weakref__")
+                 "coefficient_numbers", "coefficient_compress_list", "__weakref__")
     """A compiled Kernel object.
 
     :kwarg ast: The loopy kernel object.
@@ -39,6 +40,10 @@ class Kernel(object):
         original_form.ufl_domains() to get the correct domain).
     :kwarg coefficient_numbers: A list of which coefficients from the
         form the kernel needs.
+    :kwarg coefficient_compress_list: A list of list of coefficient components
+        that are actually used in the given integral_data. If `None` is given
+        instead of a list of components, it is assumed that all components of
+        the coeff are to be used.
     :kwarg quadrature_rule: The finat quadrature rule used to generate this kernel
     :kwarg tabulations: The runtime tabulations this kernel requires
     :kwarg needs_cell_sizes: Does the kernel require cell sizes.
@@ -46,6 +51,7 @@ class Kernel(object):
     def __init__(self, ast=None, integral_type=None, oriented=False,
                  subdomain_id=None, domain_number=None, quadrature_rule=None,
                  coefficient_numbers=(),
+                 coefficient_compress_list=None,
                  needs_cell_sizes=False):
         # Defaults
         self.ast = ast
@@ -54,6 +60,7 @@ class Kernel(object):
         self.domain_number = domain_number
         self.subdomain_id = subdomain_id
         self.coefficient_numbers = coefficient_numbers
+        self.coefficient_compress_list = coefficient_compress_list
         self.needs_cell_sizes = needs_cell_sizes
         super(Kernel, self).__init__()
 
@@ -105,8 +112,7 @@ class KernelBuilderBase(_KernelBuilderBase):
         measure of the mesh size around each vertex (hence this lives
         in P1).
         """
-        domain = domain.ufl_base()
-        print("KernelBuilderBase: ", domain)
+        #domain = domain.ufl_base()
         f = Coefficient(FunctionSpace(domain, FiniteElement("P", domain.ufl_cell(), 1)))
         funarg, expression = prepare_coefficient(f, "cell_sizes", self.scalar_type, interior_facet=self.interior_facet)
         self.cell_sizes_arg = funarg
@@ -217,8 +223,7 @@ class KernelBuilder(KernelBuilderBase):
 
         :arg domain: :class:`ufl.Domain`
         """
-        domain = domain.ufl_base()
-        print("KernelBuilder(loopy): ", domain)
+        #domain = domain.ufl_base()
         # Create a fake coordinate coefficient for a domain.
         f = Coefficient(FunctionSpace(domain, domain.ufl_coordinate_element()))
         self.domain_coordinate[domain] = f
@@ -232,6 +237,7 @@ class KernelBuilder(KernelBuilderBase):
         """
         coefficients = []
         coefficient_numbers = []
+        coefficient_compress_list = []
         # enabled_coefficients is a boolean array that indicates which
         # of reduced_coefficients the integral requires.
         for i in range(len(integral_data.enabled_coefficients)):
@@ -242,13 +248,28 @@ class KernelBuilder(KernelBuilderBase):
                     if original in self.dont_split:
                         coefficients.append(coefficient)
                         self.coefficient_split[coefficient] = [coefficient]
-                    else:
+                        coefficient_compress_list.append(None)
+                    elif integral_data.enabled_components[i] is None:
                         split = [Coefficient(FunctionSpace(coefficient.ufl_domain(), element))
                                  for element in coefficient.ufl_element().sub_elements()]
                         coefficients.extend(split)
                         self.coefficient_split[coefficient] = split
+                        coefficient_compress_list.append(None)
+                    else:
+                        # compress out unused components
+                        split = []
+                        for icomp, element in enumerate(coefficient.ufl_element().sub_elements()):
+                            if icomp in integral_data.enabled_components[i]:
+                                coeff = Coefficient(FunctionSpace(coefficient.ufl_domain(), element))
+                                split.append(coeff)
+                                coefficients.append(coeff)
+                            else:
+                                split.append(Zero(shape=element.value_shape(), domain=coefficient.ufl_domain(), element=element))
+                        self.coefficient_split[coefficient] = split
+                        coefficient_compress_list.append(integral_data.enabled_components[i])
                 else:
                     coefficients.append(coefficient)
+                    coefficient_compress_list.append(None)
                 # This is which coefficient in the original form the
                 # current coefficient is.
                 # Consider f*v*dx + g*v*ds, the full form contains two
@@ -258,6 +279,7 @@ class KernelBuilder(KernelBuilderBase):
             self.coefficient_args.append(
                 self._coefficient(coefficient, "w_%d" % i))
         self.kernel.coefficient_numbers = tuple(coefficient_numbers)
+        self.kernel.coefficient_compress_list = tuple(coefficient_compress_list)
 
     def register_requirements(self, ir):
         """Inspect what is referenced by the IR that needs to be
