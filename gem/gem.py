@@ -31,7 +31,7 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
            'IndexSum', 'ListTensor', 'Concatenate', 'Delta',
-           'index_sum', 'partial_indexed', 'reshape', 'view',
+           'index_sum', 'partial_indexed', 'decompose_variable_view', 'reshape', 'view',
            'indices', 'as_gem']
 
 

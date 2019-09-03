@@ -219,6 +219,11 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     expressions = impero_utils.preprocess_gem(expressions, **options)
     assignments = list(zip(return_variables, expressions))
 
+    # Collect GEM Variable objects that are actaully used in assignments
+    # and set builder.coefficient_compress_list
+    variable_set = impero_utils.collect_variables(assignments)
+    builder.set_coefficient_enabled_components(variable_set)
+
     # Let the kernel interface inspect the optimised IR to register
     # what kind of external data is required (e.g., cell orientations,
     # cell sizes, etc.).
@@ -254,7 +259,6 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     name_multiindex(quadrature_indices, 'ip')
     for multiindex, name in zip(argument_multiindices, ['j', 'k']):
         name_multiindex(multiindex, name)
-
     return builder.construct_kernel(kernel_name, impero_c, parameters["precision"], index_names, quad_rule)
 
 

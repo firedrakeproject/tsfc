@@ -28,7 +28,7 @@ def make_builder(*args, **kwargs):
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
                  "domain_number", "needs_cell_sizes", "tabulations", "quadrature_rule",
-                 "coefficient_numbers", "coefficient_compress_list", "__weakref__")
+                 "coefficient_numbers", "coefficient_enabled_components", "__weakref__")
     """A compiled Kernel object.
 
     :kwarg ast: The loopy kernel object.
@@ -40,7 +40,7 @@ class Kernel(object):
         original_form.ufl_domains() to get the correct domain).
     :kwarg coefficient_numbers: A list of which coefficients from the
         form the kernel needs.
-    :kwarg coefficient_compress_list: A list of list of coefficient components
+    :kwarg coefficient_enabled_components: A list of list of coefficient components
         that are actually used in the given integral_data. If `None` is given
         instead of a list of components, it is assumed that all components of
         the coeff are to be used.
@@ -51,7 +51,7 @@ class Kernel(object):
     def __init__(self, ast=None, integral_type=None, oriented=False,
                  subdomain_id=None, domain_number=None, quadrature_rule=None,
                  coefficient_numbers=(),
-                 coefficient_compress_list=None,
+                 coefficient_enabled_components=None,
                  needs_cell_sizes=False):
         # Defaults
         self.ast = ast
@@ -60,7 +60,7 @@ class Kernel(object):
         self.domain_number = domain_number
         self.subdomain_id = subdomain_id
         self.coefficient_numbers = coefficient_numbers
-        self.coefficient_compress_list = coefficient_compress_list
+        self.coefficient_enabled_components = coefficient_enabled_components
         self.needs_cell_sizes = needs_cell_sizes
         super(Kernel, self).__init__()
 
@@ -191,6 +191,8 @@ class KernelBuilder(KernelBuilderBase):
         self.local_tensor = None
         self.coordinates_arg = None
         self.coefficient_args = []
+        self.coefficient_variables = []
+        self.coefficients_reverse_map = {}
         self.coefficient_split = {}
         self.dont_split = frozenset(dont_split)
 
@@ -237,7 +239,7 @@ class KernelBuilder(KernelBuilderBase):
         """
         coefficients = []
         coefficient_numbers = []
-        coefficient_compress_list = []
+        coefficients_reverse_map = {}
         # enabled_coefficients is a boolean array that indicates which
         # of reduced_coefficients the integral requires.
         for i in range(len(integral_data.enabled_coefficients)):
@@ -248,28 +250,18 @@ class KernelBuilder(KernelBuilderBase):
                     if original in self.dont_split:
                         coefficients.append(coefficient)
                         self.coefficient_split[coefficient] = [coefficient]
-                        coefficient_compress_list.append(None)
-                    elif integral_data.enabled_components[i] is None:
-                        split = [Coefficient(FunctionSpace(coefficient.ufl_domain(), element))
-                                 for element in coefficient.ufl_element().sub_elements()]
-                        coefficients.extend(split)
-                        self.coefficient_split[coefficient] = split
-                        coefficient_compress_list.append(None)
+                        coefficients_reverse_map[coefficient] = None
                     else:
-                        # compress out unused components
                         split = []
-                        for icomp, element in enumerate(coefficient.ufl_element().sub_elements()):
-                            if icomp in integral_data.enabled_components[i]:
-                                coeff = Coefficient(FunctionSpace(coefficient.ufl_domain(), element))
-                                split.append(coeff)
-                                coefficients.append(coeff)
-                            else:
-                                split.append(Zero(shape=element.value_shape(), domain=coefficient.ufl_domain(), element=element))
+                        for iel, element in enumerate(coefficient.ufl_element().sub_elements()):
+                            coeff = Coefficient(FunctionSpace(coefficient.ufl_domain(), element))
+                            split.append(coeff)
+                            coefficients_reverse_map[coeff] = [len(coefficient_numbers), iel]
+                            coefficients.append(coeff)
                         self.coefficient_split[coefficient] = split
-                        coefficient_compress_list.append(integral_data.enabled_components[i])
                 else:
                     coefficients.append(coefficient)
-                    coefficient_compress_list.append(None)
+                    coefficients_reverse_map[coefficient] = None
                 # This is which coefficient in the original form the
                 # current coefficient is.
                 # Consider f*v*dx + g*v*ds, the full form contains two
@@ -278,8 +270,33 @@ class KernelBuilder(KernelBuilderBase):
         for i, coefficient in enumerate(coefficients):
             self.coefficient_args.append(
                 self._coefficient(coefficient, "w_%d" % i))
+            # Update the key from UFL Coeff to GEM Variable
+            variable, _, _ = gem.decompose_variable_view(self.coefficient_map[coefficient])
+            coefficients_reverse_map[variable] = coefficients_reverse_map.pop(coefficient)
+            # Create map: loopy args -> gem.Variable
+            self.coefficient_variables.append(variable)
         self.kernel.coefficient_numbers = tuple(coefficient_numbers)
-        self.kernel.coefficient_compress_list = tuple(coefficient_compress_list)
+        self.coefficients_reverse_map = coefficients_reverse_map
+
+    def set_coefficient_enabled_components(self, vset):
+        """Set kernel.coefficient_compress_list.
+
+        :arg vset: a tuple of GEM Variable objects that are actually used in the form.
+
+        Call this method only after self.kernel.coefficient_numbers is set.
+        """
+        coefficient_enabled_components = [None] * len(self.kernel.coefficient_numbers)
+        rmap = self.coefficients_reverse_map
+        for v in vset:
+            if rmap.setdefault(v, None) is not None:
+                # v if of MixedFunction origin
+                icoeff = rmap[v][0]
+                icomp = rmap[v][1]
+                if coefficient_enabled_components[icoeff] is None:
+                    coefficient_enabled_components[icoeff] = [icomp, ]
+                else:
+                    coefficient_enabled_components[icoeff].append(icomp)
+        self.kernel.coefficient_enabled_components = coefficient_enabled_components
 
     def register_requirements(self, ir):
         """Inspect what is referenced by the IR that needs to be
@@ -306,7 +323,15 @@ class KernelBuilder(KernelBuilderBase):
             args.append(self.cell_orientations_loopy_arg)
         if self.kernel.needs_cell_sizes:
             args.append(self.cell_sizes_arg)
-        args.extend(self.coefficient_args)
+        rmap = self.coefficients_reverse_map
+        for i, arg in enumerate(self.coefficient_args):
+            v = self.coefficient_variables[i]
+            if rmap is not None and rmap[v] is not None:
+                icoeff = rmap[v][0]
+                icomp = rmap[v][1]
+                if icomp not in self.kernel.coefficient_enabled_components[icoeff]:
+                    continue
+            args.append(arg)
         if self.kernel.integral_type in ["exterior_facet", "exterior_facet_vert"]:
             args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(1,)))
         elif self.kernel.integral_type in ["interior_facet", "interior_facet_vert"]:
