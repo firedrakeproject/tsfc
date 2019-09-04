@@ -58,12 +58,6 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
     logger.info(GREEN % "compute_form_data finished in %g seconds.", time.time() - cpu_time)
 
     kernels = []
-    if coffee:
-        import tsfc.kernel_interface.firedrake_coffee as firedrake_interface_coffee
-        interface = firedrake_interface_coffee.KernelBuilder
-    else:
-        import tsfc.kernel_interface.firedrake_loopy as firedrake_interface_loopy
-        interface = firedrake_interface_loopy.KernelBuilder
     for integral_data in fd.integral_data:
         start = time.time()
         kernel = compile_integral(integral_data, fd, prefix, parameters, interface=interface, coffee=coffee)

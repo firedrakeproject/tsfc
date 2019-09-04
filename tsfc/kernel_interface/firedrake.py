@@ -153,9 +153,6 @@ class ExpressionKernelBuilder(KernelBuilderBase):
         :arg body: function body (:class:`coffee.Block` node)
         :returns: :class:`ExpressionKernel` object
         """
-
-        from tsfc.coffee import generate as generate_coffee
-
         args = [return_arg]
         if self.oriented:
             args.append(cell_orientations_coffee_arg)
