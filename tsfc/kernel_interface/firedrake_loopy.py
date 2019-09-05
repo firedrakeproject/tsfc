@@ -98,9 +98,9 @@ class KernelBuilderBase(_KernelBuilderBase):
         :arg name: coefficient name
         :returns: loopy argument for the coefficient
         """
-        funarg, expression = prepare_coefficient(coefficient, name, self.scalar_type, interior_facet=self.interior_facet)
+        funarg, expression, varexp = prepare_coefficient(coefficient, name, self.scalar_type, interior_facet=self.interior_facet)
         self.coefficient_map[coefficient] = expression
-        return funarg
+        return funarg, varexp
 
     def set_cell_sizes(self, domain):
         """Setup a fake coefficient for "cell sizes".
@@ -114,7 +114,7 @@ class KernelBuilderBase(_KernelBuilderBase):
         """
         #domain = domain.ufl_base()
         f = Coefficient(FunctionSpace(domain, FiniteElement("P", domain.ufl_cell(), 1)))
-        funarg, expression = prepare_coefficient(f, "cell_sizes", self.scalar_type, interior_facet=self.interior_facet)
+        funarg, expression, _ = prepare_coefficient(f, "cell_sizes", self.scalar_type, interior_facet=self.interior_facet)
         self.cell_sizes_arg = funarg
         self._cell_sizes = expression
 
@@ -146,11 +146,11 @@ class ExpressionKernelBuilder(KernelBuilderBase):
                 subcoeffs = coefficient.split()  # Firedrake-specific
                 self.coefficients.extend(subcoeffs)
                 self.coefficient_split[coefficient] = subcoeffs
-                self.kernel_args += [self._coefficient(subcoeff, "w_%d_%d" % (i, j))
+                self.kernel_args += [self._coefficient(subcoeff, "w_%d_%d" % (i, j))[0]
                                      for j, subcoeff in enumerate(subcoeffs)]
             else:
                 self.coefficients.append(coefficient)
-                self.kernel_args.append(self._coefficient(coefficient, "w_%d" % (i,)))
+                self.kernel_args.append(self._coefficient(coefficient, "w_%d" % (i,))[0])
 
     def register_requirements(self, ir):
         """Inspect what is referenced by the IR that needs to be
@@ -229,7 +229,7 @@ class KernelBuilder(KernelBuilderBase):
         # Create a fake coordinate coefficient for a domain.
         f = Coefficient(FunctionSpace(domain, domain.ufl_coordinate_element()))
         self.domain_coordinate[domain] = f
-        self.coordinates_arg = self._coefficient(f, "coords")
+        self.coordinates_arg = self._coefficient(f, "coords")[0]
 
     def set_coefficients(self, integral_data, form_data):
         """Prepare the coefficients of the form.
@@ -268,13 +268,11 @@ class KernelBuilder(KernelBuilderBase):
                 # coefficients, but each integral only requires one.
                 coefficient_numbers.append(form_data.original_coefficient_positions[i])
         for i, coefficient in enumerate(coefficients):
-            self.coefficient_args.append(
-                self._coefficient(coefficient, "w_%d" % i))
-            # Update the key from UFL Coeff to GEM Variable
-            variable, _, _ = gem.decompose_variable_view(self.coefficient_map[coefficient])
-            coefficients_reverse_map[variable] = coefficients_reverse_map.pop(coefficient)
-            # Create map: loopy args -> gem.Variable
+            arg, variable = self._coefficient(coefficient, "w_%d" % i)
+            self.coefficient_args.append(arg)
             self.coefficient_variables.append(variable)
+            # Update the key from UFL Coeff to GEM Variable
+            coefficients_reverse_map[variable] = coefficients_reverse_map.pop(coefficient)
         self.kernel.coefficient_numbers = tuple(coefficient_numbers)
         self.coefficients_reverse_map = coefficients_reverse_map
 
@@ -285,17 +283,19 @@ class KernelBuilder(KernelBuilderBase):
 
         Call this method only after self.kernel.coefficient_numbers is set.
         """
-        coefficient_enabled_components = [None] * len(self.kernel.coefficient_numbers)
+        # MixedFunctions indices
         rmap = self.coefficients_reverse_map
+        # Initialise list: [] for MixedFunctions and None for others
+        coefficient_enabled_components = [None] * len(self.kernel.coefficient_numbers)
+        for _, value in rmap.items():
+            if value is not None:
+                coefficient_enabled_components[value[0]] = []
         for v in vset:
             if rmap.setdefault(v, None) is not None:
                 # v if of MixedFunction origin
                 icoeff = rmap[v][0]
                 icomp = rmap[v][1]
-                if coefficient_enabled_components[icoeff] is None:
-                    coefficient_enabled_components[icoeff] = [icomp, ]
-                else:
-                    coefficient_enabled_components[icoeff].append(icomp)
+                coefficient_enabled_components[icoeff].append(icomp)
         self.kernel.coefficient_enabled_components = coefficient_enabled_components
 
     def register_requirements(self, ir):
@@ -327,6 +327,7 @@ class KernelBuilder(KernelBuilderBase):
         for i, arg in enumerate(self.coefficient_args):
             v = self.coefficient_variables[i]
             if rmap is not None and rmap[v] is not None:
+                # v is of MixedFunction origin.
                 icoeff = rmap[v][0]
                 icomp = rmap[v][1]
                 if icomp not in self.kernel.coefficient_enabled_components[icoeff]:
@@ -370,10 +371,10 @@ def prepare_coefficient(coefficient, name, scalar_type, interior_facet=False):
     if coefficient.ufl_element().family() == 'Real':
         # Constant
         funarg = lp.GlobalArg(name, dtype=scalar_type, shape=(coefficient.ufl_element().value_size(),))
-        expression = gem.reshape(gem.Variable(name, (None,)),
-                                 coefficient.ufl_shape)
+        varexp = gem.Variable(name, (None,))
+        expression = gem.reshape(varexp, coefficient.ufl_shape)
 
-        return funarg, expression
+        return funarg, expression, varexp
 
     finat_element = create_element(coefficient.ufl_element())
 
@@ -381,7 +382,8 @@ def prepare_coefficient(coefficient, name, scalar_type, interior_facet=False):
     size = numpy.prod(shape, dtype=int)
 
     if not interior_facet:
-        expression = gem.reshape(gem.Variable(name, (size,)), shape)
+        varexp = gem.Variable(name, (size,))
+        expression = gem.reshape(varexp, shape)
     else:
         varexp = gem.Variable(name, (2*size,))
         plus = gem.view(varexp, slice(size))
@@ -389,7 +391,7 @@ def prepare_coefficient(coefficient, name, scalar_type, interior_facet=False):
         expression = (gem.reshape(plus, shape), gem.reshape(minus, shape))
         size = size * 2
     funarg = lp.GlobalArg(name, dtype=scalar_type, shape=(size,))
-    return funarg, expression
+    return funarg, expression, varexp
 
 
 def prepare_arguments(arguments, multiindices, scalar_type, interior_facet=False):
