@@ -53,7 +53,7 @@ supported_elements = {
     "HDiv Trace": FIAT.HDivTrace,
     "Regge": FIAT.Regge,
     "Hellan-Herrmann-Johnson": FIAT.HellanHerrmannJohnson,
-    "Arnold-Awanou-Winther": FIAT.ArnoldAwanouWinther,
+    "Nonconforming Arnold-Awanou-Winther": FIAT.ArnoldAwanouWinther,
     # These require special treatment below
     "DQ": None,
     "Q": None,
