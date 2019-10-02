@@ -14,7 +14,7 @@ from ufl.classes import (Argument, CellCoordinate, CellEdgeVectors,
                          CellFacetJacobian, CellOrientation,
                          CellOrigin, CellVertices, CellVolume,
                          Coefficient, FacetArea, FacetCoordinate,
-                         GeometricQuantity, Jacobian,
+                         GeometricQuantity, Jacobian, JacobianDeterminant,
                          NegativeRestricted, QuadratureWeight,
                          PositiveRestricted, ReferenceCellVolume,
                          ReferenceCellEdgeVectors,
@@ -150,8 +150,24 @@ class CoordinateMapping(PhysicalGeometry):
         context = PointSetContext(**config)
         return map_expr_dag(context.translator, expr)
 
+    def detJ_at(self, point):
+        expr = JacobianDeterminant(self.mt.terminal.ufl_domain())
+        if self.mt.restriction == '+':
+            expr = PositiveRestricted(expr)
+        elif self.mt.restriction == '-':
+            expr = NegativeRestricted(expr)
+        expr = preprocess_expression(expr)
+
+        config = {"point_set": PointSingleton(point)}
+        config.update(self.config)
+        context = PointSetContext(**config)
+        return map_expr_dag(context.translator, expr)
+
     def reference_normals(self):
         return gem.Literal(numpy.asarray([self.interface.fiat_cell.compute_normal(i) for i in range(3)]))
+
+    def reference_edge_tangents(self):
+        return gem.Literal(numpy.asarray([self.interface.fiat_cell.compute_edge_tangent(i) for i in range(3)]))
 
     def physical_tangents(self):
         rts = [self.interface.fiat_cell.compute_tangents(1, f)[0] for f in range(3)]
