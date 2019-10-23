@@ -117,7 +117,6 @@ def generate(impero_c, args, precision, kernel_name="loopy_kernel", index_names=
     for i, insn in enumerate(knl.instructions):
         insn_new.append(insn.copy(priority=len(knl.instructions) - i))
     knl = knl.copy(instructions=insn_new)
-
     return knl
 
 

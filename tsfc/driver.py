@@ -127,6 +127,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     builder.set_cell_sizes(mesh)
 
     builder.set_coefficients(integral_data, form_data)
+    builder.set_external_operators(form_data.external_operators)
 
     # Map from UFL FiniteElement objects to multiindices.  This is
     # so we reuse Index instances when evaluating the same coefficient

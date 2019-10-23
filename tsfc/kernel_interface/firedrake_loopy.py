@@ -27,7 +27,7 @@ def make_builder(*args, **kwargs):
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
                  "domain_number", "needs_cell_sizes", "tabulations", "quadrature_rule",
-                 "coefficient_numbers", "__weakref__")
+                 "coefficient_numbers", "external_operators", "__weakref__")
     """A compiled Kernel object.
 
     :kwarg ast: The loopy kernel object.
@@ -55,6 +55,7 @@ class Kernel(object):
         self.subdomain_id = subdomain_id
         self.coefficient_numbers = coefficient_numbers
         self.needs_cell_sizes = needs_cell_sizes
+        self.external_operators = None
         super(Kernel, self).__init__()
 
 
@@ -254,6 +255,9 @@ class KernelBuilder(KernelBuilderBase):
             self.coefficient_args.append(
                 self._coefficient(coefficient, "w_%d" % i))
         self.kernel.coefficient_numbers = tuple(coefficient_numbers)
+
+    def set_external_operators(self, extops):
+        self.kernel.external_operators = extops
 
     def register_requirements(self, ir):
         """Inspect what is referenced by the IR that needs to be
