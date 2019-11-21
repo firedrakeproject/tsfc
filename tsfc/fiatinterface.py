@@ -47,6 +47,7 @@ supported_elements = {
     "Gauss-Lobatto-Legendre": FIAT.GaussLobattoLegendre,
     "Gauss-Legendre": FIAT.GaussLegendre,
     "Lagrange": FIAT.Lagrange,
+    "Mardal-Tai-Winther": FIAT.MardalTaiWinther,
     "Nedelec 1st kind H(curl)": FIAT.Nedelec,
     "Nedelec 2nd kind H(curl)": FIAT.NedelecSecondKind,
     "Raviart-Thomas": FIAT.RaviartThomas,
