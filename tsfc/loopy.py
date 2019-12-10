@@ -191,17 +191,16 @@ def statement_evaluate(leaf, ctx):
     elif isinstance(expr, gem.Constant):
         return []
     elif isinstance(expr, gem.ComponentTensor):
-        idx=tuple()
-        for c,index in enumerate(expr.multiindex):
-            ctx.active_indices[index]=p.Variable(index.name)
-            ctx.index_extent[index.name]=index.extent
-            idx=idx+(ctx.active_indices[index],)
-            var=ctx.pymbolic_variable(expr)
-        ret=[lp.Assignment(p.Subscript(var,idx),expression(expr.children[0],ctx),within_inames=ctx.active_inames())]
-        
-        for c,index in enumerate(expr.multiindex):
+        idx = tuple()
+        for c, index in enumerate(expr.multiindex):
+            ctx.active_indices[index] = p.Variable(index.name)
+            ctx.index_extent[index.name] = index.extent
+            idx = idx + (ctx.active_indices[index], )
+            var = ctx.pymbolic_variable(expr)
+        statements = [lp.Assignment(p.Subscript(var, idx), expression(expr.children[0], ctx), within_inames=ctx.active_inames())]
+        for c, index in enumerate(expr.multiindex):
             ctx.active_indices.pop(index)
-        return ret
+        return statements
     else:
         return [lp.Assignment(ctx.pymbolic_variable(expr), expression(expr, ctx, top=True), within_inames=ctx.active_inames())]
 
