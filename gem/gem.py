@@ -32,7 +32,7 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
            'IndexSum', 'ListTensor', 'Concatenate', 'Delta',
            'index_sum', 'partial_indexed', 'reshape', 'view',
-           'indices', 'as_gem']
+           'indices', 'as_gem','FlexiblyIndexed', 'Inverse']
 
 
 class NodeMeta(type):
@@ -781,6 +781,55 @@ class Delta(Scalar, Terminal):
         self.free_indices = tuple(unique(free_indices))
         return self
 
+#TODO: inverse should be different from comp tensor 
+#in the sense that it does not take a local to a global view of a matrix
+#but instead eats a global view and spits out another global view
+class Inverse(Node):
+    __slots__ = ('children', 'multiindex', 'shape')
+    __back__ = ('multiindex',)
+
+    def __new__(cls, aggregate,multiindex):
+
+        # Accept numpy or any integer, but cast to int.
+        multiindex = tuple(int(i) if isinstance(i, Integral) else i
+                           for i in multiindex)
+
+        # Set index extents from shape
+        for index, extent in zip(multiindex, aggregate.shape):
+            assert isinstance(index, IndexBase)
+            if isinstance(index, Index):
+                index.set_extent(extent)
+
+        # Empty multiindex
+        if not multiindex:
+            return aggregate
+
+        # Zero folding
+        if isinstance(aggregate, Zero):
+            return Zero()
+        
+        shape = tuple(index.extent for index in multiindex)
+        assert all(shape)
+
+        # All indices fixed
+        if all(isinstance(i, int) for i in multiindex):
+            if isinstance(aggregate, Constant):
+                return Literal(aggregate.array[multiindex])
+            elif isinstance(aggregate, ListTensor):
+                return aggregate.array[multiindex]
+
+        self = super(Inverse, cls).__new__(cls)
+
+        self.children = (aggregate,)
+        self.multiindex = multiindex
+        self.shape = shape
+
+        # Collect free indices
+        self.free_indices = aggregate.free_indices
+
+        return self
+
+
 
 def unique(indices):
     """Sorts free indices and eliminates duplicates.
@@ -903,13 +952,13 @@ def view(expression, *slices):
             assert isinstance(index, Index)
             dim = index.extent
             s = slice_of[index]
-            start = s.start or 0
-            stop = s.stop or dim
+            start = 0
+            stop = dim
             if stop is None:
                 raise ValueError("Unknown extent!")
             if dim is not None and stop > dim:
                 raise ValueError("Slice exceeds dimension extent!")
-            step = s.step or 1
+            step = 1
             offset_ += start * stride
             extent = 1 + (stop - start - 1) // step
             index_ = Index(extent=extent)
