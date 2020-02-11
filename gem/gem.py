@@ -32,7 +32,7 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
            'IndexSum', 'ListTensor', 'Concatenate', 'Delta',
            'index_sum', 'partial_indexed', 'reshape', 'view',
-           'indices', 'as_gem', 'FlexiblyIndexed', 
+           'indices', 'as_gem', 'FlexiblyIndexed',
            'Inverse', 'Determinant', 'Factorization']
 
 
@@ -783,7 +783,7 @@ class Delta(Scalar, Terminal):
         return self
 
 
-# TODO: inverse should be different from comp tensor 
+# TODO: inverse should be different from comp tensor
 # in the sense that it does not take a local to a global view of a matrix
 # but instead eats a global view and spits out another global view
 # it does not transformation between free indices and shape so you would think it does not need a multiindex
@@ -818,7 +818,7 @@ class Determinant(Scalar):
     __slots__ = ('children', )
 
     def __new__(cls, aggregate):
-        #det of scalar valued constant is aggregate itself
+        # det of scalar valued constant is aggregate itself
         if isinstance(aggregate, Constant):
             return aggregate
 
