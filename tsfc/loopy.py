@@ -217,6 +217,19 @@ def statement_evaluate(leaf, ctx):
             ctx.active_indices.pop(index)
         output=SubArrayRef(idx, p.Subscript(var,idx))
         return [lp.CallInstruction((output,),p.Call(p.Variable("inv"), reads), within_inames=ctx.active_inames())]  
+    elif isinstance(expr, gem.Factorization):
+        idx = tuple()
+        for c, index in enumerate(expr.multiindex):
+            ctx.active_indices[index] = p.Variable(index.name)
+            ctx.index_extent[index.name] = index.extent
+            idx = idx + (ctx.active_indices[index], )
+            var = ctx.pymbolic_variable(expr)
+            var_reads = ctx.pymbolic_variable(expr.children[0])
+        reads = (SubArrayRef(idx, p.Subscript(var_reads, idx)), )
+        for c, index in enumerate(expr.multiindex):
+            ctx.active_indices.pop(index)
+        output=SubArrayRef(idx, p.Subscript(var,idx))
+        return [lp.CallInstruction((output,),p.Call(p.Variable("factorization"), reads), within_inames=ctx.active_inames())]  
     else:
         return [lp.Assignment(ctx.pymbolic_variable(expr), expression(expr, ctx, top=True), within_inames=ctx.active_inames())]
 

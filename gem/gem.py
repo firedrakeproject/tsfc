@@ -32,7 +32,8 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
            'IndexSum', 'ListTensor', 'Concatenate', 'Delta',
            'index_sum', 'partial_indexed', 'reshape', 'view',
-           'indices', 'as_gem','FlexiblyIndexed', 'Inverse', 'Determinant']
+           'indices', 'as_gem','FlexiblyIndexed', 
+           'Inverse', 'Determinant','Factorization']
 
 
 class NodeMeta(type):
@@ -831,6 +832,26 @@ class Determinant(Scalar):
         self = super(Determinant, cls).__new__(cls)
         self.children = (aggregate,)
         
+        return self
+
+class Factorization(Node):
+    __slots__ = ('children', 'multiindex', 'shape')
+    __back__ = ('multiindex',)
+
+    def __new__(cls, aggregate,multiindex):
+        assert multiindex
+
+        # Set index extents from shape
+        for index, extent in zip(multiindex, aggregate.shape):
+            assert isinstance(index, Index)
+            index.set_extent(extent)
+
+        self = super(Factorization, cls).__new__(cls)
+        self.children = (aggregate,)
+        self.shape = aggregate.shape
+        self.multiindex = multiindex
+        self.free_indices = aggregate.free_indices
+
         return self
 
 
