@@ -801,10 +801,9 @@ class Inverse(Node):
             index.set_extent(extent)
 
         self = super(Inverse, cls).__new__(cls)
-
         self.children = (aggregate,)
         self.shape = aggregate.shape
-        self.multiindex=multiindex
+        self.multiindex = multiindex
         self.free_indices = aggregate.free_indices
 
         return self
