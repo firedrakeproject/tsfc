@@ -32,7 +32,7 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
            'IndexSum', 'ListTensor', 'Concatenate', 'Delta',
            'index_sum', 'partial_indexed', 'reshape', 'view',
-           'indices', 'as_gem','FlexiblyIndexed', 'Inverse']
+           'indices', 'as_gem','FlexiblyIndexed', 'Inverse', 'Determinant']
 
 
 class NodeMeta(type):
@@ -781,6 +781,7 @@ class Delta(Scalar, Terminal):
         self.free_indices = tuple(unique(free_indices))
         return self
 
+
 #TODO: inverse should be different from comp tensor 
 #in the sense that it does not take a local to a global view of a matrix
 #but instead eats a global view and spits out another global view
@@ -829,6 +830,30 @@ class Inverse(Node):
 
         return self
 
+#NOTE: Slate does not support determinants yet
+#determinant taks in a global view and spits out a scalar
+#similar to an Indexed Node: takes a object of some shape
+#and turns into something scalar shaped
+# class Determinant(Scalar):
+#     __slots__ = ('children', )
+
+#     def __new__(cls, aggregate):
+#         #det of scalar valued constant is aggregate itself
+#         if isinstance(aggregate, Constant):
+#             return aggregate
+        
+#         #tensor must be square
+#         assert not aggregate.shape
+#         assert all(aggregate.shape)==aggregate.shape[0], "Tensor must be square"
+
+#         # Zero folding
+#         if isinstance(aggregate, Zero):
+#             return Zero()
+
+#         self = super(Scalar, cls).__new__(cls)
+#         self.children = (aggregate,)
+        
+#         return self
 
 
 def unique(indices):
