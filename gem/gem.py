@@ -976,13 +976,13 @@ def view(expression, *slices):
             assert isinstance(index, Index)
             dim = index.extent
             s = slice_of[index]
-            start = 0
-            stop = dim
+            start = s.start or 0
+            stop = s.stop or dim
             if stop is None:
                 raise ValueError("Unknown extent!")
             if dim is not None and stop > dim:
                 raise ValueError("Slice exceeds dimension extent!")
-            step = 1
+            step = s.step or 1
             offset_ += start * stride
             extent = 1 + (stop - start - 1) // step
             index_ = Index(extent=extent)
