@@ -14,6 +14,7 @@ import islpy as isl
 import loopy as lp
 
 import pymbolic.primitives as p
+from loopy.symbolic import SubArrayRef
 
 from pytools import UniqueNameGenerator
 
@@ -115,6 +116,8 @@ def generate(impero_c, args, precision, scalar_type, kernel_name="loopy_kernel",
         insn_new.append(insn.copy(priority=len(knl.instructions) - i))
     knl = knl.copy(instructions=insn_new)
 
+    print(knl)
+    
     return knl
 
 
@@ -200,6 +203,20 @@ def statement_evaluate(leaf, ctx):
         statements = [lp.Assignment(p.Subscript(var, idx), expression(expr.children[0], ctx), within_inames=ctx.active_inames())]
         for c, index in enumerate(expr.multiindex):
             ctx.active_indices.pop(index)
+        return statements
+    elif isinstance(expr, gem.Inverse):
+        idx = tuple()
+        for c, index in enumerate(expr.multiindex):
+            ctx.active_indices[index] = p.Variable(index.name)
+            ctx.index_extent[index.name] = index.extent
+            idx = idx + (ctx.active_indices[index], )
+            var = ctx.pymbolic_variable(expr)
+            var_reads = ctx.pymbolic_variable(expr.children[0])
+        reads=(SubArrayRef(idx,p.Subscript(var_reads,idx)),)
+        for c, index in enumerate(expr.multiindex):
+            ctx.active_indices.pop(index)
+        output=SubArrayRef(idx,p.Subscript(var,idx))
+        statements = [lp.CallInstruction((output,),p.Call(p.Variable("inv"),reads), within_inames=ctx.active_inames())]  
         return statements
     else:
         return [lp.Assignment(ctx.pymbolic_variable(expr), expression(expr, ctx, top=True), within_inames=ctx.active_inames())]
