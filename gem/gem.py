@@ -785,47 +785,26 @@ class Delta(Scalar, Terminal):
 #TODO: inverse should be different from comp tensor 
 #in the sense that it does not take a local to a global view of a matrix
 #but instead eats a global view and spits out another global view
+#it does not transformation between free indices and shape so you would think it does not need a multiindex
+#but the multiindex is necessary to feed in the global view of the tensor
+#it can still have free_indices inherited by the  aggregate (?)
 class Inverse(Node):
     __slots__ = ('children', 'multiindex', 'shape')
     __back__ = ('multiindex',)
 
     def __new__(cls, aggregate,multiindex):
-
-        # Accept numpy or any integer, but cast to int.
-        multiindex = tuple(int(i) if isinstance(i, Integral) else i
-                           for i in multiindex)
+        assert multiindex
 
         # Set index extents from shape
         for index, extent in zip(multiindex, aggregate.shape):
-            assert isinstance(index, IndexBase)
-            if isinstance(index, Index):
-                index.set_extent(extent)
-
-        # Empty multiindex
-        if not multiindex:
-            return aggregate
-
-        # Zero folding
-        if isinstance(aggregate, Zero):
-            return Zero()
-        
-        shape = tuple(index.extent for index in multiindex)
-        assert all(shape)
-
-        # All indices fixed
-        if all(isinstance(i, int) for i in multiindex):
-            if isinstance(aggregate, Constant):
-                return Literal(aggregate.array[multiindex])
-            elif isinstance(aggregate, ListTensor):
-                return aggregate.array[multiindex]
+            assert isinstance(index, Index)
+            index.set_extent(extent)
 
         self = super(Inverse, cls).__new__(cls)
 
         self.children = (aggregate,)
-        self.multiindex = multiindex
-        self.shape = shape
-
-        # Collect free indices
+        self.shape = aggregate.shape
+        self.multiindex=multiindex
         self.free_indices = aggregate.free_indices
 
         return self
@@ -834,26 +813,26 @@ class Inverse(Node):
 #determinant taks in a global view and spits out a scalar
 #similar to an Indexed Node: takes a object of some shape
 #and turns into something scalar shaped
-# class Determinant(Scalar):
-#     __slots__ = ('children', )
+class Determinant(Scalar):
+    __slots__ = ('children', )
 
-#     def __new__(cls, aggregate):
-#         #det of scalar valued constant is aggregate itself
-#         if isinstance(aggregate, Constant):
-#             return aggregate
+    def __new__(cls, aggregate):
+        #det of scalar valued constant is aggregate itself
+        if isinstance(aggregate, Constant):
+            return aggregate
         
-#         #tensor must be square
-#         assert not aggregate.shape
-#         assert all(aggregate.shape)==aggregate.shape[0], "Tensor must be square"
+        #tensor must be square
+        assert not aggregate.shape
+        assert all(aggregate.shape)==aggregate.shape[0], "Tensor must be square"
 
-#         # Zero folding
-#         if isinstance(aggregate, Zero):
-#             return Zero()
+        # Zero folding
+        if isinstance(aggregate, Zero):
+            return Zero()
 
-#         self = super(Scalar, cls).__new__(cls)
-#         self.children = (aggregate,)
+        self = super(Determinant, cls).__new__(cls)
+        self.children = (aggregate,)
         
-#         return self
+        return self
 
 
 def unique(indices):
