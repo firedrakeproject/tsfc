@@ -27,7 +27,7 @@ def make_builder(*args, **kwargs):
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
                  "domain_number", "needs_cell_sizes", "tabulations", "quadrature_rule",
-                 "coefficient_numbers", "__weakref__")
+                 "coefficient_numbers", "coefficient_parts", "__weakref__")
     """A compiled Kernel object.
 
     :kwarg ast: The loopy kernel object.
@@ -39,13 +39,15 @@ class Kernel(object):
         original_form.ufl_domains() to get the correct domain).
     :kwarg coefficient_numbers: A list of which coefficients from the
         form the kernel needs.
+    :kwarg coefficient_parts: A dictionary that maps each coefficient
+        to a set of its enabled parts (Only significant when the coefficient is mixed).
     :kwarg quadrature_rule: The finat quadrature rule used to generate this kernel
     :kwarg tabulations: The runtime tabulations this kernel requires
     :kwarg needs_cell_sizes: Does the kernel require cell sizes.
     """
     def __init__(self, ast=None, integral_type=None, oriented=False,
                  subdomain_id=None, domain_number=None, quadrature_rule=None,
-                 coefficient_numbers=(),
+                 coefficient_numbers=(), coefficient_parts={},
                  needs_cell_sizes=False):
         # Defaults
         self.ast = ast
@@ -54,6 +56,7 @@ class Kernel(object):
         self.domain_number = domain_number
         self.subdomain_id = subdomain_id
         self.coefficient_numbers = coefficient_numbers
+        self.coefficient_parts = coefficient_parts
         self.needs_cell_sizes = needs_cell_sizes
         super(Kernel, self).__init__()
 
@@ -230,13 +233,20 @@ class KernelBuilder(KernelBuilderBase):
         """
         coefficients = []
         coefficient_numbers = []
+        coefficient_parts = {}
         # enabled_coefficients is a boolean array that indicates which
         # of reduced_coefficients the integral requires.
         for i in range(len(integral_data.enabled_coefficients)):
             if integral_data.enabled_coefficients[i]:
                 original = form_data.reduced_coefficients[i]
                 coefficient = form_data.function_replace_map[original]
-                if type(coefficient.ufl_element()) == ufl_MixedElement:
+                if coefficient.mixed():
+                    enabled_parts = integral_data.integral_coefficients_parts[original]
+                    split = [coefficient.split()[part] for part in enabled_parts]
+                    coefficients.extend(split)
+                    # Coefficient must already be split in the form
+                    self.coefficient_split[coefficient] = None  # split
+                elif type(coefficient.ufl_element()) == ufl_MixedElement:
                     if original in self.dont_split:
                         coefficients.append(coefficient)
                         self.coefficient_split[coefficient] = [coefficient]
@@ -245,17 +255,21 @@ class KernelBuilder(KernelBuilderBase):
                                  for element in coefficient.ufl_element().sub_elements()]
                         coefficients.extend(split)
                         self.coefficient_split[coefficient] = split
+                    enabled_parts = None
                 else:
                     coefficients.append(coefficient)
+                    enabled_parts = None
                 # This is which coefficient in the original form the
                 # current coefficient is.
                 # Consider f*v*dx + g*v*ds, the full form contains two
                 # coefficients, but each integral only requires one.
                 coefficient_numbers.append(form_data.original_coefficient_positions[i])
+                coefficient_parts[coefficient] = enabled_parts
         for i, coefficient in enumerate(coefficients):
             self.coefficient_args.append(
                 self._coefficient(coefficient, "w_%d" % i))
         self.kernel.coefficient_numbers = tuple(coefficient_numbers)
+        self.kernel.coefficient_parts = coefficient_parts
 
     def register_requirements(self, ir):
         """Inspect what is referenced by the IR that needs to be
