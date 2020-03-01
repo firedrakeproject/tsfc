@@ -241,6 +241,10 @@ class KernelBuilder(KernelBuilderBase):
                 original = form_data.reduced_coefficients[i]
                 coefficient = form_data.function_replace_map[original]
                 if coefficient.mixed():
+                    print("original::::   ", repr(original))
+                    print("mixed_coeff::::", repr(coefficient))
+                    for j in coefficient.split():
+                        print("mixed_coeffsplit", repr(j))
                     enabled_parts = integral_data.integral_coefficients_parts[original]
                     split = [coefficient.split()[part] for part in enabled_parts]
                     coefficients.extend(split)
@@ -266,6 +270,7 @@ class KernelBuilder(KernelBuilderBase):
                 coefficient_numbers.append(form_data.original_coefficient_positions[i])
                 coefficient_parts[coefficient] = enabled_parts
         for i, coefficient in enumerate(coefficients):
+            print("coefficient::::::",coefficient)
             self.coefficient_args.append(
                 self._coefficient(coefficient, "w_%d" % i))
         self.kernel.coefficient_numbers = tuple(coefficient_numbers)
