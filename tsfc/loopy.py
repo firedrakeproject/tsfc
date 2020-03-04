@@ -83,7 +83,10 @@ def generate(impero_c, args, precision, scalar_type, kernel_name="loopy_kernel",
     # Create arguments
     data = list(args)
     for i, temp in enumerate(impero_c.temporaries):
-        name = "t%d" % i
+        if not (isinstance(temp,gem.Inverse) or isinstance(temp,gem.Solve)):
+            name = "t%d" % i
+        else:
+            name = "t%d" % (i-1)
         if isinstance(temp, gem.Constant):
             data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=temp.array.dtype, initializer=temp.array, address_space=lp.AddressSpace.LOCAL, read_only=True))
         else:
@@ -93,7 +96,6 @@ def generate(impero_c, args, precision, scalar_type, kernel_name="loopy_kernel",
 
     # Create instructions
     instructions = statement(impero_c.tree, ctx)
-
     # Create domains
     domains = []
     for idx, extent in ctx.index_extent.items():
@@ -204,30 +206,52 @@ def statement_evaluate(leaf, ctx):
         return statements
     elif isinstance(expr, gem.Inverse):
         idx = tuple()
+        idx2 = tuple()
         for c, index in enumerate(expr.multiindex):
             ctx.active_indices[index] = p.Variable(index.name)
             ctx.index_extent[index.name] = index.extent
             idx = idx + (ctx.active_indices[index], )
-            var = ctx.pymbolic_variable(expr)
-            var_reads = ctx.pymbolic_variable(expr.children[0])
-        reads = (SubArrayRef(idx, p.Subscript(var_reads, idx)), )
+        for c, index in enumerate(expr.children[0].multiindex):
+            ctx.active_indices[index] = p.Variable(index.name)
+            ctx.index_extent[index.name] = index.extent
+            idx2 = idx2 + (ctx.active_indices[index], )
+        var = ctx.pymbolic_variable(expr)
+        var_reads = ctx.pymbolic_variable(expr.children[0])
+        reads = (SubArrayRef(idx2, p.Subscript(var_reads, idx2)),)#,(SubArrayRef(idx, p.Subscript(var_reads3, idx)), )]
         for c, index in enumerate(expr.multiindex):
             ctx.active_indices.pop(index)
+        for c, index in enumerate(expr.children[0].multiindex):
+            ctx.active_indices.pop(index) 
         output = SubArrayRef(idx, p.Subscript(var, idx))
         return [lp.CallInstruction((output,), p.Call(p.Variable("inv"), reads), within_inames=ctx.active_inames())]
-    elif isinstance(expr, gem.Factorization):
+    elif isinstance(expr, gem.Solve):
         idx = tuple()
+        idx2 = tuple()
+        idx3 = tuple()
         for c, index in enumerate(expr.multiindex):
             ctx.active_indices[index] = p.Variable(index.name)
             ctx.index_extent[index.name] = index.extent
             idx = idx + (ctx.active_indices[index], )
-            var = ctx.pymbolic_variable(expr)
-            var_reads = ctx.pymbolic_variable(expr.children[0])
-        reads = (SubArrayRef(idx, p.Subscript(var_reads, idx)), )
+        for c, index in enumerate(expr.children[0].multiindex):
+            ctx.active_indices[index] = p.Variable(index.name)
+            ctx.index_extent[index.name] = index.extent
+            idx2 = idx2 + (ctx.active_indices[index], )
+        for c, index in enumerate(expr.children[1].multiindex):
+            ctx.active_indices[index] = p.Variable(index.name)
+            ctx.index_extent[index.name] = index.extent
+            idx3 = idx3 + (ctx.active_indices[index], )
+        var = ctx.pymbolic_variable(expr)
+        var_readsA = ctx.pymbolic_variable(expr.children[0])
+        var_readsB = ctx.pymbolic_variable(expr.children[1])
+        reads = (SubArrayRef(idx2, p.Subscript(var_readsA, idx2)),SubArrayRef(idx3, p.Subscript(var_readsB, idx3)))
         for c, index in enumerate(expr.multiindex):
             ctx.active_indices.pop(index)
+        for c, index in enumerate(expr.children[0].multiindex):
+            ctx.active_indices.pop(index) 
+        for c, index in enumerate(expr.children[1].multiindex):
+            ctx.active_indices.pop(index) 
         output = SubArrayRef(idx, p.Subscript(var, idx))
-        return [lp.CallInstruction((output,), p.Call(p.Variable("factorization"), reads), within_inames=ctx.active_inames())]
+        return [lp.CallInstruction((output,), p.Call(p.Variable("solve"), reads), within_inames=ctx.active_inames())]
     else:
         return [lp.Assignment(ctx.pymbolic_variable(expr), expression(expr, ctx, top=True), within_inames=ctx.active_inames())]
 
