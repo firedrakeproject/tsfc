@@ -55,6 +55,7 @@ supported_elements = {
     "Regge": FIAT.Regge,
     "Hellan-Herrmann-Johnson": FIAT.HellanHerrmannJohnson,
     "Nonconforming Arnold-Awanou-Winther": FIAT.ArnoldAwanouWinther,
+    "Conforming Arnold-Awanou-Winther": FIAT.ArnoldAwanouWinther,
     # These require special treatment below
     "DQ": None,
     "Q": None,

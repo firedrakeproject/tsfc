@@ -49,6 +49,7 @@ supported_elements = {
     "HDiv Trace": finat.HDivTrace,
     "Hellan-Herrmann-Johnson": finat.HellanHerrmannJohnson,
     "Nonconforming Arnold-Awanou-Winther": finat.ArnoldAwanouWinther,
+    "Conforming Arnold-Awanou-Winther": finat.ArnoldAwanouWinther,
     "Hermite": finat.Hermite,
     "Argyris": finat.Argyris,
     "Mardal-Tai-Winther": finat.MardalTaiWinther,
