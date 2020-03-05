@@ -32,13 +32,14 @@ from tsfc.parameters import default_parameters, is_complex
 sys.setrecursionlimit(3000)
 
 
-def compile_form(form, prefix="form", parameters=None, interface=None, coffee=True):
+def compile_form(form, prefix="form", parameters=None, interface=None, coffee=True, diagonal=False):
     """Compiles a UFL form into a set of assembly kernels.
 
     :arg form: UFL form
     :arg prefix: kernel name will start with this string
     :arg parameters: parameters object
     :arg coffee: compile coffee kernel instead of loopy kernel
+    :arg diagonal: Are we building a kernel for the diagonal of a rank-2 element tensor?
     :returns: list of kernels
     """
     cpu_time = time.time()
@@ -60,7 +61,7 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
     kernels = []
     for integral_data in fd.integral_data:
         start = time.time()
-        kernel = compile_integral(integral_data, fd, prefix, parameters, interface=interface, coffee=coffee)
+        kernel = compile_integral(integral_data, fd, prefix, parameters, interface=interface, coffee=coffee, diagonal=diagonal)
         if kernel is not None:
             kernels.append(kernel)
         logger.info(GREEN % "compile_integral finished in %g seconds.", time.time() - start)
@@ -69,7 +70,7 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
     return kernels
 
 
-def compile_integral(integral_data, form_data, prefix, parameters, interface, coffee):
+def compile_integral(integral_data, form_data, prefix, parameters, interface, coffee, *, diagonal=False):
     """Compiles a UFL integral into an assembly kernel.
 
     :arg integral_data: UFL integral data
@@ -77,6 +78,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     :arg prefix: kernel name will start with this string
     :arg parameters: parameters object
     :arg interface: backend module for the kernel interface
+    :arg diagonal: Are we building a kernel for the diagonal of a rank-2 element tensor?
     :returns: a kernel constructed by the kernel interface
     """
     if parameters is None:
@@ -118,9 +120,17 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     domain_numbering = form_data.original_form.domain_numbering()
     builder = interface(integral_type, integral_data.subdomain_id,
                         domain_numbering[integral_data.domain],
-                        parameters["scalar_type"])
+                        parameters["scalar_type"],
+                        diagonal=diagonal)
     argument_multiindices = tuple(builder.create_element(arg.ufl_element()).get_indices()
                                   for arg in arguments)
+    if diagonal:
+        # Error checking occurs in the builder constructor.
+        # Diagonal assembly is obtained by using the test indices for
+        # the trial space as well.
+        a, _ = argument_multiindices
+        argument_multiindices = (a, a)
+
     return_variables = builder.set_arguments(arguments, argument_multiindices)
 
     builder.set_coordinates(mesh)
@@ -257,7 +267,8 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     return builder.construct_kernel(kernel_name, impero_c, parameters["precision"], index_names, quad_rule)
 
 
-def compile_expression_at_points(expression, points, coordinates, interface=None, parameters=None, coffee=True):
+def compile_expression_at_points(expression, points, coordinates, interface=None,
+                                 parameters=None, coffee=True):
     """Compiles a UFL expression to be evaluated at compile-time known
     reference points.  Useful for interpolating UFL expressions onto
     function spaces with only point evaluation nodes.
@@ -279,10 +290,6 @@ def compile_expression_at_points(expression, points, coordinates, interface=None
         _.update(parameters)
         parameters = _
 
-    # No arguments, please!
-    if extract_arguments(expression):
-        return ValueError("Cannot interpolate UFL expression with Arguments!")
-
     # Determine whether in complex mode
     complex_mode = is_complex(parameters["scalar_type"])
 
@@ -301,6 +308,9 @@ def compile_expression_at_points(expression, points, coordinates, interface=None
             interface = firedrake_interface_loopy.ExpressionKernelBuilder
 
     builder = interface(parameters["scalar_type"])
+    arguments = extract_arguments(expression)
+    argument_multiindices = tuple(builder.create_element(arg.ufl_element()).get_indices()
+                                  for arg in arguments)
 
     # Replace coordinates (if any)
     domain = expression.ufl_domain()
@@ -323,7 +333,8 @@ def compile_expression_at_points(expression, points, coordinates, interface=None
     config = dict(interface=builder,
                   ufl_cell=coordinates.ufl_domain().ufl_cell(),
                   precision=parameters["precision"],
-                  point_set=point_set)
+                  point_set=point_set,
+                  argument_multiindices=argument_multiindices)
     ir, = fem.compile_ufl(expression, point_sum=False, **config)
 
     # Deal with non-scalar expressions
@@ -333,8 +344,8 @@ def compile_expression_at_points(expression, points, coordinates, interface=None
         ir = gem.Indexed(ir, tensor_indices)
 
     # Build kernel body
-    return_shape = (len(points),) + value_shape
-    return_indices = point_set.indices + tensor_indices
+    return_indices = point_set.indices + tensor_indices + tuple(chain(*argument_multiindices))
+    return_shape = tuple(i.extent for i in return_indices)
     return_var = gem.Variable('A', return_shape)
     if coffee:
         return_arg = ast.Decl(parameters["scalar_type"], ast.Symbol('A', rank=return_shape))
