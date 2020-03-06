@@ -12,6 +12,7 @@ import ufl
 from ufl.algorithms import extract_arguments, extract_coefficients
 from ufl.algorithms.analysis import has_type
 from ufl.classes import Form, GeometricQuantity
+from ufl.domain import extract_domains
 from ufl.log import GREEN
 from ufl.utils.sequences import max_degree
 
@@ -133,7 +134,12 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
 
     return_variables = builder.set_arguments(arguments, argument_multiindices)
 
-    builder.set_coordinates(mesh)
+    meshes = set((mesh, ))
+    for integral in integral_data.integrals:
+        meshes.update(extract_domains(integral.integrand()))
+    meshes = tuple(sorted(meshes))
+    print("printing meshes:::::::", meshes)
+    builder.set_coordinates(meshes)
     builder.set_cell_sizes(mesh)
 
     builder.set_coefficients(integral_data, form_data)

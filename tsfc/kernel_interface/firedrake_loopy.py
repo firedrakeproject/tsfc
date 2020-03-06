@@ -39,15 +39,16 @@ class Kernel(object):
         original_form.ufl_domains() to get the correct domain).
     :kwarg coefficient_numbers: A list of which coefficients from the
         form the kernel needs.
-    :kwarg coefficient_parts: A dictionary that maps each coefficient
-        to a set of its enabled parts (Only significant when the coefficient is mixed).
+    :kwarg coefficient_parts: A list of enabled parts corresponding to
+        the coefficients represented by coefficient_numbers
+        (Only significant when the coefficient is mixed).
     :kwarg quadrature_rule: The finat quadrature rule used to generate this kernel
     :kwarg tabulations: The runtime tabulations this kernel requires
     :kwarg needs_cell_sizes: Does the kernel require cell sizes.
     """
     def __init__(self, ast=None, integral_type=None, oriented=False,
                  subdomain_id=None, domain_number=None, quadrature_rule=None,
-                 coefficient_numbers=(), coefficient_parts={},
+                 coefficient_numbers=(), coefficient_parts=(),
                  needs_cell_sizes=False):
         # Defaults
         self.ast = ast
@@ -185,7 +186,7 @@ class KernelBuilder(KernelBuilderBase):
                              domain_number=domain_number)
         self.diagonal = diagonal
         self.local_tensor = None
-        self.coordinates_arg = None
+        self.coordinates_arg = []
         self.coefficient_args = []
         self.coefficient_split = {}
         self.dont_split = frozenset(dont_split)
@@ -215,15 +216,16 @@ class KernelBuilder(KernelBuilderBase):
             diagonal=self.diagonal)
         return expressions
 
-    def set_coordinates(self, domain):
+    def set_coordinates(self, domains):
         """Prepare the coordinate field.
 
-        :arg domain: :class:`ufl.Domain`
+        :arg domains: a tuple of :class:`ufl.Domain`s
         """
-        # Create a fake coordinate coefficient for a domain.
-        f = Coefficient(FunctionSpace(domain, domain.ufl_coordinate_element()))
-        self.domain_coordinate[domain] = f
-        self.coordinates_arg = self._coefficient(f, "coords")
+        # Create a fake coordinate coefficient for each enabled domain.
+        for i, domain in enumerate(domains):
+            f = Coefficient(FunctionSpace(domain, domain.ufl_coordinate_element()))
+            self.domain_coordinate[domain] = f
+            self.coordinates_arg.append(self._coefficient(f, "coords" + str(i)))
 
     def set_coefficients(self, integral_data, form_data):
         """Prepare the coefficients of the form.
@@ -233,30 +235,30 @@ class KernelBuilder(KernelBuilderBase):
         """
         coefficients = []
         coefficient_numbers = []
-        coefficient_parts = {}
+        coefficient_parts = []
         # enabled_coefficients is a boolean array that indicates which
         # of reduced_coefficients the integral requires.
         for i in range(len(integral_data.enabled_coefficients)):
             if integral_data.enabled_coefficients[i]:
                 original = form_data.reduced_coefficients[i]
                 coefficient = form_data.function_replace_map[original]
-                if coefficient.mixed():
-                    print("original::::   ", repr(original))
-                    print("mixed_coeff::::", repr(coefficient))
-                    for j in coefficient.split():
-                        print("mixed_coeffsplit", repr(j))
-                    enabled_parts = integral_data.integral_coefficients_parts[original]
-                    split = [coefficient.split()[part] for part in enabled_parts]
-                    coefficients.extend(split)
-                    # Coefficient must already be split in the form
-                    self.coefficient_split[coefficient] = None  # split
-                elif type(coefficient.ufl_element()) == ufl_MixedElement:
+                #if coefficient.mixed():
+                #    enabled_parts = integral_data.integral_coefficients_parts[integral_data.integral_coefficients.index(original)]
+                #    split = [coefficient.split()[part] for part in enabled_parts]
+                #    coefficients.extend(split)
+                #    # Coefficient must already be split in the form
+                #    self.coefficient_split[coefficient] = None  # split
+                if type(coefficient.ufl_element()) == ufl_MixedElement:
                     if original in self.dont_split:
                         coefficients.append(coefficient)
                         self.coefficient_split[coefficient] = [coefficient]
                     else:
-                        split = [Coefficient(FunctionSpace(coefficient.ufl_domain(), element))
-                                 for element in coefficient.ufl_element().sub_elements()]
+                        if coefficient.mixed():
+                            split = [Coefficient(FunctionSpace(d, e))
+                                     for d, e in zip(coefficient.ufl_domain(), coefficient.ufl_element().sub_elements())]
+                        else:
+                            split = [Coefficient(FunctionSpace(coefficient.ufl_domain(), element))
+                                     for element in coefficient.ufl_element().sub_elements()]
                         coefficients.extend(split)
                         self.coefficient_split[coefficient] = split
                     enabled_parts = None
@@ -268,13 +270,12 @@ class KernelBuilder(KernelBuilderBase):
                 # Consider f*v*dx + g*v*ds, the full form contains two
                 # coefficients, but each integral only requires one.
                 coefficient_numbers.append(form_data.original_coefficient_positions[i])
-                coefficient_parts[coefficient] = enabled_parts
+                coefficient_parts.append(enabled_parts)
         for i, coefficient in enumerate(coefficients):
-            print("coefficient::::::",coefficient)
             self.coefficient_args.append(
                 self._coefficient(coefficient, "w_%d" % i))
         self.kernel.coefficient_numbers = tuple(coefficient_numbers)
-        self.kernel.coefficient_parts = coefficient_parts
+        self.kernel.coefficient_parts = tuple(coefficient_parts)
 
     def register_requirements(self, ir):
         """Inspect what is referenced by the IR that needs to be
@@ -296,7 +297,7 @@ class KernelBuilder(KernelBuilderBase):
         :returns: :class:`Kernel` object
         """
 
-        args = [self.local_tensor, self.coordinates_arg]
+        args = [self.local_tensor, ] + self.coordinates_arg
         if self.kernel.oriented:
             args.append(self.cell_orientations_loopy_arg)
         if self.kernel.needs_cell_sizes:
