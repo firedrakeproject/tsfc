@@ -22,7 +22,7 @@
 
 from ufl.classes import (ReferenceValue, ReferenceGrad,
                          NegativeRestricted, PositiveRestricted,
-                         Restricted, ConstantValue,
+                         Restricted, Filtered, ConstantValue,
                          Jacobian, SpatialCoordinate, Zero)
 from ufl.checks import is_cellwise_constant
 
@@ -39,9 +39,10 @@ class ModifiedTerminal(object):
         local_derivatives  - tuple of ints, each meaning derivative in that local direction
         reference_value    - bool, whether this is represented in reference frame
         restriction        - None, '+' or '-'
+        filter             - None or UFL Filter object
     """
 
-    def __init__(self, expr, terminal, local_derivatives, restriction, reference_value):
+    def __init__(self, expr, terminal, local_derivatives, restriction, reference_value, fltr):
         # The original expression
         self.expr = expr
 
@@ -50,6 +51,7 @@ class ModifiedTerminal(object):
 
         # Components
         self.reference_value = reference_value
+        self.filter = fltr
         self.restriction = restriction
 
         # Derivatives
@@ -60,7 +62,8 @@ class ModifiedTerminal(object):
         rv = self.reference_value
         ld = self.local_derivatives
         r = self.restriction
-        return (t, rv, ld, r)
+        f = self.filter
+        return (t, rv, ld, r, f)
 
     def __hash__(self):
         return hash(self.as_tuple())
@@ -76,6 +79,7 @@ class ModifiedTerminal(object):
         s += ["terminal:           {0}".format(self.terminal)]
         s += ["local_derivatives:  {0}".format(self.local_derivatives)]
         s += ["restriction:        {0}".format(self.restriction)]
+        s += ["filter:             {0}".format(self.filter)]
         return '\n'.join(s)
 
 
@@ -111,6 +115,7 @@ def analyse_modified_terminal(expr):
     local_derivatives = 0
     reference_value = None
     restriction = None
+    fltr = None
 
     # Start with expr and strip away layers of modifiers
     t = expr
@@ -129,6 +134,10 @@ def analyse_modified_terminal(expr):
             restriction = t._side
             t, = t.ufl_operands
 
+        elif isinstance(t, Filtered):
+            assert fltr is None, "Got twice filtered terminal!"
+            t, fltr = t.ufl_operands
+
         elif t._ufl_terminal_modifiers_:
             raise ValueError("Missing handler for terminal modifier type %s, object is %s." % (type(t), repr(t)))
 
@@ -146,7 +155,7 @@ def analyse_modified_terminal(expr):
         if local_derivatives and not reference_value:
             raise ValueError("Local derivatives of non-local value?")
 
-    return ModifiedTerminal(expr, t, local_derivatives, restriction, reference_value)
+    return ModifiedTerminal(expr, t, local_derivatives, restriction, reference_value, fltr)
 
 
 def construct_modified_terminal(mt, terminal):
@@ -158,6 +167,10 @@ def construct_modified_terminal(mt, terminal):
         expr = ReferenceValue(expr)
 
     dim = expr.ufl_domain().topological_dimension()
+
+    if mt.filter:
+        expr = Filtered(expr, mt.filter)
+
     for n in range(mt.local_derivatives):
         # Return zero if expression is trivially constant. This has to
         # happen here because ReferenceGrad has no access to the

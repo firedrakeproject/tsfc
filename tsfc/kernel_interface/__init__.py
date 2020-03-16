@@ -18,6 +18,11 @@ class KernelInterface(metaclass=ABCMeta):
         expressions."""
 
     @abstractmethod
+    def filter(self, ufl_filter, restriction):
+        """A function that maps :class:`ufl.Filter`s to GEM
+        expressions."""
+
+    @abstractmethod
     def cell_orientation(self, restriction):
         """Cell orientation as a GEM expression."""
 

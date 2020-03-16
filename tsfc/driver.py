@@ -136,7 +136,8 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     builder.set_coordinates(mesh)
     builder.set_cell_sizes(mesh)
 
-    builder.set_coefficients(integral_data, form_data)
+    builder.set_coefficients_and_filters(integral_data, form_data, 'coefficient')
+    builder.set_coefficients_and_filters(integral_data, form_data, 'filter')
 
     # Map from UFL FiniteElement objects to multiindices.  This is
     # so we reuse Index instances when evaluating the same coefficient
@@ -167,8 +168,10 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
         mode = pick_mode(params["mode"])
         mode_irs.setdefault(mode, collections.OrderedDict())
 
-        integrand = ufl.replace(integral.integrand(), form_data.function_replace_map)
-        integrand = ufl_utils.split_coefficients(integrand, builder.coefficient_split)
+        integrand = integral.integrand()
+        integrand = ufl.replace(integrand, form_data.function_replace_map)
+        integrand = ufl.replace(integrand, form_data.filter_replace_map)
+        integrand = ufl_utils.split_coefficients(integrand, builder.coefficient_split, builder.filter_split)
 
         # Check if the integral has a quad degree attached, otherwise use
         # the estimated polynomial degree attached by compute_form_data
@@ -326,7 +329,7 @@ def compile_expression_at_points(expression, points, coordinates, interface=None
     builder.set_coefficients(coefficients)
 
     # Split mixed coefficients
-    expression = ufl_utils.split_coefficients(expression, builder.coefficient_split)
+    expression = ufl_utils.split_coefficients(expression, builder.coefficient_split, )
 
     # Translate to GEM
     point_set = PointSet(points)

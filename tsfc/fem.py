@@ -562,7 +562,12 @@ def translate_argument(terminal, mt, ctx):
         # lives on after ditching FFC and switching to FInAT.
         return ffc_rounding(square, ctx.epsilon)
     table = ctx.entity_selector(callback, mt.restriction)
-    return gem.ComponentTensor(gem.Indexed(table, argument_multiindex + sigma), sigma)
+
+    if mt.filter:
+        vec = ctx.filter(mt.filter, mt.restriction)
+        return gem.ComponentTensor(Product(gem.Indexed(vec, argument_multiindex), gem.Indexed(table, argument_multiindex + sigma)), sigma)
+    else:
+        return gem.ComponentTensor(gem.Indexed(table, argument_multiindex + sigma), sigma)
 
 
 @translate.register(Coefficient)

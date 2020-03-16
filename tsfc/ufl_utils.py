@@ -25,7 +25,8 @@ from ufl.classes import (Abs, Argument, CellOrientation, Coefficient,
 
 from gem.node import MemoizerArg
 
-from tsfc.modified_terminals import (is_modified_terminal,
+from tsfc.modified_terminals import (ModifiedTerminal,
+                                     is_modified_terminal,
                                      analyse_modified_terminal,
                                      construct_modified_terminal)
 
@@ -39,6 +40,7 @@ def compute_form_data(form,
                       do_apply_geometry_lowering=True,
                       preserve_geometry_types=preserve_geometry_types,
                       do_apply_restrictions=True,
+                      do_apply_filters=True,
                       do_estimate_degrees=True,
                       complex_mode=False):
     """Preprocess UFL form in a format suitable for TSFC. Return
@@ -146,6 +148,8 @@ class ModifiedTerminalMixin(object):
     # Unlike UFL, we do not regard Indexed as a terminal modifier.
     # indexed = _modified_terminal
 
+    filtered = _modified_terminal
+
     positive_restricted = _modified_terminal
     negative_restricted = _modified_terminal
 
@@ -156,9 +160,10 @@ class ModifiedTerminalMixin(object):
 
 
 class CoefficientSplitter(MultiFunction, ModifiedTerminalMixin):
-    def __init__(self, split):
+    def __init__(self, split, filter_split):
         MultiFunction.__init__(self)
         self._split = split
+        self._filter_split = filter_split
 
     expr = MultiFunction.reuse_if_untouched
 
@@ -180,10 +185,22 @@ class CoefficientSplitter(MultiFunction, ModifiedTerminalMixin):
         # Derivative indices
         beta = indices(mt.local_derivatives)
 
+        # Coefficient split
+        _split = self._split[terminal]
+
+        # Filter split
+        if mt.filter:
+            _filter_split = self._filter_split[mt.filter]
+            assert len(_filter_split) == len(_split), "Number of split components does not match"
+        else:
+            _filter_split = tuple(None for _ in _split)
+
         components = []
-        for subcoeff in self._split[terminal]:
+        for subcoeff, subfltr in zip(_split, _filter_split):
+            # Construct ModifiedTerminal using sub filter
+            submt = ModifiedTerminal(None, None, mt.local_derivatives, mt.restriction, mt.reference_value, subfltr)
             # Apply terminal modifiers onto the subcoefficient
-            component = construct_modified_terminal(mt, subcoeff)
+            component = construct_modified_terminal(submt, subcoeff)
             # Collect components of the subcoefficient
             for alpha in numpy.ndindex(subcoeff.ufl_element().reference_value_shape()):
                 # New modified terminal: component[alpha + beta]
@@ -193,18 +210,20 @@ class CoefficientSplitter(MultiFunction, ModifiedTerminalMixin):
         return ComponentTensor(as_tensor(components)[c], MultiIndex((c,) + beta))
 
 
-def split_coefficients(expression, split):
+def split_coefficients(expression, split, filter_split=None):
     """Split mixed coefficients, so mixed elements need not be
     implemented.
 
     :arg split: A :py:class:`dict` mapping each mixed coefficient to a
                 sequence of subcoefficients.  If None, calling this
                 function is a no-op.
+    :arg filter_split: A :py:class:`dict` mapping each mixed filter to a
+                sequence of subfilters.
     """
     if split is None:
         return expression
 
-    splitter = CoefficientSplitter(split)
+    splitter = CoefficientSplitter(split, filter_split)
     return map_expr_dag(splitter, expression)
 
 

@@ -30,6 +30,9 @@ class KernelBuilderBase(KernelInterface):
         # Coefficients
         self.coefficient_map = {}
 
+        # Filters
+        self.filter_map = {}
+
     @cached_property
     def unsummed_coefficient_indices(self):
         return frozenset()
@@ -42,6 +45,17 @@ class KernelBuilderBase(KernelInterface):
         expressions."""
         kernel_arg = self.coefficient_map[ufl_coefficient]
         if ufl_coefficient.ufl_element().family() == 'Real':
+            return kernel_arg
+        elif not self.interior_facet:
+            return kernel_arg
+        else:
+            return kernel_arg[{'+': 0, '-': 1}[restriction]]
+
+    def filter(self, ufl_filter, restriction):
+        """A function that maps :class:`ufl.Filter`s to GEM
+        expressions."""
+        kernel_arg = self.filter_map[ufl_filter]
+        if ufl_filter.ufl_element().family() == 'Real':
             return kernel_arg
         elif not self.interior_facet:
             return kernel_arg

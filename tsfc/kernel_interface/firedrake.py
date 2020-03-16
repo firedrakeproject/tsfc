@@ -3,7 +3,7 @@ from collections import namedtuple
 from itertools import chain, product
 from functools import partial
 
-from ufl import Coefficient, MixedElement as ufl_MixedElement, FunctionSpace, FiniteElement
+from ufl import Coefficient, Filter, MixedElement as ufl_MixedElement, FunctionSpace, FiniteElement
 
 import coffee.base as coffee
 
@@ -27,7 +27,7 @@ def make_builder(*args, **kwargs):
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
                  "domain_number", "needs_cell_sizes", "tabulations", "quadrature_rule",
-                 "coefficient_numbers", "__weakref__")
+                 "coefficient_numbers", "filter_numbers", "__weakref__")
     """A compiled Kernel object.
 
     :kwarg ast: The COFFEE ast for the kernel.
@@ -39,6 +39,8 @@ class Kernel(object):
         original_form.ufl_domains() to get the correct domain).
     :kwarg coefficient_numbers: A list of which coefficients from the
         form the kernel needs.
+    :kwarg filter_numbers: A list of which filters from the
+        form the kernel needs.
     :kwarg quadrature_rule: The finat quadrature rule used to generate this kernel
     :kwarg tabulations: The runtime tabulations this kernel requires
     :kwarg needs_cell_sizes: Does the kernel require cell sizes.
@@ -46,6 +48,7 @@ class Kernel(object):
     def __init__(self, ast=None, integral_type=None, oriented=False,
                  subdomain_id=None, domain_number=None, quadrature_rule=None,
                  coefficient_numbers=(),
+                 filter_numbers=(),
                  needs_cell_sizes=False):
         # Defaults
         self.ast = ast
@@ -54,6 +57,7 @@ class Kernel(object):
         self.domain_number = domain_number
         self.subdomain_id = subdomain_id
         self.coefficient_numbers = coefficient_numbers
+        self.filter_numbers = filter_numbers
         self.needs_cell_sizes = needs_cell_sizes
         super(Kernel, self).__init__()
 
@@ -85,8 +89,20 @@ class KernelBuilderBase(_KernelBuilderBase):
         :arg name: coefficient name
         :returns: COFFEE function argument for the coefficient
         """
-        funarg, expression = prepare_coefficient(coefficient, name, self.scalar_type, interior_facet=self.interior_facet)
+        funarg, expression = prepare_coefficient_filter(coefficient, name, self.scalar_type, interior_facet=self.interior_facet)
         self.coefficient_map[coefficient] = expression
+        return funarg
+
+    def _filter(self, fltr, name):
+        """Prepare a filter. Adds glue code for the filter
+        and adds the filter to the filter map.
+
+        :arg fltr: :class:`ufl.Filter`
+        :arg name: filter name
+        :returns: COFFEE function argument for the filter
+        """
+        funarg, expression = prepare_coefficient_filter(fltr, name, self.scalar_type, interior_facet=self.interior_facet)
+        self.filter_map[fltr] = expression
         return funarg
 
     def set_cell_sizes(self, domain):
@@ -100,7 +116,7 @@ class KernelBuilderBase(_KernelBuilderBase):
         in P1).
         """
         f = Coefficient(FunctionSpace(domain, FiniteElement("P", domain.ufl_cell(), 1)))
-        funarg, expression = prepare_coefficient(f, "cell_sizes", self.scalar_type, interior_facet=self.interior_facet)
+        funarg, expression = prepare_coefficient_filter(f, "cell_sizes", self.scalar_type, interior_facet=self.interior_facet)
         self.cell_sizes_arg = funarg
         self._cell_sizes = expression
 
@@ -182,6 +198,8 @@ class KernelBuilder(KernelBuilderBase):
         self.coordinates_arg = None
         self.coefficient_args = []
         self.coefficient_split = {}
+        self.filter_args = []
+        self.filter_split = {}
         self.dont_split = frozenset(dont_split)
 
         # Facet number
@@ -219,40 +237,44 @@ class KernelBuilder(KernelBuilderBase):
         self.domain_coordinate[domain] = f
         self.coordinates_arg = self._coefficient(f, "coords")
 
-    def set_coefficients(self, integral_data, form_data):
-        """Prepare the coefficients of the form.
+    def set_coefficients_and_filters(self, integral_data, form_data, name):
+        """Prepare the coefficients/filters of the form.
 
         :arg integral_data: UFL integral data
         :arg form_data: UFL form data
+        :arg name: name of the class whose instances are set here: 'coefficient' or 'filter'
         """
-        coefficients = []
-        coefficient_numbers = []
-        # enabled_coefficients is a boolean array that indicates which
-        # of reduced_coefficients the integral requires.
-        for i in range(len(integral_data.enabled_coefficients)):
-            if integral_data.enabled_coefficients[i]:
-                original = form_data.reduced_coefficients[i]
-                coefficient = form_data.function_replace_map[original]
-                if type(coefficient.ufl_element()) == ufl_MixedElement:
+        objects = []
+        object_numbers = []
+        # enabled_coefficients/enabled_filters is a boolean array that indicates which
+        # of reduced_coefficients/reduced_filters the integral requires.
+        enabled_objects = getattr(integral_data, 'enabled_' + name + 's')
+        reduced_objects = getattr(form_data, 'reduced_' + name + 's')
+        replace_map = getattr(form_data, {'coefficient':'function', 'filter': 'filter'}[name] + '_replace_map')
+        cls = {'coefficient': Coefficient, 'filter': Filter}[name]
+        for i in range(len(enabled_objects)):
+            if enabled_objects[i]:
+                original = reduced_objects[i]
+                obj = replace_map[original]
+                if type(obj.ufl_element()) == ufl_MixedElement:
                     if original in self.dont_split:
-                        coefficients.append(coefficient)
-                        self.coefficient_split[coefficient] = [coefficient]
+                        objects.append(obj)
+                        getattr(self, name + '_split')[obj] = [obj]
                     else:
-                        split = [Coefficient(FunctionSpace(coefficient.ufl_domain(), element))
-                                 for element in coefficient.ufl_element().sub_elements()]
-                        coefficients.extend(split)
-                        self.coefficient_split[coefficient] = split
+                        split = [cls(FunctionSpace(obj.ufl_domain(), element))
+                                 for element in obj.ufl_element().sub_elements()]
+                        objects.extend(split)
+                        getattr(self, name + '_split')[obj] = split
                 else:
-                    coefficients.append(coefficient)
-                # This is which coefficient in the original form the
-                # current coefficient is.
+                    objects.append(obj)
+                # This is which coefficient/filter in the original form the
+                # current coefficient/filter is.
                 # Consider f*v*dx + g*v*ds, the full form contains two
                 # coefficients, but each integral only requires one.
-                coefficient_numbers.append(form_data.original_coefficient_positions[i])
-        for i, coefficient in enumerate(coefficients):
-            self.coefficient_args.append(
-                self._coefficient(coefficient, "w_%d" % i))
-        self.kernel.coefficient_numbers = tuple(coefficient_numbers)
+                object_numbers.append(getattr(form_data, 'original_' + name + '_positions')[i])
+        for i, obj in enumerate(objects):
+            getattr(self, name + '_args').append(getattr(self, '_' + name)(obj, {'coefficient': "w_%d", 'filter': "r_%d"}[name] % i))
+        setattr(self.kernel, name + '_numbers', tuple(object_numbers))
 
     def register_requirements(self, ir):
         """Inspect what is referenced by the IR that needs to be
@@ -281,7 +303,7 @@ class KernelBuilder(KernelBuilderBase):
             args.append(cell_orientations_coffee_arg)
         if self.kernel.needs_cell_sizes:
             args.append(self.cell_sizes_arg)
-        args.extend(self.coefficient_args)
+        args.extend(self.coefficient_args + self.filter_args)
         if self.kernel.integral_type in ["exterior_facet", "exterior_facet_vert"]:
             args.append(coffee.Decl("unsigned int",
                                     coffee.Symbol("facet", rank=(1,)),
@@ -326,11 +348,11 @@ def check_requirements(ir):
     return cell_orientations, cell_sizes, tuple(sorted(rt_tabs.items()))
 
 
-def prepare_coefficient(coefficient, name, scalar_type, interior_facet=False):
+def prepare_coefficient_filter(obj, name, scalar_type, interior_facet=False):
     """Bridges the kernel interface and the GEM abstraction for
     Coefficients.
 
-    :arg coefficient: UFL Coefficient
+    :arg obj: UFL Coefficient/Filter
     :arg name: unique name to refer to the Coefficient in the kernel
     :arg interior_facet: interior facet integral?
     :returns: (funarg, expression)
@@ -340,18 +362,18 @@ def prepare_coefficient(coefficient, name, scalar_type, interior_facet=False):
     """
     assert isinstance(interior_facet, bool)
 
-    if coefficient.ufl_element().family() == 'Real':
+    if obj.ufl_element().family() == 'Real':
         # Constant
         funarg = coffee.Decl(scalar_type, coffee.Symbol(name),
                              pointers=[("restrict",)],
                              qualifiers=["const"])
 
         expression = gem.reshape(gem.Variable(name, (None,)),
-                                 coefficient.ufl_shape)
+                                 obj.ufl_shape)
 
         return funarg, expression
 
-    finat_element = create_element(coefficient.ufl_element())
+    finat_element = create_element(obj.ufl_element())
     shape = finat_element.index_shape
     size = numpy.prod(shape, dtype=int)
 
