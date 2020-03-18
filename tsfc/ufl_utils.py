@@ -188,7 +188,7 @@ class CoefficientSplitter(MultiFunction, ModifiedTerminalMixin):
         # Coefficient split
         _split = self._split[terminal]
 
-        # Filter split
+        # TopologicalCoefficient(filter) split
         if mt.filter:
             _filter_split = self._filter_split[mt.filter]
             assert len(_filter_split) == len(_split), "Number of split components does not match"

@@ -3,7 +3,7 @@ from collections import namedtuple
 from itertools import chain, product
 from functools import partial
 
-from ufl import Coefficient, Filter, MixedElement as ufl_MixedElement, FunctionSpace, FiniteElement
+from ufl import Coefficient, TopologicalCoefficient, MixedElement as ufl_MixedElement, FunctionSpace, TopologicalFunctionSpace, FiniteElement
 
 import gem
 from gem.optimise import remove_componenttensors as prune
@@ -27,7 +27,7 @@ def make_builder(*args, **kwargs):
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
                  "domain_number", "needs_cell_sizes", "tabulations", "quadrature_rule",
-                 "coefficient_numbers", "filter_numbers", "__weakref__")
+                 "coefficient_numbers", "topological_coefficient_numbers", "__weakref__")
     """A compiled Kernel object.
 
     :kwarg ast: The loopy kernel object.
@@ -39,7 +39,7 @@ class Kernel(object):
         original_form.ufl_domains() to get the correct domain).
     :kwarg coefficient_numbers: A list of which coefficients from the
         form the kernel needs.
-    :kwarg filter_numbers: A list of which filters from the
+    :kwarg topological_coefficient_numbers: A list of which topological coefficients from the
         form the kernel needs.
     :kwarg quadrature_rule: The finat quadrature rule used to generate this kernel
     :kwarg tabulations: The runtime tabulations this kernel requires
@@ -48,7 +48,7 @@ class Kernel(object):
     def __init__(self, ast=None, integral_type=None, oriented=False,
                  subdomain_id=None, domain_number=None, quadrature_rule=None,
                  coefficient_numbers=(),
-                 filter_numbers=(),
+                 topological_coefficient_numbers=(),
                  needs_cell_sizes=False):
         # Defaults
         self.ast = ast
@@ -57,7 +57,7 @@ class Kernel(object):
         self.domain_number = domain_number
         self.subdomain_id = subdomain_id
         self.coefficient_numbers = coefficient_numbers
-        self.filter_numbers = filter_numbers
+        self.topological_coefficient_numbers = topological_coefficient_numbers
         self.needs_cell_sizes = needs_cell_sizes
         super(Kernel, self).__init__()
 
@@ -96,16 +96,16 @@ class KernelBuilderBase(_KernelBuilderBase):
         self.coefficient_map[coefficient] = expression
         return funarg
 
-    def _filter(self, fltr, name):
-        """Prepare a filter. Adds glue code for the filter
-        and adds the filter to the filter map.
+    def _topological_coefficient(self, topo_coeff, name):
+        """Prepare a topological coefficient. Adds glue code for the topological coefficient
+        and adds the topological coefficient to the topological coefficient map.
 
-        :arg fltr: :class:`ufl.Filter`
-        :arg name: filter name
-        :returns: loopy argument for the filter
+        :arg topo_coeff: :class:`ufl.TopologicalCoefficient`
+        :arg name: topological coefficient name
+        :returns: loopy argument for the topological coefficient
         """
-        funarg, expression = prepare_coefficient_filter(fltr, name, self.scalar_type, interior_facet=self.interior_facet)
-        self.filter_map[fltr] = expression
+        funarg, expression = prepare_coefficient_filter(topo_coeff, name, self.scalar_type, interior_facet=self.interior_facet)
+        self.topological_coefficient_map[topo_coeff] = expression
         return funarg
 
     def set_cell_sizes(self, domain):
@@ -201,8 +201,8 @@ class KernelBuilder(KernelBuilderBase):
         self.coordinates_arg = None
         self.coefficient_args = []
         self.coefficient_split = {}
-        self.filter_args = []
-        self.filter_split = {}
+        self.topological_coefficient_args = []
+        self.topological_coefficient_split = {}
         self.dont_split = frozenset(dont_split)
 
         # Facet number
@@ -241,20 +241,21 @@ class KernelBuilder(KernelBuilderBase):
         self.coordinates_arg = self._coefficient(f, "coords")
 
     def set_coefficients_and_filters(self, integral_data, form_data, name):
-        """Prepare the coefficients/filters of the form.
+        """Prepare the coefficients/topological_coefficients of the form.
 
         :arg integral_data: UFL integral data
         :arg form_data: UFL form data
-        :arg name: name of the class whose instances are set here: 'coefficient' or 'filter'
+        :arg name: name of the class whose instances are set here: 'coefficient' or 'topological_coefficient'
         """
         objects = []
         object_numbers = []
-        # enabled_coefficients/enabled_filters is a boolean array that indicates which
-        # of reduced_coefficients/reduced_filters the integral requires.
+        # enabled_coefficients/enabled_topological_coefficients is a boolean array that indicates which
+        # of reduced_coefficients/reduced_topological_coefficients the integral requires.
         enabled_objects = getattr(integral_data, 'enabled_' + name + 's')
         reduced_objects = getattr(form_data, 'reduced_' + name + 's')
-        replace_map = getattr(form_data, {'coefficient':'function', 'filter': 'filter'}[name] + '_replace_map')
-        cls = {'coefficient': Coefficient, 'filter': Filter}[name]
+        replace_map = getattr(form_data, {'coefficient':'function', 'topological_coefficient': 'topological_coefficient'}[name] + '_replace_map')
+        cls = {'coefficient': Coefficient, 'topological_coefficient': TopologicalCoefficient}[name]
+        fs = {'coefficient': FunctionSpace, 'topological_coefficient': TopologicalFunctionSpace}[name]
         for i in range(len(enabled_objects)):
             if enabled_objects[i]:
                 original = reduced_objects[i]
@@ -264,19 +265,19 @@ class KernelBuilder(KernelBuilderBase):
                         objects.append(obj)
                         getattr(self, name + '_split')[obj] = [obj]
                     else:
-                        split = [cls(FunctionSpace(obj.ufl_domain(), element))
+                        split = [cls(fs(obj.ufl_domain(), element))
                                  for element in obj.ufl_element().sub_elements()]
                         objects.extend(split)
                         getattr(self, name + '_split')[obj] = split
                 else:
                     objects.append(obj)
-                # This is which coefficient/filter in the original form the
-                # current coefficient/filter is.
+                # This is which coefficient/topological coefficient in the original form the
+                # current coefficient/topological coefficient is.
                 # Consider f*v*dx + g*v*ds, the full form contains two
                 # coefficients, but each integral only requires one.
                 object_numbers.append(getattr(form_data, 'original_' + name + '_positions')[i])
         for i, obj in enumerate(objects):
-            getattr(self, name + '_args').append(getattr(self, '_' + name)(obj, {'coefficient': "w_%d", 'filter': "r_%d"}[name] % i))
+            getattr(self, name + '_args').append(getattr(self, '_' + name)(obj, {'coefficient': "w_%d", 'topological_coefficient': "r_%d"}[name] % i))
         setattr(self.kernel, name + '_numbers', tuple(object_numbers))
 
     def register_requirements(self, ir):
@@ -304,7 +305,7 @@ class KernelBuilder(KernelBuilderBase):
             args.append(self.cell_orientations_loopy_arg)
         if self.kernel.needs_cell_sizes:
             args.append(self.cell_sizes_arg)
-        args.extend(self.coefficient_args + self.filter_args)
+        args.extend(self.coefficient_args + self.topological_coefficient_args)
         if self.kernel.integral_type in ["exterior_facet", "exterior_facet_vert"]:
             args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(1,)))
         elif self.kernel.integral_type in ["interior_facet", "interior_facet_vert"]:
@@ -329,14 +330,14 @@ class KernelBuilder(KernelBuilderBase):
 
 def prepare_coefficient_filter(obj, name, scalar_type, interior_facet=False):
     """Bridges the kernel interface and the GEM abstraction for
-    Coefficients/Filters.
+    Coefficients/TopologicalCoefficient.
 
-    :arg obj: UFL Coefficient/Filter
-    :arg name: unique name to refer to the Coefficient/Filter in the kernel
+    :arg obj: UFL Coefficient/TopologicalCoefficient
+    :arg name: unique name to refer to the Coefficient/TopologicalCoefficient in the kernel
     :arg interior_facet: interior facet integral?
     :returns: (funarg, expression)
          funarg     - :class:`loopy.GlobalArg` function argument
-         expression - GEM expression referring to the Coefficient/Filter
+         expression - GEM expression referring to the Coefficient/TopologicalCoefficient
                       values
     """
     assert isinstance(interior_facet, bool)
@@ -350,7 +351,6 @@ def prepare_coefficient_filter(obj, name, scalar_type, interior_facet=False):
         return funarg, expression
 
     finat_element = create_element(obj.ufl_element())
-
     shape = finat_element.index_shape
     size = numpy.prod(shape, dtype=int)
 

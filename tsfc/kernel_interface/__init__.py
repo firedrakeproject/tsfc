@@ -18,8 +18,8 @@ class KernelInterface(metaclass=ABCMeta):
         expressions."""
 
     @abstractmethod
-    def filter(self, ufl_filter, restriction):
-        """A function that maps :class:`ufl.Filter`s to GEM
+    def topological_coefficient(self, ufl_topological_coefficient, restriction):
+        """A function that maps :class:`ufl.TopologicalCoefficient`s to GEM
         expressions."""
 
     @abstractmethod

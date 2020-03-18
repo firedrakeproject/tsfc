@@ -39,7 +39,7 @@ class ModifiedTerminal(object):
         local_derivatives  - tuple of ints, each meaning derivative in that local direction
         reference_value    - bool, whether this is represented in reference frame
         restriction        - None, '+' or '-'
-        filter             - None or UFL Filter object
+        filter             - None or UFL TopologicalCoefficient object
     """
 
     def __init__(self, expr, terminal, local_derivatives, restriction, reference_value, fltr):
