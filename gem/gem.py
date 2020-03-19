@@ -574,8 +574,8 @@ class FlexiblyIndexed(Scalar):
             variable[1 + i*12 + j*4 + k][0]
 
         """
-        assert isinstance(variable, Variable)
-        assert len(variable.shape) == len(dim2idxs)
+        # assert isinstance(variable, Variable)
+        # assert len(variable.shape) == len(dim2idxs)
 
         dim2idxs_ = []
         free_indices = []
