@@ -195,12 +195,20 @@ def statement_evaluate(leaf, ctx):
         return []
     elif isinstance(expr, gem.ComponentTensor):
         idx = tuple()
+        sub_idx = ()
+        var = ctx.pymbolic_variable(expr)
         for c, index in enumerate(expr.multiindex):
             ctx.active_indices[index] = p.Variable(index.name)
             ctx.index_extent[index.name] = index.extent
             idx = idx + (ctx.active_indices[index], )
-            var = ctx.pymbolic_variable(expr)
-        statements = [lp.Assignment(p.Subscript(var, idx), expression(expr.children[0], ctx), within_inames=ctx.active_inames())]
+        if isinstance(var, p.Subscript):
+            var, sub_idx = var.aggregate, var.index_tuple
+            var = p.Subscript(var, idx + sub_idx)
+            rhs = expression(expr.children[0], ctx)
+        else:
+            var = p.Subscript(var, idx)
+            rhs = expression(expr.children[0], ctx)
+        statements = [lp.Assignment(var, rhs, within_inames=ctx.active_inames())]
         for c, index in enumerate(expr.multiindex):
             ctx.active_indices.pop(index)
         return statements
@@ -409,6 +417,8 @@ def _expression_indexed(expr, ctx):
     rank = ctx.pym_multiindex(expr.multiindex)
     var = expression(expr.children[0], ctx)
     if isinstance(var, p.Subscript):
+        # if var.index != rank:
+        #     rank = var.index + rank
         rank = var.index + rank
         var = var.aggregate
     return p.Subscript(var, rank)
