@@ -125,11 +125,19 @@ def classify(argument_indices, expression, delta_inside):
     if n == 0:
         return OTHER
     elif n == 1:
-        if isinstance(expression, (Delta, Indexed, FlexiblyIndexed)) and not delta_inside(expression):
+        if isinstance(expression, FlexiblyIndexed):
+            if n == len(expression.free_indices):
+                # Return ATOMIC if expression is a filter.
+                return ATOMIC
+        if isinstance(expression, (Delta, Indexed)) and not delta_inside(expression):
             return ATOMIC
         else:
             return COMPOUND
     else:
+        if isinstance(expression, FlexiblyIndexed):
+            if n == len(expression.free_indices):
+                # Return ATOMIC if expression is a filter.
+                return ATOMIC
         return COMPOUND
 
 

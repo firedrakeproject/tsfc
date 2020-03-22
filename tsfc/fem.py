@@ -565,8 +565,9 @@ def translate_argument(terminal, mt, ctx):
 
     if mt.filter:
         vec = ctx.topological_coefficient(mt.filter, mt.restriction)
-        vec_i, = gem.optimise.remove_componenttensors([gem.Indexed(vec, argument_multiindex)])
-        return gem.ComponentTensor(gem.Product(vec_i, gem.Indexed(table, argument_multiindex + sigma)), sigma)
+        #vec_i, = gem.optimise.remove_componenttensors([gem.Indexed(vec, argument_multiindex)])
+        #return gem.ComponentTensor(gem.Product(vec_i, gem.Indexed(table, argument_multiindex + sigma)), sigma)
+        return gem.ComponentTensor(gem.Product(gem.Indexed(vec, argument_multiindex), gem.Indexed(table, argument_multiindex + sigma)), sigma)
     else:
         return gem.ComponentTensor(gem.Indexed(table, argument_multiindex + sigma), sigma)
 
@@ -575,9 +576,15 @@ def translate_argument(terminal, mt, ctx):
 def translate_coefficient(terminal, mt, ctx):
     vec = ctx.coefficient(terminal, mt.restriction)
 
+    if mt.filter:
+        filter_vec = ctx.topological_coefficient(mt.filter, mt.restriction)
+
     if terminal.ufl_element().family() == 'Real':
         assert mt.local_derivatives == 0
-        return vec
+        if mt.filter:
+            return gem.Product(filter_vec, vec)
+        else:
+            return vec
 
     element = ctx.create_element(terminal.ufl_element(), restriction=mt.restriction)
 
@@ -611,13 +618,18 @@ def translate_coefficient(terminal, mt, ctx):
     beta = ctx.index_cache[terminal.ufl_element()]
     zeta = element.get_value_indices()
     vec_beta, = gem.optimise.remove_componenttensors([gem.Indexed(vec, beta)])
+    if mt.filter:
+        filter_vec_beta, = gem.optimise.remove_componenttensors([gem.Indexed(filter_vec, beta)])
     value_dict = {}
     for alpha, table in per_derivative.items():
         table_qi = gem.Indexed(table, beta + zeta)
         summands = []
         for var, expr in unconcatenate([(vec_beta, table_qi)], ctx.index_cache):
             indices = tuple(i for i in var.index_ordering() if i not in ctx.unsummed_coefficient_indices)
-            value = gem.IndexSum(gem.Product(expr, var), indices)
+            if mt.filter:
+                value = gem.IndexSum(gem.Product(gem.Product(filter_vec_beta, expr), var), indices)
+            else:
+                value = gem.IndexSum(gem.Product(expr, var), indices)
             summands.append(gem.optimise.contraction(value))
         optimised_value = gem.optimise.make_sum(summands)
         value_dict[alpha] = gem.ComponentTensor(optimised_value, zeta)
