@@ -227,6 +227,46 @@ def split_coefficients(expression, split, filter_split=None):
     return map_expr_dag(splitter, expression)
 
 
+class TopologicalCoefficientSplitter(MultiFunction):
+    def __init__(self, split):
+        MultiFunction.__init__(self)
+        self._split = split
+
+    expr = MultiFunction.reuse_if_untouched
+
+    def topological_coefficient(self, o):
+
+        if type(o.ufl_element()) != MixedElement:
+            # Only split mixed topological coefficients
+            return o
+
+        # Coefficient split
+        _split = self._split[o]
+
+        components = []
+        for subcoeff in _split:
+            # Collect components of the subcoefficient
+            for alpha in numpy.ndindex(subcoeff.ufl_element().reference_value_shape()):
+                # New modified terminal: component[alpha + beta]
+                components.append(subcoeff[alpha])
+        return as_tensor(components)
+
+
+def split_topological_coefficients(expression, split):
+    """Split mixed topological coefficients, so mixed elements need not be
+    implemented.
+
+    :arg split: A :py:class:`dict` mapping each mixed topological coefficient to a
+                sequence of subcoefficients.  If None, calling this
+                function is a no-op.
+    """
+    if split is None:
+        return expression
+
+    splitter = TopologicalCoefficientSplitter(split)
+    return map_expr_dag(splitter, expression)
+
+
 class PickRestriction(MultiFunction, ModifiedTerminalMixin):
     """Pick out parts of an expression with specified restrictions on
     the arguments.

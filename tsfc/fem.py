@@ -564,6 +564,7 @@ def translate_argument(terminal, mt, ctx):
     table = ctx.entity_selector(callback, mt.restriction)
 
     if mt.filter:
+        print("mt_filter:::::", repr(mt.filter))
         vec = ctx.topological_coefficient(mt.filter, mt.restriction)
         #vec_i, = gem.optimise.remove_componenttensors([gem.Indexed(vec, argument_multiindex)])
         #return gem.ComponentTensor(gem.Product(vec_i, gem.Indexed(table, argument_multiindex + sigma)), sigma)

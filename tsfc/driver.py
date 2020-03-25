@@ -136,8 +136,8 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     builder.set_coordinates(mesh)
     builder.set_cell_sizes(mesh)
 
-    builder.set_coefficients_and_filters(integral_data, form_data, 'coefficient')
-    builder.set_coefficients_and_filters(integral_data, form_data, 'topological_coefficient')
+    builder.set_coefficients(integral_data, form_data)
+    builder.set_topological_coefficients(integral_data, form_data)
 
     # Map from UFL FiniteElement objects to multiindices.  This is
     # so we reuse Index instances when evaluating the same coefficient
@@ -171,10 +171,10 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
         integrand = integral.integrand()
         integrand = ufl.replace(integrand, form_data.function_replace_map)
         integrand = ufl.replace(integrand, form_data.topological_coefficient_replace_map)
+        # Split coefficient along with filters here
         integrand = ufl_utils.split_coefficients(integrand, builder.coefficient_split, builder.topological_coefficient_split)
-
-        # If using TopologicaCoefficient for something other than filtering,
-        # right replacement must be performed here.
+        # Split rest of the topological coefficients
+        integrand = ufl_utils.split_topological_coefficients(integrand, builder.topological_coefficient_split)
 
         # Check if the integral has a quad degree attached, otherwise use
         # the estimated polynomial degree attached by compute_form_data

@@ -27,7 +27,7 @@ def make_builder(*args, **kwargs):
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
                  "domain_number", "needs_cell_sizes", "tabulations", "quadrature_rule",
-                 "coefficient_numbers", "topological_coefficient_numbers", "__weakref__")
+                 "coefficient_numbers", "topological_coefficient_numbers", "topological_coefficient_parts", "__weakref__")
     """A compiled Kernel object.
 
     :kwarg ast: The COFFEE ast for the kernel.
@@ -41,6 +41,10 @@ class Kernel(object):
         form the kernel needs.
     :kwarg topological_coefficient_numbers: A list of which topological coefficients from the
         form the kernel needs.
+    :kwarg topological_coefficient_parts: A list of lists of topological coefficient components
+        that are actually used in the given integral_data. If `None` is given
+        instead of a list of components, it is assumed that all components of
+        that topological coefficient are to be used.
     :kwarg quadrature_rule: The finat quadrature rule used to generate this kernel
     :kwarg tabulations: The runtime tabulations this kernel requires
     :kwarg needs_cell_sizes: Does the kernel require cell sizes.
@@ -49,6 +53,7 @@ class Kernel(object):
                  subdomain_id=None, domain_number=None, quadrature_rule=None,
                  coefficient_numbers=(),
                  topological_coefficient_numbers=(),
+                 topological_coefficient_parts=None,
                  needs_cell_sizes=False):
         # Defaults
         self.ast = ast
@@ -58,6 +63,7 @@ class Kernel(object):
         self.subdomain_id = subdomain_id
         self.coefficient_numbers = coefficient_numbers
         self.topological_coefficient_numbers = topological_coefficient_numbers
+        self.topological_coefficient_parts = topological_coefficient_parts
         self.needs_cell_sizes = needs_cell_sizes
         super(Kernel, self).__init__()
 
@@ -237,22 +243,19 @@ class KernelBuilder(KernelBuilderBase):
         self.domain_coordinate[domain] = f
         self.coordinates_arg = self._coefficient(f, "coords")
 
-    def set_coefficients_and_filters(self, integral_data, form_data, name):
-        """Prepare the coefficients/topological_coefficients of the form.
+    def set_coefficients(self, integral_data, form_data):
+        """Prepare the coefficients of the form.
 
         :arg integral_data: UFL integral data
         :arg form_data: UFL form data
-        :arg name: name of the class whose instances are set here: 'coefficient' or 'topological_coefficient'
         """
         objects = []
         object_numbers = []
-        # enabled_coefficients/enabled_topological_coefficients is a boolean array that indicates which
-        # of reduced_coefficients/reduced_topological_coefficients the integral requires.
-        enabled_objects = getattr(integral_data, 'enabled_' + name + 's')
-        reduced_objects = getattr(form_data, 'reduced_' + name + 's')
-        replace_map = getattr(form_data, {'coefficient':'function', 'topological_coefficient': 'topological_coefficient'}[name] + '_replace_map')
-        cls = {'coefficient': Coefficient, 'topological_coefficient': TopologicalCoefficient}[name]
-        fs = {'coefficient': FunctionSpace, 'topological_coefficient': TopologicalFunctionSpace}[name]
+        # enabled_coefficients is a boolean array that indicates which
+        # of reduced_coefficients the integral requires.
+        enabled_objects = integral_data.enabled_coefficients
+        reduced_objects = form_data.reduced_coefficients
+        replace_map = form_data.function_replace_map
         for i in range(len(enabled_objects)):
             if enabled_objects[i]:
                 original = reduced_objects[i]
@@ -260,22 +263,61 @@ class KernelBuilder(KernelBuilderBase):
                 if type(obj.ufl_element()) == ufl_MixedElement:
                     if original in self.dont_split:
                         objects.append(obj)
-                        getattr(self, name + '_split')[obj] = [obj]
+                        self.coefficient_split[obj] = [obj]
                     else:
-                        split = [cls(fs(obj.ufl_domain(), element))
+                        split = [Coefficient(FunctionSpace(obj.ufl_domain(), element))
                                  for element in obj.ufl_element().sub_elements()]
                         objects.extend(split)
-                        getattr(self, name + '_split')[obj] = split
+                        self.coefficient_split[obj] = split
                 else:
                     objects.append(obj)
-                # This is which coefficient/topological coefficient in the original form the
-                # current coefficient/topological coefficient is.
+                # This is which coefficient in the original form the
+                # current coefficient is.
                 # Consider f*v*dx + g*v*ds, the full form contains two
                 # coefficients, but each integral only requires one.
-                object_numbers.append(getattr(form_data, 'original_' + name + '_positions')[i])
+                object_numbers.append(form_data.original_coefficient_positions[i])
         for i, obj in enumerate(objects):
-            getattr(self, name + '_args').append(getattr(self, '_' + name)(obj, {'coefficient': "w_%d", 'topological_coefficient': "r_%d"}[name] % i))
-        setattr(self.kernel, name + '_numbers', tuple(object_numbers))
+            self.coefficient_args.append(self._coefficient(obj, "w_%d" % i))
+        self.kernel.coefficient_numbers = tuple(object_numbers)
+
+    def set_topological_coefficients(self, integral_data, form_data):
+        """Prepare the topological coefficients of the form.
+
+        :arg integral_data: UFL integral data
+        :arg form_data: UFL form data
+        """
+        objects = []
+        object_numbers = []
+        # enabled_topological_coefficients is a boolean array that indicates which
+        # of reduced_topological_coefficients the integral requires.
+        enabled_objects = integral_data.enabled_topological_coefficients
+        reduced_objects = form_data.reduced_topological_coefficients
+        replace_map = form_data.topological_coefficient_replace_map
+        for i in range(len(enabled_objects)):
+            if enabled_objects[i]:
+                original = reduced_objects[i]
+                obj = replace_map[original]
+                if type(obj.ufl_element()) == ufl_MixedElement:
+                    if original in self.dont_split:
+                        objects.append(obj)
+                        self.topological_coefficient_split[obj] = [obj]
+                    else:
+                        split = [TopologicalCoefficient(TopologicalFunctionSpace(obj.ufl_domain(), element))
+                                 for element in obj.ufl_element().sub_elements()]
+                        objects.extend(split)
+                        self.topological_coefficient_split[obj] = split
+                else:
+                    objects.append(obj)
+                # This is which topological coefficient in the original form the
+                # current topological coefficient is.
+                object_numbers.append(form_data.original_topological_coefficient_positions[i])
+        for i, obj in enumerate(objects):
+            self.topological_coefficient_args.append(self._topological_coefficient(obj, "r_%d" % i))
+        self.kernel.topological_coefficient_numbers = tuple(object_numbers)
+        # TODO: Remove redundant components by appropriately setting this.
+        # For now, this is only necessary for 'topological_coefficient' to deal with
+        # splitting of arguments.
+        self.kernel.topological_coefficient_parts = [None for _ in self.kernel.topological_coefficient_numbers]
 
     def register_requirements(self, ir):
         """Inspect what is referenced by the IR that needs to be
