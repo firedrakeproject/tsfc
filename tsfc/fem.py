@@ -571,10 +571,13 @@ def translate_argument(terminal, mt, ctx):
         # TODO: add more regorous checks here.
         fltr = mt.filter
         # Remove internal list tensors.
-        if isinstance(fltr, ListTensor):
-            fltr = ListTensor(*[purge_list_tensors(fltr[i]) for i in range(fltr.ufl_shape[0])])
-        else:
-            fltr = purge_list_tensors(fltr)
+        def _remove_list_tensors(a):
+            if isinstance(a, ListTensor):
+                for i in range(a.ufl_shape[0]):
+                    yield from _remove_list_tensors(a[i])
+            else:
+                yield purge_list_tensors(a)
+        fltr = ListTensor(*tuple(_remove_list_tensors(fltr)))
         fltr = tuple(extract_type(fltr, TopologicalCoefficient))
         fltr = fltr[0]
         vec = ctx.topological_coefficient(fltr, mt.restriction)
