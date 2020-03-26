@@ -13,14 +13,17 @@ from ufl.corealg.multifunction import MultiFunction
 from ufl.classes import (Argument, CellCoordinate, CellEdgeVectors,
                          CellFacetJacobian, CellOrientation,
                          CellOrigin, CellVertices, CellVolume,
-                         Coefficient, FacetArea, FacetCoordinate,
+                         Coefficient, TopologicalCoefficient,
+                         FacetArea, FacetCoordinate,
                          GeometricQuantity, Jacobian,
                          NegativeRestricted, QuadratureWeight,
                          PositiveRestricted, ReferenceCellVolume,
                          ReferenceCellEdgeVectors,
                          ReferenceFacetVolume, ReferenceNormal,
-                         SpatialCoordinate)
-
+                         SpatialCoordinate,
+                         ListTensor)
+from ufl.algorithms.analysis import extract_type
+from ufl.algorithms.expand_indices import purge_list_tensors
 
 from FIAT.reference_element import make_affine_mapping
 
@@ -564,8 +567,17 @@ def translate_argument(terminal, mt, ctx):
     table = ctx.entity_selector(callback, mt.restriction)
 
     if mt.filter:
-        print("mt_filter:::::", repr(mt.filter))
-        vec = ctx.topological_coefficient(mt.filter, mt.restriction)
+        # split(topo_coeff) generates list tensors.
+        # TODO: add more regorous checks here.
+        fltr = mt.filter
+        # Remove internal list tensors.
+        if isinstance(fltr, ListTensor):
+            fltr = ListTensor(*[purge_list_tensors(fltr[i]) for i in range(fltr.ufl_shape[0])])
+        else:
+            fltr = purge_list_tensors(fltr)
+        fltr = tuple(extract_type(fltr, TopologicalCoefficient))
+        fltr = fltr[0]
+        vec = ctx.topological_coefficient(fltr, mt.restriction)
         #vec_i, = gem.optimise.remove_componenttensors([gem.Indexed(vec, argument_multiindex)])
         #return gem.ComponentTensor(gem.Product(vec_i, gem.Indexed(table, argument_multiindex + sigma)), sigma)
         return gem.ComponentTensor(gem.Product(gem.Indexed(vec, argument_multiindex), gem.Indexed(table, argument_multiindex + sigma)), sigma)
