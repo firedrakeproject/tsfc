@@ -33,7 +33,7 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'IndexSum', 'ListTensor', 'Concatenate', 'Delta',
            'index_sum', 'partial_indexed', 'reshape', 'view',
            'indices', 'as_gem', 'FlexiblyIndexed',
-           'Inverse', 'Determinant', 'Solve']
+           'Inverse', 'Determinant', 'Solve', 'decompose_variable_view']
 
 
 class NodeMeta(type):
@@ -654,13 +654,13 @@ class IndexSum(Scalar):
             return summand
 
         # Unroll singleton sums
-        unroll = tuple(index for index in multiindex if index.extent <= 1)
-        if unroll:
-            assert numpy.prod([index.extent for index in unroll]) == 1
-            summand = Indexed(ComponentTensor(summand, unroll),
-                              (0,) * len(unroll))
-            multiindex = tuple(index for index in multiindex
-                               if index not in unroll)
+        # unroll = tuple(index for index in multiindex if index.extent <= 1)
+        # if unroll:
+        #     assert numpy.prod([index.extent for index in unroll]) == 1
+        #     summand = Indexed(ComponentTensor(summand, unroll),
+        #                       (0,) * len(unroll))
+        #     multiindex = tuple(index for index in multiindex
+        #                        if index not in unroll)
 
         # No indices case
         multiindex = tuple(multiindex)
