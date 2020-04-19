@@ -291,7 +291,7 @@ def compile_expression_at_points(expression, points, coordinates, interface=None
 
     # No arguments, please!
     if extract_arguments(expression):
-        return ValueError("Cannot interpolate UFL expression with Arguments!")
+        raise ValueError("Cannot interpolate UFL expression with Arguments!")
 
     # Determine whether in complex mode
     complex_mode = is_complex(parameters["scalar_type"])
