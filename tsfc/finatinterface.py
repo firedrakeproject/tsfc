@@ -131,10 +131,6 @@ def convert_finiteelement(element, **kwargs):
     if kind is None:
         kind = 'spectral' if element.cell().cellname() == 'interval' else 'equispaced'  # default variant
 
-    if element.family() == "Bogner-Fox-Schmit":
-        degree = element.degree()
-        return finat.BognerFoxSchmit(cell, degree), set()
-
     if element.family() == "Lagrange":
         if kind == 'equispaced':
             lmbda = finat.Lagrange
@@ -172,7 +168,13 @@ def convert_finiteelement(element, **kwargs):
         elif element.cell().geometric_dimension() == 3:
             element = element.reconstruct(cell=ufl.cell.hypercube(3))
 
-    return lmbda(cell, element.degree()), set()
+    finat_element, deps = lmbda(cell, element.degree()), set()
+    if (element.family() == "Bogner-Fox-Schmit" and
+        element.cell().cellname() in {"quadrilateral", "hexahedron"}):
+        return finat.FlattenedDimensions(finat_element), deps
+    else:
+        return finat_element, deps
+
 
 
 # Element modifiers and compound element types
