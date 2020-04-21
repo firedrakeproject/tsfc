@@ -49,6 +49,7 @@ supported_elements = {
     "HDiv Trace": finat.HDivTrace,
     "Hellan-Herrmann-Johnson": finat.HellanHerrmannJohnson,
     "Hermite": finat.Hermite,
+    "Bogner-Fox-Schmit": finat.BognerFoxSchmit,
     "Argyris": finat.Argyris,
     "Morley": finat.Morley,
     "Bell": finat.Bell,
@@ -129,6 +130,10 @@ def convert_finiteelement(element, **kwargs):
     kind = element.variant()
     if kind is None:
         kind = 'spectral' if element.cell().cellname() == 'interval' else 'equispaced'  # default variant
+
+    if element.family() == "Bogner-Fox-Schmit":
+        degree = element.degree()
+        return finat.BognerFoxSchmit(cell, degree), set()
 
     if element.family() == "Lagrange":
         if kind == 'equispaced':
