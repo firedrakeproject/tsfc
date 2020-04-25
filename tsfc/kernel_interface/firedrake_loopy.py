@@ -112,6 +112,20 @@ class KernelBuilderBase(_KernelBuilderBase):
         a UFL element."""
         return create_element(element, **kwargs)
 
+    def construct_kernel(self, name, args, impero_c, precision):
+        """Constructs a KernelBuilderBase Loopy kernel.
+
+        :arg name: Name of the kernel
+        :arg args: loopy.GlobalArg array for the values in kernel
+        :arg impero_c: gem.ImperoC object that represents the kernel
+        :arg precision: floating point precision for code generation
+        :returns: :class:`KernelBuilderBase` object
+        """
+
+        loopy_kernel = generate_loopy(impero_c, args, precision, self.scalar_type,
+                                      "loopy_kernel_" + name)
+        return loopy_kernel
+
 
 class ExpressionKernelBuilder(KernelBuilderBase):
     """Builds expression kernels for UFL interpolation in Firedrake."""
