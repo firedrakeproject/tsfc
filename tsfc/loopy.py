@@ -20,6 +20,8 @@ from pytools import UniqueNameGenerator
 
 from tsfc.parameters import is_complex
 
+from contextlib import contextmanager
+
 
 class LoopyContext(object):
     def __init__(self):
@@ -61,6 +63,24 @@ class LoopyContext(object):
         # Return all active indices
         return frozenset([i.name for i in self.active_indices.values()])
 
+    def pymbolic_indices(self, indices):
+        idx = tuple()
+        for index in indices:
+            assert index.extent
+            if not index.name:
+                index.name = self.name_gen(self.index_names[index])
+            self.index_extent[index.name] = index.extent
+            idx = idx + (p.Variable(index.name), )
+        return idx
+
+@contextmanager
+def active_indices(gem_indices, pym_indices, lambda_statement, ctx):
+    for gem_index, pym_index in zip(gem_indices, pym_indices):
+        ctx.active_indices[gem_index] = pym_index
+    yield lambda_statement(ctx)
+    for index in gem_indices:
+        ctx.active_indices.pop(index)
+
 
 def generate(impero_c, args, precision, scalar_type, kernel_name="loopy_kernel", index_names=[]):
     """Generates loopy code.
@@ -83,7 +103,6 @@ def generate(impero_c, args, precision, scalar_type, kernel_name="loopy_kernel",
     # Create arguments
     data = list(args)
     for i, temp in enumerate(impero_c.temporaries):
-        # Inverse and Solve translate to void function calls so that lhs temporary can be overstepped
         name = "t%d" % i
         if isinstance(temp, gem.Constant):
             data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=temp.array.dtype, initializer=temp.array, address_space=lp.AddressSpace.LOCAL, read_only=True))
@@ -94,6 +113,7 @@ def generate(impero_c, args, precision, scalar_type, kernel_name="loopy_kernel",
 
     # Create instructions
     instructions = statement(impero_c.tree, ctx)
+
     # Create domains
     domains = []
     for idx, extent in ctx.index_extent.items():
@@ -192,94 +212,36 @@ def statement_evaluate(leaf, ctx):
     elif isinstance(expr, gem.Constant):
         return []
     elif isinstance(expr, gem.ComponentTensor):
-        idx = tuple()
-        sub_idx = ()
-
-        # Indices for lhs
-        for c, index in enumerate(expr.multiindex):
-            ctx.active_indices[index] = p.Variable(index.name)
-            ctx.index_extent[index.name] = index.extent
-            idx = idx + (ctx.active_indices[index], )
-
-        # Variable might already be subscripted e.g. for blocks
+        statements = []
+        idx = ctx.pymbolic_indices(expr.multiindex)
         var = ctx.pymbolic_variable(expr)
+        # Variable might already be subscripted e.g. for blocks
         if isinstance(var, p.Subscript):
             var, sub_idx = var.aggregate, var.index_tuple
             var = p.Subscript(var, idx + sub_idx)
-            rhs = expression(expr.children[0], ctx)
         else:
-            var = p.Subscript(var, idx)
-            rhs = expression(expr.children[0], ctx)
-
-        # Translation of ComponentTensor
-        statements = [lp.Assignment(var, rhs, within_inames=ctx.active_inames())]
-
-        # end loop
-        for c, index in enumerate(expr.multiindex):
-            ctx.active_indices.pop(index)
+            var = p.Subscript(var, idx)   
+        lambda_statement = lambda ctx: lp.Assignment(var, expression(expr.children[0], ctx), within_inames=ctx.active_inames())
+        with active_indices(expr.multiindex, idx, lambda_statement, ctx) as stm:
+            statements = [stm]
         return statements
     elif isinstance(expr, gem.Inverse):
-        idx = tuple()
-        idx2 = tuple()
-
-        # Indices and variable for lhs
-        for c, index in enumerate(expr.multiindex):
-            ctx.active_indices[index] = p.Variable(index.name)
-            ctx.index_extent[index.name] = index.extent
-            idx = idx + (ctx.active_indices[index], )
+        idx = ctx.pymbolic_indices(expr.multiindex)
+        idx_reads = ctx.pymbolic_indices(expr.children[0].multiindex)
         var = ctx.pymbolic_variable(expr)
-        # Indices and variable for arguments of function call
-        for c, index in enumerate(expr.children[0].multiindex):
-            ctx.active_indices[index] = p.Variable(index.name)
-            ctx.index_extent[index.name] = index.extent
-            idx2 = idx2 + (ctx.active_indices[index], )
         var_reads = ctx.pymbolic_variable(expr.children[0])
-
-        # No loops around CallInstruction
-        for c, index in enumerate(expr.multiindex):
-            ctx.active_indices.pop(index)
-        for c, index in enumerate(expr.children[0].multiindex):
-            ctx.active_indices.pop(index)
-
-        # Translation of Inverse
         output = SubArrayRef(idx, p.Subscript(var, idx))
-        reads = (SubArrayRef(idx2, p.Subscript(var_reads, idx2)),)
+        reads = (SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)),)
         return [lp.CallInstruction((output,), p.Call(p.Variable("inv"), reads), within_inames=ctx.active_inames())]
     elif isinstance(expr, gem.Solve):
-        idx = tuple()
-        idx2 = tuple()
-        idx3 = tuple()
-
-        # Indices and variable for lhs
-        for c, index in enumerate(expr.multiindex):
-            ctx.active_indices[index] = p.Variable(index.name)
-            ctx.index_extent[index.name] = index.extent
-            idx = idx + (ctx.active_indices[index], )
+        idx = ctx.pymbolic_indices(expr.multiindex)
+        idx_readsA = ctx.pymbolic_indices(expr.children[0].multiindex)
+        idx_readsB = ctx.pymbolic_indices(expr.children[1].multiindex)
         var = ctx.pymbolic_variable(expr)
-        # Indices and variable for matrix
-        for c, index in enumerate(expr.children[0].multiindex):
-            ctx.active_indices[index] = p.Variable(index.name)
-            ctx.index_extent[index.name] = index.extent
-            idx2 = idx2 + (ctx.active_indices[index], )
         var_readsA = ctx.pymbolic_variable(expr.children[0])
-        # Indices and variable for rhs
-        for c, index in enumerate(expr.children[1].multiindex):
-            ctx.active_indices[index] = p.Variable(index.name)
-            ctx.index_extent[index.name] = index.extent
-            idx3 = idx3 + (ctx.active_indices[index], )
         var_readsB = ctx.pymbolic_variable(expr.children[1])
-
-        # No loops around CallInstruction
-        for c, index in enumerate(expr.multiindex):
-            ctx.active_indices.pop(index)
-        for c, index in enumerate(expr.children[0].multiindex):
-            ctx.active_indices.pop(index)
-        for c, index in enumerate(expr.children[1].multiindex):
-            ctx.active_indices.pop(index)
-
-        # Translation of Solve
         output = SubArrayRef(idx, p.Subscript(var, idx))
-        reads = (SubArrayRef(idx2, p.Subscript(var_readsA, idx2)), SubArrayRef(idx3, p.Subscript(var_readsB, idx3)))
+        reads = (SubArrayRef(idx_readsA, p.Subscript(var_readsA, idx_readsA)), SubArrayRef(idx_readsB, p.Subscript(var_readsB, idx_readsB)))
         return [lp.CallInstruction((output,), p.Call(p.Variable("solve"), reads), within_inames=ctx.active_inames())]
     else:
         return [lp.Assignment(ctx.pymbolic_variable(expr), expression(expr, ctx, top=True), within_inames=ctx.active_inames())]
