@@ -43,41 +43,52 @@ class LoopyContext(object):
                 indices.append(index)
         return tuple(indices)
 
-    def pymbolic_variable(self, node):
+    def gem_to_pym(self, node):
         try:
             pym = self.gem_to_pymbolic[node]
         except KeyError:
             name = self.name_gen(node.name)
             pym = p.Variable(name)
             self.gem_to_pymbolic[node] = pym
+        return pym
+
+    def pymbolic_variable(self, node):
+        pym = self.gem_to_pym(node)
         if node in self.indices:
             indices = self.pym_multiindex(self.indices[node])
             if indices:
                 return p.Subscript(pym, indices)
-            else:
-                return pym
-        else:
-            return pym
+        return pym
+
+    def pymbolic_variable_and_destruct(self, node):
+        pym = self.gem_to_pym(node)
+        if node in self.indices:
+            indices = self.pym_multiindex(self.indices[node])
+            if indices:
+                return (pym, indices)
+        return (pym, ())
 
     def active_inames(self):
         # Return all active indices
         return frozenset([i.name for i in self.active_indices.values()])
 
     def pymbolic_indices(self, indices):
-        idx = tuple()
+        pym_idx = tuple()
         for index in indices:
-            assert index.extent
-            if not index.name:
-                index.name = self.name_gen(self.index_names[index])
-            self.index_extent[index.name] = index.extent
-            idx = idx + (p.Variable(index.name), )
-        return idx
+            name = index.name
+            self.index_extent[name] = index.extent
+            pym_idx += (p.Variable(name), )
+        return pym_idx
+
 
 @contextmanager
-def active_indices(gem_indices, pym_indices, lambda_statement, ctx):
+def active_indices(gem_indices, pym_indices, ctx):
+    """ Context manager function to keep track of active indices.
+    Note: Does not work for recursion, hence cannot be used for statement_for.
+    """
     for gem_index, pym_index in zip(gem_indices, pym_indices):
         ctx.active_indices[gem_index] = pym_index
-    yield lambda_statement(ctx)
+    yield ctx
     for index in gem_indices:
         ctx.active_indices.pop(index)
 
@@ -202,10 +213,7 @@ def statement_evaluate(leaf, ctx):
     expr = leaf.expression
     if isinstance(expr, gem.ListTensor):
         ops = []
-        var = ctx.pymbolic_variable(expr)
-        index = ()
-        if isinstance(var, p.Subscript):
-            var, index = var.aggregate, var.index_tuple
+        var, index = ctx.pymbolic_variable_and_destruct(expr)
         for multiindex, value in numpy.ndenumerate(expr.array):
             ops.append(lp.Assignment(p.Subscript(var, index + multiindex), expression(value, ctx), within_inames=ctx.active_inames()))
         return ops
@@ -214,35 +222,36 @@ def statement_evaluate(leaf, ctx):
     elif isinstance(expr, gem.ComponentTensor):
         statements = []
         idx = ctx.pymbolic_indices(expr.multiindex)
-        var = ctx.pymbolic_variable(expr)
-        # Variable might already be subscripted e.g. for blocks
-        if isinstance(var, p.Subscript):
-            var, sub_idx = var.aggregate, var.index_tuple
-            var = p.Subscript(var, idx + sub_idx)
-        else:
-            var = p.Subscript(var, idx)   
-        lambda_statement = lambda ctx: lp.Assignment(var, expression(expr.children[0], ctx), within_inames=ctx.active_inames())
-        with active_indices(expr.multiindex, idx, lambda_statement, ctx) as stm:
-            statements = [stm]
+        var, sub_idx = ctx.pymbolic_variable_and_destruct(expr)
+        lhs = p.Subscript(var, idx + sub_idx)
+        with active_indices(expr.multiindex, idx, ctx) as ctx_active:
+            statements = [lp.Assignment(lhs, expression(expr.children[0], ctx_active), within_inames=ctx_active.active_inames())]
         return statements
     elif isinstance(expr, gem.Inverse):
         idx = ctx.pymbolic_indices(expr.multiindex)
-        idx_reads = ctx.pymbolic_indices(expr.children[0].multiindex)
         var = ctx.pymbolic_variable(expr)
+        lhs = (SubArrayRef(idx, p.Subscript(var, idx)),)
+
+        idx_reads = ctx.pymbolic_indices(expr.children[0].multiindex)
         var_reads = ctx.pymbolic_variable(expr.children[0])
-        output = SubArrayRef(idx, p.Subscript(var, idx))
         reads = (SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)),)
-        return [lp.CallInstruction((output,), p.Call(p.Variable("inv"), reads), within_inames=ctx.active_inames())]
+        rhs = p.Call(p.Variable("inv"), reads)
+
+        return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
     elif isinstance(expr, gem.Solve):
         idx = ctx.pymbolic_indices(expr.multiindex)
-        idx_readsA = ctx.pymbolic_indices(expr.children[0].multiindex)
-        idx_readsB = ctx.pymbolic_indices(expr.children[1].multiindex)
         var = ctx.pymbolic_variable(expr)
-        var_readsA = ctx.pymbolic_variable(expr.children[0])
-        var_readsB = ctx.pymbolic_variable(expr.children[1])
-        output = SubArrayRef(idx, p.Subscript(var, idx))
-        reads = (SubArrayRef(idx_readsA, p.Subscript(var_readsA, idx_readsA)), SubArrayRef(idx_readsB, p.Subscript(var_readsB, idx_readsB)))
-        return [lp.CallInstruction((output,), p.Call(p.Variable("solve"), reads), within_inames=ctx.active_inames())]
+        lhs = (SubArrayRef(idx, p.Subscript(var, idx)),)
+
+        reads = ()
+        for child in expr.children:
+            idx_reads = ctx.pymbolic_indices(child.multiindex)
+            var = ctx.pymbolic_variable(expr.children[0])
+            print(var_reads)
+            reads += SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads))
+        rhs = p.Call(p.Variable("solve"), reads)
+
+        return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
     else:
         return [lp.Assignment(ctx.pymbolic_variable(expr), expression(expr, ctx, top=True), within_inames=ctx.active_inames())]
 
