@@ -33,7 +33,7 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'IndexSum', 'ListTensor', 'Concatenate', 'Delta',
            'index_sum', 'partial_indexed', 'reshape', 'view',
            'indices', 'as_gem', 'FlexiblyIndexed',
-           'Inverse', 'Determinant', 'Solve', 'decompose_variable_view']
+           'Inverse', 'Solve', 'decompose_variable_view']
 
 
 class NodeMeta(type):
@@ -783,18 +783,26 @@ class Delta(Scalar, Terminal):
         return self
 
 
-# TODO: inverse should be different from comp tensor
-# in the sense that it does not take a local to a global view of a matrix
-# but instead eats a global view and spits out another global view
-# it does not transformation between free indices and shape so you would think it does not need a multiindex
-# but the multiindex is necessary to feed in the global view of the tensor
-# it can still have free_indices inherited by the  aggregate (?)
 class Inverse(Node):
+    """ Inverse is a shape to shape operation.
+
+        :arg aggregate: Tensor to be inversed
+        :arg multiindex: Indices for result of Inverse
+
+        Inverse is different from ComponentTensor, because its children must have shape.
+        It does no transformation between free indices and shape, but the multiindex is still necessary.
+        The multiindices of the children are used for indexing them when passing to inverse function call,
+        the multiindex of the Inverse node itself is used to index the result of the function call.
+    """
     __slots__ = ('children', 'multiindex', 'shape')
     __back__ = ('multiindex',)
 
     def __new__(cls, aggregate, multiindex):
         assert multiindex
+
+        # Children must have shape and multiindices
+        assert aggregate.multiindex
+        assert aggregate.shape
 
         # Set index extents from shape
         for index, extent in zip(multiindex, aggregate.shape):
@@ -810,37 +818,27 @@ class Inverse(Node):
         return self
 
 
-# NOTE: Slate does not support determinants yet
-# determinant taks in a global view and spits out a scalar
-# similar to an Indexed Node: takes a object of some shape
-# and turns into something scalar shaped
-class Determinant(Scalar):
-    __slots__ = ('children', )
-
-    def __new__(cls, aggregate):
-        # det of scalar valued constant is aggregate itself
-        if isinstance(aggregate, Constant):
-            return aggregate
-
-        # tensor must be square
-        assert not aggregate.shape
-        assert all(aggregate.shape) == aggregate.shape[0], "Tensor must be square"
-
-        # Zero folding
-        if isinstance(aggregate, Zero):
-            return Zero()
-
-        self = super(Determinant, cls).__new__(cls)
-        self.children = (aggregate,)
-
-        return self
-
 class Solve(Node):
+    """ Solve is a shape to shape operation similar to Inverse.
+
+        :arg A: Tensor
+        :arg B: Right-hand side
+        :arg multiindex: Indices for result of solve
+    """
     __slots__ = ('children', 'multiindex', 'shape')
     __back__ = ('multiindex',)
 
-    def __new__(cls, A,B, multiindex):
+    def __new__(cls, A, B, multiindex):
         assert multiindex
+
+        # Children must have shape and multiindices
+        assert A.multiindex
+        assert A.shape
+        assert B.multiindex
+        assert B.shape
+
+        # Match shapes
+        assert A.shape[1] == B.shape[0]
 
         # Set index extents from shape
         for index, extent in zip(multiindex, B.shape):
@@ -848,10 +846,10 @@ class Solve(Node):
             index.set_extent(extent)
 
         self = super(Solve, cls).__new__(cls)
-        self.children = (A,B)
+        self.children = (A, B)
         self.shape = B.shape
         self.multiindex = multiindex
-        self.free_indices = B.free_indices#??
+        self.free_indices = B.free_indices
 
         return self
 
