@@ -84,10 +84,7 @@ def generate(impero_c, args, precision, scalar_type, kernel_name="loopy_kernel",
     data = list(args)
     for i, temp in enumerate(impero_c.temporaries):
         # Inverse and Solve translate to void function calls so that lhs temporary can be overstepped
-        if not (isinstance(temp, gem.Inverse) or isinstance(temp, gem.Solve)):
-            name = "t%d" % i
-        else:
-            name = "t%d" % (i-1)
+        name = "t%d" % i
         if isinstance(temp, gem.Constant):
             data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=temp.array.dtype, initializer=temp.array, address_space=lp.AddressSpace.LOCAL, read_only=True))
         else:
