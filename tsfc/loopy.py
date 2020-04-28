@@ -84,7 +84,6 @@ class LoopyContext(object):
 @contextmanager
 def active_indices(gem_indices, pym_indices, ctx):
     """ Context manager function to keep track of active indices.
-    Note: Does not work for recursion, hence cannot be used for statement_for.
     """
     for gem_index, pym_index in zip(gem_indices, pym_indices):
         ctx.active_indices[gem_index] = pym_index
@@ -173,12 +172,11 @@ def statement_for(tree, ctx):
     extent = tree.index.extent
     assert extent
     idx = ctx.name_gen(ctx.index_names[tree.index])
-    ctx.active_indices[tree.index] = p.Variable(idx)
     ctx.index_extent[idx] = extent
 
-    statements = statement(tree.children[0], ctx)
+    with active_indices((tree.index,), (p.Variable(idx),), ctx) as ctx_active:
+        statements = statement(tree.children[0], ctx_active)
 
-    ctx.active_indices.pop(tree.index)
     return statements
 
 
@@ -246,7 +244,7 @@ def statement_evaluate(leaf, ctx):
         reads = ()
         for child in expr.children:
             idx_reads = ctx.pymbolic_indices(child.multiindex)
-            var = ctx.pymbolic_variable(expr.children[0])
+            var = ctx.pymbolic_variable(child)
             reads += SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads))
         rhs = p.Call(p.Variable("solve"), reads)
 
