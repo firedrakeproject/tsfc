@@ -794,25 +794,15 @@ class Inverse(Node):
         The multiindices of the children are used for indexing them when passing to inverse function call,
         the multiindex of the Inverse node itself is used to index the result of the function call.
     """
-    __slots__ = ('children', 'multiindex', 'shape')
-    __back__ = ('multiindex',)
+    __slots__ = ('children', 'shape')
+    __back__ = ()
 
-    def __new__(cls, aggregate, multiindex):
-        assert multiindex
-
-        # Children must have shape and multiindices
-        assert aggregate.multiindex
+    def __new__(cls, aggregate):
         assert aggregate.shape
-
-        # Set index extents from shape
-        for index, extent in zip(multiindex, aggregate.shape):
-            assert isinstance(index, Index)
-            index.set_extent(extent)
 
         self = super(Inverse, cls).__new__(cls)
         self.children = (aggregate,)
         self.shape = aggregate.shape
-        self.multiindex = multiindex
         self.free_indices = aggregate.free_indices
 
         return self
@@ -825,30 +815,21 @@ class Solve(Node):
         :arg B: Right-hand side
         :arg multiindex: Indices for result of solve
     """
-    __slots__ = ('children', 'multiindex', 'shape')
-    __back__ = ('multiindex',)
+    __slots__ = ('children', 'shape')
+    __back__ = ()
 
-    def __new__(cls, A, B, multiindex):
-        assert multiindex
+    def __new__(cls, A, B):
 
-        # Children must have shape and multiindices
-        assert A.multiindex
+        # Children must have shape
         assert A.shape
-        assert B.multiindex
         assert B.shape
 
         # Match shapes
         assert A.shape[1] == B.shape[0]
 
-        # Set index extents from shape
-        for index, extent in zip(multiindex, B.shape):
-            assert isinstance(index, Index)
-            index.set_extent(extent)
-
         self = super(Solve, cls).__new__(cls)
         self.children = (A, B)
         self.shape = B.shape
-        self.multiindex = multiindex
         self.free_indices = B.free_indices
 
         return self

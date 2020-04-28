@@ -72,11 +72,24 @@ class LoopyContext(object):
         # Return all active indices
         return frozenset([i.name for i in self.active_indices.values()])
 
-    def pymbolic_indices(self, indices):
+    def pymbolic_indices(self, expr):
+        try:
+            indices = expr.multiindex
+        except AttributeError:
+            indices = tuple(shp for shp in expr.shape)
         pym_idx = tuple()
         for index in indices:
-            name = index.name
-            self.index_extent[name] = index.extent
+            if type(index) == gem.Index:
+                if not index.name:
+                    name = self.name_gen(self.index_names[index])
+                else:
+                    name = index.name
+                assert index.extent
+                extent = index.extent
+            else:
+                name = self.name_gen(self.index_names[index])
+                extent = index
+            self.index_extent[name] = extent
             pym_idx += (p.Variable(name), )
         return pym_idx
 
@@ -219,33 +232,33 @@ def statement_evaluate(leaf, ctx):
         return []
     elif isinstance(expr, gem.ComponentTensor):
         statements = []
-        idx = ctx.pymbolic_indices(expr.multiindex)
+        idx = ctx.pymbolic_indices(expr)
         var, sub_idx = ctx.pymbolic_variable_and_destruct(expr)
         lhs = p.Subscript(var, idx + sub_idx)
         with active_indices(expr.multiindex, idx, ctx) as ctx_active:
             statements = [lp.Assignment(lhs, expression(expr.children[0], ctx_active), within_inames=ctx_active.active_inames())]
         return statements
     elif isinstance(expr, gem.Inverse):
-        idx = ctx.pymbolic_indices(expr.multiindex)
+        idx = ctx.pymbolic_indices(expr)
         var = ctx.pymbolic_variable(expr)
         lhs = (SubArrayRef(idx, p.Subscript(var, idx)),)
 
-        idx_reads = ctx.pymbolic_indices(expr.children[0].multiindex)
+        idx_reads = ctx.pymbolic_indices(expr.children[0])
         var_reads = ctx.pymbolic_variable(expr.children[0])
         reads = (SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)),)
         rhs = p.Call(p.Variable("inv"), reads)
 
         return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
     elif isinstance(expr, gem.Solve):
-        idx = ctx.pymbolic_indices(expr.multiindex)
+        idx = ctx.pymbolic_indices(expr)
         var = ctx.pymbolic_variable(expr)
         lhs = (SubArrayRef(idx, p.Subscript(var, idx)),)
 
         reads = ()
         for child in expr.children:
-            idx_reads = ctx.pymbolic_indices(child.multiindex)
-            var = ctx.pymbolic_variable(child)
-            reads += SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads))
+            idx_reads = ctx.pymbolic_indices(child)
+            var_reads = ctx.pymbolic_variable(child)
+            reads += (SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)),)
         rhs = p.Call(p.Variable("solve"), reads)
 
         return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
