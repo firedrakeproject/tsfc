@@ -128,7 +128,6 @@ def replace_indices_indexed(node, self, subst):
 @replace_indices.register(FlexiblyIndexed)
 def replace_indices_flexiblyindexed(node, self, subst):
     child, = node.children
-    assert isinstance(child, Terminal)
     assert not child.free_indices
 
     substitute = dict(subst)
