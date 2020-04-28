@@ -247,7 +247,6 @@ def statement_evaluate(leaf, ctx):
         for child in expr.children:
             idx_reads = ctx.pymbolic_indices(child.multiindex)
             var = ctx.pymbolic_variable(expr.children[0])
-            print(var_reads)
             reads += SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads))
         rhs = p.Call(p.Variable("solve"), reads)
 
@@ -409,8 +408,8 @@ def _expression_indexed(expr, ctx):
     rank = ctx.pym_multiindex(expr.multiindex)
     var = expression(expr.children[0], ctx)
     if isinstance(var, p.Subscript):
-        # if var.index != rank:
-        #     rank = var.index + rank
+        if var.index != rank:
+            rank = var.index + rank
         rank = var.index + rank
         var = var.aggregate
     return p.Subscript(var, rank)
