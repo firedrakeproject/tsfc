@@ -789,7 +789,7 @@ class Inverse(Node):
     __slots__ = ('children', 'shape')
     __back__ = ()
 
-    def __init__(cls, tensor):
+    def __new__(cls, tensor):
         assert len(tensor.shape) == 2
         assert tensor.shape[0] == tensor.shape[1] 
 
@@ -797,8 +797,11 @@ class Inverse(Node):
         if tensor.shape == (1,1):
             return ListTensor([[Division(one, Indexed(tensor, (0, 0)))]])
 
+        self = super(Inverse, cls).__new__(cls)
         self.children = (tensor,)
         self.shape = tensor.shape
+
+        return self
 
 
 class Solve(Node):
