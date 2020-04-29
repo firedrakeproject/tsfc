@@ -254,12 +254,12 @@ def statement_evaluate(leaf, ctx):
         var = ctx.pymbolic_variable(expr)
         lhs = (SubArrayRef(idx, p.Subscript(var, idx)),)
 
-        reads = ()
+        reads = []
         for child in expr.children:
             idx_reads = ctx.pymbolic_indices(child)
             var_reads = ctx.pymbolic_variable(child)
-            reads += (SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)),)
-        rhs = p.Call(p.Variable("solve"), reads)
+            reads.append(SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)))
+        rhs = p.Call(p.Variable("solve"), tuple(reads))
 
         return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
     else:
