@@ -94,14 +94,15 @@ class LoopyContext(object):
 
 
 @contextmanager
-def active_indices(gem_indices, pym_indices, ctx):
-    """ Context manager function to keep track of active indices.
-    """
-    for gem_index, pym_index in zip(gem_indices, pym_indices):
-        ctx.active_indices[gem_index] = pym_index
+def active_indices(mapping, ctx):
+    """Push active indices onto context.
+   :arg mapping: dict mapping gem indices to pymbolic index expressions
+   :arg ctx: code generation context.
+   :returns: new code generation context."""
+    saved = ctx.active_indices.copy()
+    ctx.active_indices.update(mapping)
     yield ctx
-    for index in gem_indices:
-        ctx.active_indices.pop(index)
+    [ctx.active_indices.pop(key) for key in mapping.keys()]
 
 
 def generate(impero_c, args, precision, scalar_type, kernel_name="loopy_kernel", index_names=[]):
@@ -185,8 +186,7 @@ def statement_for(tree, ctx):
     assert extent
     idx = ctx.name_gen(ctx.index_names[tree.index])
     ctx.index_extent[idx] = extent
-
-    with active_indices((tree.index,), (p.Variable(idx),), ctx) as ctx_active:
+    with active_indices({tree.index: p.Variable(idx)}, ctx) as ctx_active:
         return statement(tree.children[0], ctx_active)
 
     return statements
@@ -234,7 +234,8 @@ def statement_evaluate(leaf, ctx):
         idx = ctx.pymbolic_indices(expr)
         var, sub_idx = ctx.pymbolic_variable_and_destruct(expr)
         lhs = p.Subscript(var, idx + sub_idx)
-        with active_indices(expr.multiindex, idx, ctx) as ctx_active:
+        mapping = {i:j for i,j in zip(expr.multiindex,idx)}
+        with active_indices(mapping, ctx) as ctx_active:
             return [lp.Assignment(lhs, expression(expr.children[0], ctx_active), within_inames=ctx_active.active_inames())]
     elif isinstance(expr, gem.Inverse):
         idx = ctx.pymbolic_indices(expr)
