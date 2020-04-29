@@ -187,7 +187,7 @@ def statement_for(tree, ctx):
     ctx.index_extent[idx] = extent
 
     with active_indices((tree.index,), (p.Variable(idx),), ctx) as ctx_active:
-        statements = statement(tree.children[0], ctx_active)
+        return statement(tree.children[0], ctx_active)
 
     return statements
 
@@ -235,8 +235,7 @@ def statement_evaluate(leaf, ctx):
         var, sub_idx = ctx.pymbolic_variable_and_destruct(expr)
         lhs = p.Subscript(var, idx + sub_idx)
         with active_indices(expr.multiindex, idx, ctx) as ctx_active:
-            statements = [lp.Assignment(lhs, expression(expr.children[0], ctx_active), within_inames=ctx_active.active_inames())]
-        return statements
+            return [lp.Assignment(lhs, expression(expr.children[0], ctx_active), within_inames=ctx_active.active_inames())]
     elif isinstance(expr, gem.Inverse):
         idx = ctx.pymbolic_indices(expr)
         var = ctx.pymbolic_variable(expr)
