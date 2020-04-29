@@ -106,7 +106,7 @@ class Queue(object):
 
 def handle(ops, push, decref, node):
     """Helper function for scheduling"""
-    if isinstance(node, gem.Variable):
+    if isinstance(node, gem.Variable) or isinstance(node, gem.StructuredSparseVariable):
         # Declared in the kernel header
         pass
     elif isinstance(node, gem.Constant):

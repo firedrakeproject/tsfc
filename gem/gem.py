@@ -26,7 +26,7 @@ from gem.node import Node as NodeBase
 
 
 __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
-           'Variable', 'Sum', 'Product', 'Division', 'Power',
+           'Variable', 'StructuredSparseVariable', 'Sum', 'Product', 'Division', 'Power',
            'MathFunction', 'MinValue', 'MaxValue', 'Comparison',
            'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
@@ -227,6 +227,34 @@ class Variable(Terminal):
     def __init__(self, name, shape):
         self.name = name
         self.shape = shape
+
+
+class StructuredSparseVariable(Terminal):
+    """Structured sparse variable tensor"""
+
+    __slots__ = ('name', 'shape')
+    # __front__ = ('name', 'shape')
+
+    def __init__(self, name, shape):
+        self.name = name
+        self.shape = shape
+
+    def _key_var_to_ssvar(self, key):
+        """Translate index key in Variable to index in SSVar"""
+        return key
+
+    def _key_ssvar_to_var(self, key):
+        """Translate index key in SSVar to index in Variable"""
+        return key
+    
+    def __getitem__(self, key):
+        return super().__getitem__(self._key_var_to_ssvar(key))
+    
+    def __setitem__(self, key, value):
+        return super().__setitem__(self._key_var_to_ssvar(key))
+
+    def __delitem__(self, key):
+        return super().__delitem__(self._key_var_to_ssvar(key))
 
 
 class Sum(Scalar):
@@ -617,6 +645,7 @@ class ComponentTensor(Node):
     __back__ = ('multiindex',)
 
     def __new__(cls, expression, multiindex):
+        # print('expression:', expression, expression.shape)
         assert not expression.shape
 
         # Empty multiindex

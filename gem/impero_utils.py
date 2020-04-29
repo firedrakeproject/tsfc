@@ -70,6 +70,7 @@ def compile_gem(assignments, prefix_ordering, remove_zeros=False):
 
     # Build operation ordering
     ops = scheduling.emit_operations(assignments, get_indices)
+    print('\nops:', ops)
 
     # Empty kernel
     if len(ops) == 0:

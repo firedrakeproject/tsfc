@@ -412,6 +412,11 @@ def _expression_variable(expr, ctx):
     return ctx.pymbolic_variable(expr)
 
 
+@_expression.register(gem.StructuredSparseVariable)
+def _expression_stucturedsparsevariable(expr, ctx):
+    return ctx.pymbolic_variable(expr)
+
+
 @_expression.register(gem.Indexed)
 def _expression_indexed(expr, ctx):
     rank = ctx.fetch_multiindex(expr.multiindex)
