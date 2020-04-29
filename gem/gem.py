@@ -814,21 +814,20 @@ class Solve(Node):
     __slots__ = ('children', 'shape')
     __back__ = ()
 
-    def __new__(cls, A, B):
+    def __init__(self, A, B):
 
         # Children must have shape
         assert A.shape
         assert B.shape
 
-        # Match shapes
-        assert A.shape[1] == B.shape[0]
+        # Shape requirements
+        assert len(A.shape) == 2
+        assert A.shape[0] == A.shape[1] 
+        assert A.shape[0] == B.shape[0]
 
-        self = super(Solve, cls).__new__(cls)
         self.children = (A, B)
-        self.shape = B.shape
-        self.free_indices = B.free_indices
-
-        return self
+        self.shape = A.shape[1:] + B.shape[1:]
+        self.free_indices = A.free_indices + B.free_indices
 
 
 def unique(indices):
