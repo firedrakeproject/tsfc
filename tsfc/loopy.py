@@ -230,7 +230,7 @@ def statement_evaluate(leaf, ctx):
         idx = ctx.pymbolic_indices(expr)
         var, sub_idx = ctx.pymbolic_variable_and_destruct(expr)
         lhs = p.Subscript(var, idx + sub_idx)
-        mapping = {i:j for i,j in zip(expr.multiindex,idx)}
+        mapping = {i: j for i, j in zip(expr.multiindex, idx)}
         with active_indices(mapping, ctx) as ctx_active:
             return [lp.Assignment(lhs, expression(expr.children[0], ctx_active), within_inames=ctx_active.active_inames())]
     elif isinstance(expr, gem.Inverse):
