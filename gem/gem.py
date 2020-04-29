@@ -795,7 +795,8 @@ class Inverse(Node):
 
         # Invert 1x1 matrix
         if tensor.shape == (1,1):
-            return ListTensor([[Division(one, Indexed(tensor, (0, 0)))]])
+            multiindex = (Index(extent=1), Index(extent=1))
+            return ComponentTensor(Division(one, Indexed(tensor, multiindex)), multiindex)
 
         self = super(Inverse, cls).__new__(cls)
         self.children = (tensor,)
