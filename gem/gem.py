@@ -791,10 +791,10 @@ class Inverse(Node):
 
     def __new__(cls, tensor):
         assert len(tensor.shape) == 2
-        assert tensor.shape[0] == tensor.shape[1] 
+        assert tensor.shape[0] == tensor.shape[1]
 
         # Invert 1x1 matrix
-        if tensor.shape == (1,1):
+        if tensor.shape == (1, 1):
             multiindex = (Index(extent=1), Index(extent=1))
             return ComponentTensor(Division(one, Indexed(tensor, multiindex)), multiindex)
 
@@ -823,7 +823,7 @@ class Solve(Node):
 
         # Shape requirements
         assert len(A.shape) == 2
-        assert A.shape[0] == A.shape[1] 
+        assert A.shape[0] == A.shape[1]
         assert A.shape[0] == B.shape[0]
 
         self.children = (A, B)
