@@ -75,7 +75,7 @@ class LoopyContext(object):
         try:
             indices = expr.multiindex
         except AttributeError:
-            indices = shape
+            indices = expr.shape
         pym_idx = tuple()
         for index in indices:
             if type(index) == gem.Index:
@@ -99,7 +99,6 @@ def active_indices(mapping, ctx):
    :arg mapping: dict mapping gem indices to pymbolic index expressions
    :arg ctx: code generation context.
    :returns: new code generation context."""
-    saved = ctx.active_indices.copy()
     ctx.active_indices.update(mapping)
     yield ctx
     [ctx.active_indices.pop(key) for key in mapping.keys()]
@@ -189,8 +188,6 @@ def statement_for(tree, ctx):
     with active_indices({tree.index: p.Variable(idx)}, ctx) as ctx_active:
         return statement(tree.children[0], ctx_active)
 
-    return statements
-
 
 @statement.register(imp.Initialise)
 def statement_initialise(leaf, ctx):
@@ -230,7 +227,6 @@ def statement_evaluate(leaf, ctx):
     elif isinstance(expr, gem.Constant):
         return []
     elif isinstance(expr, gem.ComponentTensor):
-        statements = []
         idx = ctx.pymbolic_indices(expr)
         var, sub_idx = ctx.pymbolic_variable_and_destruct(expr)
         lhs = p.Subscript(var, idx + sub_idx)
