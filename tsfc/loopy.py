@@ -76,7 +76,7 @@ class LoopyContext(object):
         try:
             indices = expr.multiindex
         except AttributeError:
-            indices = tuple(shp for shp in expr.shape)
+            indices = shape
         pym_idx = tuple()
         for index in indices:
             if type(index) == gem.Index:
