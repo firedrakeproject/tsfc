@@ -785,25 +785,21 @@ class Delta(Scalar, Terminal):
 
 class Inverse(Node):
     """ Inverse is a shape to shape operation.
-
-        :arg aggregate: Tensor to be inversed
-        :arg multiindex: Indices for result of Inverse
-
-        Inverse is different from ComponentTensor, because its children must have shape.
-        It does no transformation between free indices and shape, but the multiindex is still necessary.
-        The multiindices of the children are used for indexing them when passing to inverse function call,
-        the multiindex of the Inverse node itself is used to index the result of the function call.
     """
     __slots__ = ('children', 'shape')
     __back__ = ()
 
-    def __new__(cls, aggregate):
-        assert aggregate.shape
+    def __new__(cls, tensor):
+        assert len(tensor.shape) == 2
+        assert tensor.shape[0] == tensor.shape[1] 
+
+        # Invert 1x1 matrix
+        if tensor.shape == (1,1):
+            return ListTensor([[Division(one, Indexed(tensor, (0, 0)))]])
 
         self = super(Inverse, cls).__new__(cls)
-        self.children = (aggregate,)
-        self.shape = aggregate.shape
-        self.free_indices = aggregate.free_indices
+        self.children = (tensor,)
+        self.shape = tensor.shape
 
         return self
 
