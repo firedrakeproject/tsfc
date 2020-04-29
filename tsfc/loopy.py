@@ -61,12 +61,11 @@ class LoopyContext(object):
         return pym
 
     def pymbolic_variable_and_destruct(self, node):
-        pym = self.gem_to_pym(node)
-        if node in self.indices:
-            indices = self.pym_multiindex(self.indices[node])
-            if indices:
-                return (pym, indices)
-        return (pym, ())
+        pym = self.pymbolic_variable(node)
+        if isinstance(pym, p.Subscript):
+            return pym.aggregate, pym.index_tuple
+        else:
+            return pym, ()
 
     def active_inames(self):
         # Return all active indices
