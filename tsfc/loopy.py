@@ -418,8 +418,6 @@ def _expression_indexed(expr, ctx):
     rank = ctx.pym_multiindex(expr.multiindex)
     var = expression(expr.children[0], ctx)
     if isinstance(var, p.Subscript):
-        if var.index != rank:
-            rank = var.index + rank
         rank = var.index + rank
         var = var.aggregate
     return p.Subscript(var, rank)
