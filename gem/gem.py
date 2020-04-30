@@ -562,7 +562,7 @@ class FlexiblyIndexed(Scalar):
     def __init__(self, variable, dim2idxs):
         """Construct a flexibly indexed node.
 
-        :arg variable: a :py:class:`Variable`
+        :arg variable: a node that has a shape
         :arg dim2idxs: describes the mapping of indices
 
         For example, if ``variable`` is rank two, and ``dim2idxs`` is
@@ -574,7 +574,7 @@ class FlexiblyIndexed(Scalar):
             variable[1 + i*12 + j*4 + k][0]
 
         """
-        assert isinstance(variable, Variable)
+        assert variable.shape
         assert len(variable.shape) == len(dim2idxs)
 
         dim2idxs_ = []
