@@ -179,7 +179,7 @@ class KernelBuilder(KernelBuilderBase):
                              domain_number=domain_number)
         self.diagonal = diagonal
         self.local_tensor = None
-        self.coordinates_arg = None
+        self.coordinates_arg = []
         self.coefficient_args = []
         self.coefficient_split = {}
         self.dont_split = frozenset(dont_split)
@@ -209,15 +209,19 @@ class KernelBuilder(KernelBuilderBase):
             diagonal=self.diagonal)
         return expressions
 
-    def set_coordinates(self, domain):
+    def set_coordinates(self, domains):
         """Prepare the coordinate field.
 
-        :arg domain: :class:`ufl.Domain`
+        :arg domains: a tuple of :class:`ufl.Domain`s
         """
         # Create a fake coordinate coefficient for a domain.
-        f = Coefficient(FunctionSpace(domain, domain.ufl_coordinate_element()))
-        self.domain_coordinate[domain] = f
-        self.coordinates_arg = self._coefficient(f, "coords")
+        #f = Coefficient(FunctionSpace(domain, domain.ufl_coordinate_element()))
+        #self.domain_coordinate[domain] = f
+        #self.coordinates_arg = self._coefficient(f, "coords")
+        for i, domain in enumerate(domains):
+            f = Coefficient(FunctionSpace(domain, domain.ufl_coordinate_element()))
+            self.domain_coordinate[domain] = f
+            self.coordinates_arg.append(self._coefficient(f, "coords" + str(i)))
 
     def set_coefficients(self, integral_data, form_data):
         """Prepare the coefficients of the form.
