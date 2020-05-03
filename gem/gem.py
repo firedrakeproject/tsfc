@@ -32,7 +32,8 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
            'IndexSum', 'ListTensor', 'Concatenate', 'Delta',
            'index_sum', 'partial_indexed', 'reshape', 'view',
-           'indices', 'as_gem']
+           'indices', 'as_gem', 'FlexiblyIndexed',
+           'Inverse', 'Solve']
 
 
 class NodeMeta(type):
@@ -561,7 +562,7 @@ class FlexiblyIndexed(Scalar):
     def __init__(self, variable, dim2idxs):
         """Construct a flexibly indexed node.
 
-        :arg variable: a :py:class:`Variable`
+        :arg variable: a node that has a shape
         :arg dim2idxs: describes the mapping of indices
 
         For example, if ``variable`` is rank two, and ``dim2idxs`` is
@@ -573,7 +574,7 @@ class FlexiblyIndexed(Scalar):
             variable[1 + i*12 + j*4 + k][0]
 
         """
-        assert isinstance(variable, Variable)
+        assert variable.shape
         assert len(variable.shape) == len(dim2idxs)
 
         dim2idxs_ = []
@@ -780,6 +781,44 @@ class Delta(Scalar, Terminal):
         free_indices = tuple(index for index in (i, j) if isinstance(index, Index))
         self.free_indices = tuple(unique(free_indices))
         return self
+
+
+class Inverse(Node):
+    """The inverse of a square matrix."""
+    __slots__ = ('children', 'shape')
+
+    def __new__(cls, tensor):
+        assert len(tensor.shape) == 2
+        assert tensor.shape[0] == tensor.shape[1]
+
+        # Invert 1x1 matrix
+        if tensor.shape == (1, 1):
+            multiindex = (Index(), Index())
+            return ComponentTensor(Division(one, Indexed(tensor, multiindex)), multiindex)
+
+        self = super(Inverse, cls).__new__(cls)
+        self.children = (tensor,)
+        self.shape = tensor.shape
+
+        return self
+
+
+class Solve(Node):
+    """Solution of a square matrix equation with (potentially) multiple right hand sides.
+
+    Represents the X obtained by solving AX = B.
+    """
+    __slots__ = ('children', 'shape')
+
+    def __init__(self, A, B):
+        # Shape requirements
+        assert B.shape
+        assert len(A.shape) == 2
+        assert A.shape[0] == A.shape[1]
+        assert A.shape[0] == B.shape[0]
+
+        self.children = (A, B)
+        self.shape = A.shape[1:] + B.shape[1:]
 
 
 def unique(indices):
