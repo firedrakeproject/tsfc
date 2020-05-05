@@ -149,7 +149,7 @@ class ModifiedTerminalMixin(object):
     # Unlike UFL, we do not regard Indexed as a terminal modifier.
     # indexed = _modified_terminal
 
-    filtered = _modified_terminal
+    transformed = _modified_terminal
 
     positive_restricted = _modified_terminal
     negative_restricted = _modified_terminal

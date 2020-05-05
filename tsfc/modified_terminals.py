@@ -22,7 +22,7 @@
 
 from ufl.classes import (ReferenceValue, ReferenceGrad,
                          NegativeRestricted, PositiveRestricted,
-                         Restricted, Filtered, ConstantValue,
+                         Restricted, Transformed, ConstantValue,
                          Jacobian, SpatialCoordinate, Zero)
 from ufl.checks import is_cellwise_constant
 
@@ -134,8 +134,8 @@ def analyse_modified_terminal(expr):
             restriction = t._side
             t, = t.ufl_operands
 
-        elif isinstance(t, Filtered):
-            assert fltr is None, "Got twice filtered terminal!"
+        elif isinstance(t, Transformed):
+            assert fltr is None, "Got twice transformed terminal!"
             t, fltr = t.ufl_operands
 
         elif t._ufl_terminal_modifiers_:
@@ -169,7 +169,7 @@ def construct_modified_terminal(mt, terminal):
     dim = expr.ufl_domain().topological_dimension()
 
     if mt.filter:
-        expr = Filtered(expr, mt.filter)
+        expr = Transformed(expr, mt.filter)
 
     for n in range(mt.local_derivatives):
         # Return zero if expression is trivially constant. This has to
