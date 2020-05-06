@@ -4,7 +4,9 @@ notifications:
 
 language: python
 python:
-  - "3.5"
+  - "3.6"
+  - "3.7"
+  - "3.8"
 
 before_install:
   - pip install -r requirements.txt
@@ -12,8 +14,8 @@ before_install:
   - pip install --upgrade pytest
 
 install:
-  - python setup.py install
+  - pip install .
 
 script:
   - flake8 .
-  - py.test tests
+  - pytest tests
