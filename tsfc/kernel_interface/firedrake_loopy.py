@@ -26,7 +26,7 @@ def make_builder(*args, **kwargs):
 
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
-                 "domain_number", "needs_cell_sizes", "tabulations", "quadrature_rule",
+                 "domain_number", "domain_numbers", "needs_cell_sizes", "tabulations", "quadrature_rule",
                  "coefficient_numbers", "coefficient_parts", "__weakref__")
     """A compiled Kernel object.
 
@@ -37,6 +37,7 @@ class Kernel(object):
     :kwarg domain_number: Which domain number in the original form
         does this kernel correspond to (can be used to index into
         original_form.ufl_domains() to get the correct domain).
+    :kwarg domain_numbers: Similary as above, but include extra domains.
     :kwarg coefficient_numbers: A list of which coefficients from the
         form the kernel needs.
     :kwarg coefficient_parts: A list of enabled parts corresponding to
@@ -47,7 +48,7 @@ class Kernel(object):
     :kwarg needs_cell_sizes: Does the kernel require cell sizes.
     """
     def __init__(self, ast=None, integral_type=None, oriented=False,
-                 subdomain_id=None, domain_number=None, quadrature_rule=None,
+                 subdomain_id=None, domain_number=None, domain_numbers=None, quadrature_rule=None,
                  coefficient_numbers=(), coefficient_parts=(),
                  needs_cell_sizes=False):
         # Defaults
@@ -55,6 +56,7 @@ class Kernel(object):
         self.integral_type = integral_type
         self.oriented = oriented
         self.domain_number = domain_number
+        self.domain_numbers = domain_numbers
         self.subdomain_id = subdomain_id
         self.coefficient_numbers = coefficient_numbers
         self.coefficient_parts = coefficient_parts
@@ -177,13 +179,13 @@ class ExpressionKernelBuilder(KernelBuilderBase):
 class KernelBuilder(KernelBuilderBase):
     """Helper class for building a :class:`Kernel` object."""
 
-    def __init__(self, integral_type, subdomain_id, domain_number, scalar_type, dont_split=(),
+    def __init__(self, integral_type, subdomain_id, domain_number, domain_numbers, scalar_type, dont_split=(),
                  diagonal=False):
         """Initialise a kernel builder."""
         super(KernelBuilder, self).__init__(scalar_type, integral_type.startswith("interior_facet"))
 
         self.kernel = Kernel(integral_type=integral_type, subdomain_id=subdomain_id,
-                             domain_number=domain_number)
+                             domain_number=domain_number, domain_numbers=domain_numbers)
         self.diagonal = diagonal
         self.local_tensor = None
         self.coordinates_arg = []

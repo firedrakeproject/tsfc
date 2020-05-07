@@ -12,7 +12,7 @@ import ufl
 from ufl.algorithms import extract_arguments, extract_coefficients
 from ufl.algorithms.analysis import has_type
 from ufl.classes import Form, GeometricQuantity
-from ufl.domain import extract_domains
+from ufl.domain import extract_domains, sort_domains
 from ufl.log import GREEN
 from ufl.utils.sequences import max_degree
 
@@ -109,6 +109,10 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     integral_type = integral_data.integral_type
     interior_facet = integral_type.startswith("interior_facet")
     mesh = integral_data.domain
+    meshes = set((mesh, ))
+    for integral in integral_data.integrals:
+        meshes.update(extract_domains(integral.integrand()))
+    meshes = tuple(sort_domains(meshes))
     cell = integral_data.domain.ufl_cell()
     arguments = form_data.preprocessed_form.arguments()
     kernel_name = "%s_%s_integral_%s" % (prefix, integral_type, integral_data.subdomain_id)
@@ -123,7 +127,8 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     # Dict mapping domains to index in original_form.ufl_domains()
     domain_numbering = form_data.original_form.domain_numbering()
     builder = interface(integral_type, integral_data.subdomain_id,
-                        domain_numbering[integral_data.domain],
+                        domain_numbering[mesh],
+                        [domain_numbering[m] for m in meshes],
                         parameters["scalar_type"],
                         diagonal=diagonal)
     argument_multiindices = tuple(builder.create_element(arg.ufl_element()).get_indices()
@@ -137,10 +142,6 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
 
     return_variables = builder.set_arguments(arguments, argument_multiindices)
 
-    meshes = set((mesh, ))
-    for integral in integral_data.integrals:
-        meshes.update(extract_domains(integral.integrand()))
-    meshes = tuple(sorted(meshes))
     print("printing meshes:::::::", meshes)
     builder.set_coordinates(meshes)
     builder.set_cell_sizes(mesh)
