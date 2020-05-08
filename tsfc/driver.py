@@ -109,10 +109,13 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     integral_type = integral_data.integral_type
     interior_facet = integral_type.startswith("interior_facet")
     mesh = integral_data.domain
-    meshes = set((mesh, ))
+    # Make a tuple of all meshes involved.
+    # Order meshes so that the integration domain comes first.
+    # TODO: Remove Kernel.domain_number and always use Kernel.domain_numbers[0].
+    meshes = set()
     for integral in integral_data.integrals:
         meshes.update(extract_domains(integral.integrand()))
-    meshes = tuple(sort_domains(meshes))
+    meshes = (mesh, ) + tuple(sort_domains(meshes - set((mesh, ))))
     cell = integral_data.domain.ufl_cell()
     arguments = form_data.preprocessed_form.arguments()
     kernel_name = "%s_%s_integral_%s" % (prefix, integral_type, integral_data.subdomain_id)
@@ -142,7 +145,6 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
 
     return_variables = builder.set_arguments(arguments, argument_multiindices)
 
-    print("printing meshes:::::::", meshes)
     builder.set_coordinates(meshes)
     builder.set_cell_sizes(mesh)
 
