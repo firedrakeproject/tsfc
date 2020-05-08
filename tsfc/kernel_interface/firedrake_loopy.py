@@ -97,9 +97,9 @@ class KernelBuilderBase(_KernelBuilderBase):
         :arg name: coefficient name
         :returns: loopy argument for the coefficient
         """
-        funarg, expression = prepare_coefficient(coefficient, name, self.scalar_type, interior_facet=self.interior_facet)
+        funarg, varexp, expression = prepare_coefficient(coefficient, name, self.scalar_type, interior_facet=self.interior_facet)
         self.coefficient_map[coefficient] = expression
-        return funarg
+        return funarg, varexp
 
     def set_cell_sizes(self, domain):
         """Setup a fake coefficient for "cell sizes".
@@ -112,7 +112,7 @@ class KernelBuilderBase(_KernelBuilderBase):
         in P1).
         """
         f = Coefficient(FunctionSpace(domain, FiniteElement("P", domain.ufl_cell(), 1)))
-        funarg, expression = prepare_coefficient(f, "cell_sizes", self.scalar_type, interior_facet=self.interior_facet)
+        funarg, varexp, expression = prepare_coefficient(f, "cell_sizes", self.scalar_type, interior_facet=self.interior_facet)
         self.cell_sizes_arg = funarg
         self._cell_sizes = expression
 
@@ -144,11 +144,11 @@ class ExpressionKernelBuilder(KernelBuilderBase):
                 subcoeffs = coefficient.split()  # Firedrake-specific
                 self.coefficients.extend(subcoeffs)
                 self.coefficient_split[coefficient] = subcoeffs
-                self.kernel_args += [self._coefficient(subcoeff, "w_%d_%d" % (i, j))
+                self.kernel_args += [self._coefficient(subcoeff, "w_%d_%d" % (i, j))[0]
                                      for j, subcoeff in enumerate(subcoeffs)]
             else:
                 self.coefficients.append(coefficient)
-                self.kernel_args.append(self._coefficient(coefficient, "w_%d" % (i,)))
+                self.kernel_args.append(self._coefficient(coefficient, "w_%d" % (i,))[0])
 
     def register_requirements(self, ir):
         """Inspect what is referenced by the IR that needs to be
@@ -194,7 +194,9 @@ class KernelBuilder(KernelBuilderBase):
         self.coordinates_arg = []
         self.coefficient_args = []
         self.coefficient_split = {}
+        self.coefficient_len = []
         self.dont_split = frozenset(dont_split)
+        self.variable_to_coefficient_index_map = {}
 
         # Facet number
         if integral_type in ['exterior_facet', 'exterior_facet_vert']:
@@ -230,7 +232,7 @@ class KernelBuilder(KernelBuilderBase):
         for i, domain in enumerate(domains):
             f = Coefficient(FunctionSpace(domain, domain.ufl_coordinate_element()))
             self.domain_coordinate[domain] = f
-            self.coordinates_arg.append(self._coefficient(f, "coords" + str(i)))
+            self.coordinates_arg.append(self._coefficient(f, "coords" + str(i))[0])
 
     def set_coefficients(self, integral_data, form_data):
         """Prepare the coefficients of the form.
@@ -240,47 +242,71 @@ class KernelBuilder(KernelBuilderBase):
         """
         coefficients = []
         coefficient_numbers = []
-        coefficient_parts = []
         # enabled_coefficients is a boolean array that indicates which
         # of reduced_coefficients the integral requires.
         for i in range(len(integral_data.enabled_coefficients)):
             if integral_data.enabled_coefficients[i]:
                 original = form_data.reduced_coefficients[i]
                 coefficient = form_data.function_replace_map[original]
-                #if coefficient.mixed():
-                #    enabled_parts = integral_data.integral_coefficients_parts[integral_data.integral_coefficients.index(original)]
-                #    split = [coefficient.split()[part] for part in enabled_parts]
-                #    coefficients.extend(split)
-                #    # Coefficient must already be split in the form
-                #    self.coefficient_split[coefficient] = None  # split
                 if type(coefficient.ufl_element()) == ufl_MixedElement:
                     if original in self.dont_split:
                         coefficients.append(coefficient)
                         self.coefficient_split[coefficient] = [coefficient]
+                        self.variable_to_coefficient_index_map[coefficient] = None
+                        self.coefficient_len.append(None)
                     else:
+                        split = []
                         if coefficient.mixed():
-                            split = [Coefficient(FunctionSpace(d, e))
-                                     for d, e in zip(coefficient.ufl_domain(), coefficient.ufl_element().sub_elements())]
+                            assert isinstance(coefficient.ufl_domain(), tuple)
+                            for idx, (d, e) in enumerate(zip(coefficient.ufl_domain(), coefficient.ufl_element().sub_elements())):
+                                coeff = Coefficient(FunctionSpace(d, e))
+                                split.append(coeff)
+                                self.variable_to_coefficient_index_map[coeff] = (len(coefficient_numbers), idx)
                         else:
-                            split = [Coefficient(FunctionSpace(coefficient.ufl_domain(), element))
-                                     for element in coefficient.ufl_element().sub_elements()]
+                            assert not isinstance(coefficient.ufl_domain(), tuple)
+                            d = coefficient.ufl_domain()
+                            for idx, e in enumerate(coefficient.ufl_element().sub_elements()):
+                                coeff = Coefficient(FunctionSpace(d, e))
+                                split.append(coeff)
+                                self.variable_to_coefficient_index_map[coeff] = (len(coefficient_numbers), idx)
                         coefficients.extend(split)
                         self.coefficient_split[coefficient] = split
-                    enabled_parts = None
+                        self.coefficient_len.append(len(split))
                 else:
                     coefficients.append(coefficient)
-                    enabled_parts = None
+                    self.variable_to_coefficient_index_map[coefficient] = None
+                    self.coefficient_len.append(None)
                 # This is which coefficient in the original form the
                 # current coefficient is.
                 # Consider f*v*dx + g*v*ds, the full form contains two
                 # coefficients, but each integral only requires one.
                 coefficient_numbers.append(form_data.original_coefficient_positions[i])
-                coefficient_parts.append(enabled_parts)
         for i, coefficient in enumerate(coefficients):
-            self.coefficient_args.append(
-                self._coefficient(coefficient, "w_%d" % i))
+            funarg, varexp = self._coefficient(coefficient, "w_%d" % i)
+            self.coefficient_args.append(funarg)
+            # Update the key from ufl coeff to gen variable
+            self.variable_to_coefficient_index_map[varexp] = self.variable_to_coefficient_index_map.pop(coefficient)
         self.kernel.coefficient_numbers = tuple(coefficient_numbers)
-        self.kernel.coefficient_parts = tuple(coefficient_parts)
+
+    def set_coefficient_parts(self, varset):
+        """Set kernel.coefficient_parts.
+        :arg varset: a tuple of `gem.Variable`s that are actually used in the form.
+        Call this method only after self.kernel.coefficient_numbers is set.
+        """
+        # Map gem.Variable -> (mixed coefficient local number, idx)
+        variable_to_coefficient_index_map = self.variable_to_coefficient_index_map
+        # Initialise list: [] for mixed coefficients and None for the others
+        coefficient_parts = [None] * len(self.kernel.coefficient_numbers)
+        for _, val in variable_to_coefficient_index_map.items():
+            if val is not None:
+                coefficient_parts[val[0]] = []
+        for var in varset:
+            if var in variable_to_coefficient_index_map and variable_to_coefficient_index_map[var]:
+                num = variable_to_coefficient_index_map[var][0]
+                idx = variable_to_coefficient_index_map[var][1]
+                coefficient_parts[num].append(idx)
+        coefficient_parts = [sorted(parts) if parts else None for parts in coefficient_parts]
+        self.kernel.coefficient_parts = coefficient_parts
 
     def register_requirements(self, ir):
         """Inspect what is referenced by the IR that needs to be
@@ -307,7 +333,16 @@ class KernelBuilder(KernelBuilderBase):
             args.append(self.cell_orientations_loopy_arg)
         if self.kernel.needs_cell_sizes:
             args.append(self.cell_sizes_arg)
-        args.extend(self.coefficient_args)
+        count = 0
+        for i, coeff_parts in enumerate(self.kernel.coefficient_parts):
+            if self.coefficient_len[i] is None:
+                args.append(self.coefficient_args[count])
+                count += 1
+            else:
+                for j in range(self.coefficient_len[i]):
+                    if j in coeff_parts:
+                        args.append(self.coefficient_args[count])
+                    count += 1
         if self.kernel.integral_type in ["exterior_facet", "exterior_facet_vert"]:
             args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(1,)))
         elif self.kernel.integral_type in ["interior_facet", "interior_facet_vert"]:
@@ -347,10 +382,11 @@ def prepare_coefficient(coefficient, name, scalar_type, interior_facet=False):
     if coefficient.ufl_element().family() == 'Real':
         # Constant
         funarg = lp.GlobalArg(name, dtype=scalar_type, shape=(coefficient.ufl_element().value_size(),))
-        expression = gem.reshape(gem.Variable(name, (None,)),
+        varexp = gem.Variable(name, (None,))
+        expression = gem.reshape(varexp,
                                  coefficient.ufl_shape)
 
-        return funarg, expression
+        return funarg, varexp, expression
 
     finat_element = create_element(coefficient.ufl_element())
 
@@ -358,7 +394,8 @@ def prepare_coefficient(coefficient, name, scalar_type, interior_facet=False):
     size = numpy.prod(shape, dtype=int)
 
     if not interior_facet:
-        expression = gem.reshape(gem.Variable(name, (size,)), shape)
+        varexp = gem.Variable(name, (size,))
+        expression = gem.reshape(varexp, shape)
     else:
         varexp = gem.Variable(name, (2*size,))
         plus = gem.view(varexp, slice(size))
@@ -366,7 +403,7 @@ def prepare_coefficient(coefficient, name, scalar_type, interior_facet=False):
         expression = (gem.reshape(plus, shape), gem.reshape(minus, shape))
         size = size * 2
     funarg = lp.GlobalArg(name, dtype=scalar_type, shape=(size,))
-    return funarg, expression
+    return funarg, varexp, expression
 
 
 def prepare_arguments(arguments, multiindices, scalar_type, interior_facet=False, diagonal=False):

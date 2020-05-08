@@ -99,6 +99,10 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
             # Delayed import, loopy is a runtime dependency
             import tsfc.kernel_interface.firedrake_loopy as firedrake_interface_loopy
             interface = firedrake_interface_loopy.KernelBuilder
+    else:
+        #temp
+        raise NotImplementedError("submesh not implemented for outside interface.")
+
 
     # Remove these here, they're handled below.
     if parameters.get("quadrature_degree") in ["auto", "default", None, -1, "-1"]:
@@ -240,6 +244,11 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
                            for mode in mode_irs.keys()]))
     expressions = impero_utils.preprocess_gem(expressions, **options)
     assignments = list(zip(return_variables, expressions))
+
+    # Collect gem variables that are actaully used in assignments
+    # and set builder.kernel.coefficient_parts
+    variable_set = impero_utils.collect_variables(expressions)
+    builder.set_coefficient_parts(variable_set)
 
     # Let the kernel interface inspect the optimised IR to register
     # what kind of external data is required (e.g., cell orientations,
