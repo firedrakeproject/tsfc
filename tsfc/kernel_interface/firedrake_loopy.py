@@ -37,7 +37,10 @@ class Kernel(object):
     :kwarg domain_number: Which domain number in the original form
         does this kernel correspond to (can be used to index into
         original_form.ufl_domains() to get the correct domain).
-    :kwarg domain_numbers: Similary as above, but include extra domains.
+    :kwarg domain_numbers: List of domain numbers of the domains
+        in the original form that are relevant in this kernel
+        (can be used to index into original_form.ufl_domains() to get
+        the correct domains).
     :kwarg coefficient_numbers: A list of which coefficients from the
         form the kernel needs.
     :kwarg coefficient_parts: A list of enabled parts corresponding to
