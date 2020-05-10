@@ -101,7 +101,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
             interface = firedrake_interface_loopy.KernelBuilder
     else:
         #temp
-        raise NotImplementedError("submesh not implemented for outside interface.")
+        print("interface", interface)
 
 
     # Remove these here, they're handled below.
