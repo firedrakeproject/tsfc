@@ -52,7 +52,7 @@ class Kernel(object):
     """
     def __init__(self, ast=None, integral_type=None, oriented=False,
                  subdomain_id=None, domain_number=None, domain_numbers=None, quadrature_rule=None,
-                 coefficient_numbers=(), coefficient_parts=(),
+                 coefficient_numbers=(), coefficient_parts=None,
                  needs_cell_sizes=False):
         # Defaults
         self.ast = ast
@@ -182,8 +182,7 @@ class ExpressionKernelBuilder(KernelBuilderBase):
 class KernelBuilder(KernelBuilderBase):
     """Helper class for building a :class:`Kernel` object."""
 
-    def __init__(self, integral_type, subdomain_id, domain_number, domain_numbers, scalar_type, dont_split=(),
-                 diagonal=False):
+    def __init__(self, integral_type, subdomain_id, domain_number, domain_numbers, scalar_type, dont_split=(), diagonal=False):
         """Initialise a kernel builder."""
         super(KernelBuilder, self).__init__(scalar_type, integral_type.startswith("interior_facet"))
 
@@ -305,7 +304,7 @@ class KernelBuilder(KernelBuilderBase):
                 num = variable_to_coefficient_index_map[var][0]
                 idx = variable_to_coefficient_index_map[var][1]
                 coefficient_parts[num].append(idx)
-        coefficient_parts = [sorted(parts) if parts else None for parts in coefficient_parts]
+        coefficient_parts = [sorted(parts) if parts is not None else None for parts in coefficient_parts]
         self.kernel.coefficient_parts = coefficient_parts
 
     def register_requirements(self, ir):
@@ -333,16 +332,19 @@ class KernelBuilder(KernelBuilderBase):
             args.append(self.cell_orientations_loopy_arg)
         if self.kernel.needs_cell_sizes:
             args.append(self.cell_sizes_arg)
-        count = 0
-        for i, coeff_parts in enumerate(self.kernel.coefficient_parts):
-            if self.coefficient_len[i] is None:
-                args.append(self.coefficient_args[count])
-                count += 1
-            else:
-                for j in range(self.coefficient_len[i]):
-                    if j in coeff_parts:
-                        args.append(self.coefficient_args[count])
+        if self.kernel.coefficient_parts is None:
+            args.extend(self.coefficient_args)
+        else:
+            count = 0
+            for i, coeff_parts in enumerate(self.kernel.coefficient_parts):
+                if self.coefficient_len[i] is None:
+                    args.append(self.coefficient_args[count])
                     count += 1
+                else:
+                    for j in range(self.coefficient_len[i]):
+                        if j in coeff_parts:
+                            args.append(self.coefficient_args[count])
+                        count += 1
         if self.kernel.integral_type in ["exterior_facet", "exterior_facet_vert"]:
             args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(1,)))
         elif self.kernel.integral_type in ["interior_facet", "interior_facet_vert"]:
