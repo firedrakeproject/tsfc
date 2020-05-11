@@ -14,6 +14,7 @@ from tsfc.finatinterface import create_element
 from tsfc.kernel_interface.common import KernelBuilderBase as _KernelBuilderBase
 from tsfc.kernel_interface.firedrake import check_requirements
 from tsfc.loopy import generate as generate_loopy
+from pyop2.codegen.rep2loopy import TARGET
 
 
 # Expression kernel description type
@@ -78,7 +79,7 @@ class KernelBuilderBase(_KernelBuilderBase):
             shape = (1,)
             cell_orientations = gem.Variable("cell_orientations", shape)
             self._cell_orientations = (gem.Indexed(cell_orientations, (0,)),)
-        self.cell_orientations_loopy_arg = lp.GlobalArg("cell_orientations", dtype=numpy.int32, shape=shape)
+        self.cell_orientations_loopy_arg = lp.GlobalArg("cell_orientations", dtype=numpy.int32, shape=shape, target=TARGET)
 
     def _coefficient(self, coefficient, name):
         """Prepare a coefficient. Adds glue code for the coefficient
@@ -162,7 +163,7 @@ class ExpressionKernelBuilder(KernelBuilderBase):
             args.append(self.cell_sizes_arg)
         args.extend(self.kernel_args)
         for name_, shape in self.tabulations:
-            args.append(lp.GlobalArg(name_, dtype=self.scalar_type, shape=shape))
+            args.append(lp.GlobalArg(name_, dtype=self.scalar_type, shape=shape, target=TARGET))
 
         loopy_kernel = generate_loopy(impero_c, args, precision, self.scalar_type,
                                       "expression_kernel", index_names)
@@ -284,12 +285,12 @@ class KernelBuilder(KernelBuilderBase):
             args.append(self.cell_sizes_arg)
         args.extend(self.coefficient_args)
         if self.kernel.integral_type in ["exterior_facet", "exterior_facet_vert"]:
-            args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(1,)))
+            args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(1,), target=TARGET))
         elif self.kernel.integral_type in ["interior_facet", "interior_facet_vert"]:
-            args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(2,)))
+            args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(2,), target=TARGET))
 
         for name_, shape in self.kernel.tabulations:
-            args.append(lp.GlobalArg(name_, dtype=self.scalar_type, shape=shape))
+            args.append(lp.GlobalArg(name_, dtype=self.scalar_type, shape=shape, target=TARGET))
 
         self.kernel.quadrature_rule = quadrature_rule
         self.kernel.ast = generate_loopy(impero_c, args, precision,
@@ -340,7 +341,7 @@ def prepare_coefficient(coefficient, name, scalar_type, interior_facet=False):
         minus = gem.view(varexp, slice(size, 2*size))
         expression = (gem.reshape(plus, shape), gem.reshape(minus, shape))
         size = size * 2
-    funarg = lp.GlobalArg(name, dtype=scalar_type, shape=(size,))
+    funarg = lp.GlobalArg(name, dtype=scalar_type, shape=(size,), target=TARGET)
     return funarg, expression
 
 
@@ -363,7 +364,7 @@ def prepare_arguments(arguments, multiindices, scalar_type, interior_facet=False
 
     if len(arguments) == 0:
         # No arguments
-        funarg = lp.GlobalArg("A", dtype=scalar_type, shape=(1,))
+        funarg = lp.GlobalArg("A", dtype=scalar_type, shape=(1,), target=TARGET)
         expression = gem.Indexed(gem.Variable("A", (1,)), (0,))
 
         return funarg, [expression]
@@ -397,7 +398,7 @@ def prepare_arguments(arguments, multiindices, scalar_type, interior_facet=False
         c_shape = tuple(u_shape)
         slicez = [[slice(s) for s in u_shape]]
 
-    funarg = lp.GlobalArg("A", dtype=scalar_type, shape=c_shape)
+    funarg = lp.GlobalArg("A", dtype=scalar_type, shape=c_shape, target=TARGET)
     varexp = gem.Variable("A", c_shape)
     expressions = [expression(gem.view(varexp, *slices)) for slices in slicez]
     return funarg, prune(expressions)

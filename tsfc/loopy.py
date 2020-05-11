@@ -21,6 +21,7 @@ from pytools import UniqueNameGenerator
 from tsfc.parameters import is_complex
 
 from contextlib import contextmanager
+from pyop2.codegen.rep2loopy import TARGET
 
 
 class LoopyContext(object):
@@ -131,10 +132,10 @@ def generate(impero_c, args, precision, scalar_type, kernel_name="loopy_kernel",
     for i, temp in enumerate(impero_c.temporaries):
         name = "t%d" % i
         if isinstance(temp, gem.Constant):
-            data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=temp.array.dtype, initializer=temp.array, address_space=lp.AddressSpace.LOCAL, read_only=True))
+            data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=temp.array.dtype, initializer=temp.array, address_space=lp.AddressSpace.LOCAL, read_only=True, target=TARGET))
         else:
             shape = tuple([i.extent for i in ctx.indices[temp]]) + temp.shape
-            data.append(lp.TemporaryVariable(name, shape=shape, dtype=numpy.float64, initializer=None, address_space=lp.AddressSpace.LOCAL, read_only=False))
+            data.append(lp.TemporaryVariable(name, shape=shape, dtype=numpy.float64, initializer=None, address_space=lp.AddressSpace.LOCAL, read_only=False, target=TARGET))
         ctx.gem_to_pymbolic[temp] = p.Variable(name)
 
     # Create instructions
