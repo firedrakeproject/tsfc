@@ -876,7 +876,9 @@ def strides_of(shape):
 
 def decompose_variable_view(expression):
     """Extract ComponentTensor + FlexiblyIndexed view onto a variable."""
-    if isinstance(expression, Variable):
+    if (isinstance(expression, Variable) or
+        (isinstance(expression, ComponentTensor) and
+         not isinstance(expression.children[0], FlexiblyIndexed))):
         variable = expression
         indexes = tuple(Index(extent=extent) for extent in expression.shape)
         dim2idxs = tuple((0, ((index, 1),)) for index in indexes)
