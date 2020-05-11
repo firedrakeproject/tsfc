@@ -40,7 +40,6 @@ class KernelBuilderBase(KernelInterface):
     def coefficient(self, ufl_coefficient, restriction):
         """A function that maps :class:`ufl.Coefficient`s to GEM
         expressions."""
-        print("mmm: ufl_coefficient",ufl_coefficient)
         kernel_arg = self.coefficient_map[ufl_coefficient]
         if ufl_coefficient.ufl_element().family() == 'Real':
             return kernel_arg

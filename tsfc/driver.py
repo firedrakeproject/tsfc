@@ -190,7 +190,6 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
         # the estimated polynomial degree attached by compute_form_data
         quadrature_degree = params.get("quadrature_degree",
                                        params["estimated_polynomial_degree"])
-        print("quadrature::::", quadrature_degree)
         try:
             quadrature_degree = params["quadrature_degree"]
         except KeyError:
