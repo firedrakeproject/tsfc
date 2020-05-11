@@ -181,14 +181,44 @@ class CoefficientSplitter(MultiFunction, ModifiedTerminalMixin):
         # Derivative indices
         beta = indices(mt.local_derivatives)
 
+        # Max. derivative dimension used in the
+        # construction of ufl `ReferenceGrad`.
+        #TODO: define ufl.MixedMesh/ufl.MixedCell and set
+        # topological_dimension to max_dim to avoid
+        # repetition here?
+        domain = terminal.ufl_domain()
+        if isinstance(domain, tuple):
+            # Set _dim to the max. topological dimension and
+            # pad Zero() where appropriate.
+            a = tuple(d.topological_dimension() for d in domain)
+            max_dim = max(a)
+        else:
+            max_dim = domain.topological_dimension()
+
         components = []
         for subcoeff in self._split[terminal]:
             # Apply terminal modifiers onto the subcoefficient
             component = construct_modified_terminal(mt, subcoeff)
             # Collect components of the subcoefficient
-            for alpha in numpy.ndindex(subcoeff.ufl_element().reference_value_shape()):
+            fs = subcoeff.ufl_function_space()
+            dim = fs.ufl_domain().topological_dimension()
+            for alpha in numpy.ndindex(fs.ufl_element().reference_value_shape()):
                 # New modified terminal: component[alpha + beta]
-                components.append(component[alpha + beta])
+                # Equivalent to
+                # components.append(component[alpha + beta])
+                # but generalised to pad Zeros when dim < max_dim.
+                if mt.local_derivatives == 0:
+                    components.append(component[alpha + beta])
+                else:
+                    subcomp = []
+                    subcomp_shape = (max_dim, ) * mt.local_derivatives
+                    for b in numpy.ndindex(subcomp_shape):
+                        if all(_b < dim for _b in b):
+                            subcomp.append(component[alpha + b])
+                        else:
+                            subcomp.append(Zero())
+                    subcomponents = as_tensor(numpy.asarray(subcomp).reshape(subcomp_shape)) 
+                    components.append(subcomponents[beta])
         # Repack derivative indices to shape
         c, = indices(1)
         return ComponentTensor(as_tensor(components)[c], MultiIndex((c,) + beta))
