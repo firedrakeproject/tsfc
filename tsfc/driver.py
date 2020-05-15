@@ -239,7 +239,8 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
                                            for var in return_variables]))
     index_ordering = tuple(quadrature_indices) + split_argument_indices
     try:
-        impero_c = impero_utils.compile_gem(assignments, index_ordering, remove_zeros=True)
+        impero_c = impero_utils.compile_gem(assignments, index_ordering,
+                                            parameters["scalar_type"], remove_zeros=True)
     except impero_utils.NoopError:
         # No operations, construct empty kernel
         return builder.construct_empty_kernel(kernel_name)
@@ -421,7 +422,8 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, inte
     # TODO: one should apply some GEM optimisations as in assembly,
     # but we don't for now.
     ir, = impero_utils.preprocess_gem([ir])
-    impero_c = impero_utils.compile_gem([(return_expr, ir)], return_indices)
+    impero_c = impero_utils.compile_gem([(return_expr, ir)], return_indices,
+                                        parameters["scalar_type"])
     index_names = dict((idx, "p%d" % i) for (i, idx) in enumerate(basis_indices))
     # Handle kernel interface requirements
     builder.register_requirements([ir])

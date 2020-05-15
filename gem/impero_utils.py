@@ -10,6 +10,8 @@ import collections
 from functools import singledispatch
 from itertools import chain, groupby
 
+from numpy import find_common_type
+
 from gem.node import traversal, collect_refcount
 from gem import gem, impero as imp, optimise, scheduling
 
@@ -21,7 +23,9 @@ from gem import gem, impero as imp, optimise, scheduling
 #     temporaries - List of GEM expressions which have assigned temporaries
 #     declare     - Where to declare temporaries to get correct C code
 #     indices     - Indices for declarations and referencing values
-ImperoC = collections.namedtuple('ImperoC', ['tree', 'temporaries', 'declare', 'indices'])
+#     return_variable - 2-tuple of gem return variable and inferred numpy dtype
+ImperoC = collections.namedtuple('ImperoC', ['tree', 'temporaries', 'declare', 'indices',
+                                             'return_variable'])
 
 
 class NoopError(Exception):
@@ -38,11 +42,12 @@ def preprocess_gem(expressions, replace_delta=True, remove_componenttensors=True
     return expressions
 
 
-def compile_gem(assignments, prefix_ordering, remove_zeros=False):
+def compile_gem(assignments, prefix_ordering, scalar_type, remove_zeros=False):
     """Compiles GEM to Impero.
 
     :arg assignments: list of (return variable, expression DAG root) pairs
     :arg prefix_ordering: outermost loop indices
+    :arg scalar_type: default scalar type
     :arg remove_zeros: remove zero assignment to return variables
     """
     # Remove zeros
@@ -51,6 +56,9 @@ def compile_gem(assignments, prefix_ordering, remove_zeros=False):
             variable, expression = assignment
             return not isinstance(expression, gem.Zero)
         assignments = list(filter(nonzero, assignments))
+
+    # Type inference for return value
+    return_variable = infer_dtype(assignments, scalar_type)
 
     # Just the expressions
     expressions = [expression for variable, expression in assignments]
@@ -88,7 +96,26 @@ def compile_gem(assignments, prefix_ordering, remove_zeros=False):
     declare, indices = place_declarations(tree, temporaries, get_indices)
 
     # Prepare ImperoC (Impero AST + other data for code generation)
-    return ImperoC(tree, temporaries, declare, indices)
+    return ImperoC(tree, temporaries, declare, indices, return_variable)
+
+
+def infer_dtype(assignments, scalar_type):
+    from tsfc.loopy import assign_dtypes
+    from gem.node import traversal
+
+    def extract_variable(expr):
+        x, = set(v for v in traversal([expr]) if isinstance(v, gem.Variable))
+        return x
+
+    vars = set()
+    dtypes = set()
+    for var, expression in assignments:
+        var = extract_variable(var)
+        ((_, dtype), ) = assign_dtypes([expression], scalar_type)
+        vars.add(var)
+        dtypes.add(dtype)
+    var, = vars
+    return var, find_common_type([], dtypes)
 
 
 def make_prefix_ordering(indices, prefix_ordering):

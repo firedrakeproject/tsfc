@@ -27,7 +27,7 @@ def make_builder(*args, **kwargs):
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
                  "domain_number", "needs_cell_sizes", "tabulations", "quadrature_rule",
-                 "coefficient_numbers", "__weakref__")
+                 "return_dtype", "coefficient_numbers", "__weakref__")
     """A compiled Kernel object.
 
     :kwarg ast: The loopy kernel object.
@@ -40,12 +40,14 @@ class Kernel(object):
     :kwarg coefficient_numbers: A list of which coefficients from the
         form the kernel needs.
     :kwarg quadrature_rule: The finat quadrature rule used to generate this kernel
+    :kwarg return_dtype: numpy dtype of the return value.
     :kwarg tabulations: The runtime tabulations this kernel requires
     :kwarg needs_cell_sizes: Does the kernel require cell sizes.
     """
     def __init__(self, ast=None, integral_type=None, oriented=False,
                  subdomain_id=None, domain_number=None, quadrature_rule=None,
                  coefficient_numbers=(),
+                 return_dtype=None,
                  needs_cell_sizes=False):
         # Defaults
         self.ast = ast
@@ -55,6 +57,7 @@ class Kernel(object):
         self.subdomain_id = subdomain_id
         self.coefficient_numbers = coefficient_numbers
         self.needs_cell_sizes = needs_cell_sizes
+        self.return_dtype = return_dtype
         super(Kernel, self).__init__()
 
 
@@ -164,8 +167,8 @@ class ExpressionKernelBuilder(KernelBuilderBase):
         for name_, shape in self.tabulations:
             args.append(lp.GlobalArg(name_, dtype=self.scalar_type, shape=shape))
 
-        loopy_kernel = generate_loopy(impero_c, args, precision, self.scalar_type,
-                                      "expression_kernel", index_names)
+        loopy_kernel, _ = generate_loopy(impero_c, args, precision, self.scalar_type,
+                                         "expression_kernel", index_names, ignore_return_type=True)
         return ExpressionKernel(loopy_kernel, self.oriented, self.cell_sizes,
                                 self.coefficients, self.tabulations)
 
@@ -207,6 +210,7 @@ class KernelBuilder(KernelBuilderBase):
         :arg multiindices: GEM argument multiindices
         :returns: GEM expression representing the return variable
         """
+        self.rank = len(arguments)
         self.local_tensor, expressions = prepare_arguments(
             arguments, multiindices, self.scalar_type, interior_facet=self.interior_facet,
             diagonal=self.diagonal)
@@ -277,7 +281,11 @@ class KernelBuilder(KernelBuilderBase):
         :returns: :class:`Kernel` object
         """
 
-        args = [self.local_tensor, self.coordinates_arg]
+        ignore_return_type = self.rank > 0
+        if ignore_return_type:
+            args = [self.local_tensor, self.coordinates_arg]
+        else:
+            args = [self.coordinates_arg]
         if self.kernel.oriented:
             args.append(self.cell_orientations_loopy_arg)
         if self.kernel.needs_cell_sizes:
@@ -292,8 +300,11 @@ class KernelBuilder(KernelBuilderBase):
             args.append(lp.GlobalArg(name_, dtype=self.scalar_type, shape=shape))
 
         self.kernel.quadrature_rule = quadrature_rule
-        self.kernel.ast = generate_loopy(impero_c, args, precision,
-                                         self.scalar_type, name, index_names)
+        ast, dtype = generate_loopy(impero_c, args, precision,
+                                    self.scalar_type, name, index_names,
+                                    ignore_return_type=ignore_return_type)
+        self.kernel.ast = ast
+        self.kernel.return_dtype = dtype
         return self.kernel
 
     def construct_empty_kernel(self, name):

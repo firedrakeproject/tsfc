@@ -186,15 +186,17 @@ def active_indices(mapping, ctx):
         ctx.active_indices.pop(key)
 
 
-def generate(impero_c, args, precision, scalar_type, kernel_name="loopy_kernel", index_names=[]):
+def generate(impero_c, args, precision, scalar_type, kernel_name="loopy_kernel", index_names=[],
+             ignore_return_type=True):
     """Generates loopy code.
 
     :arg impero_c: ImperoC tuple with Impero AST and other data
     :arg args: list of loopy.GlobalArgs
     :arg precision: floating-point precision for printing
-    :arg scalar_type: type of scalars as C typename string
+    :arg scalar_type: type of scalars as numpy dtype
     :arg kernel_name: function name of the kernel
     :arg index_names: pre-assigned index names
+    :arg ignore_return_type: Ignore inferred return type from impero_c?
     :returns: loopy kernel
     """
     ctx = LoopyContext()
@@ -205,7 +207,12 @@ def generate(impero_c, args, precision, scalar_type, kernel_name="loopy_kernel",
     ctx.epsilon = 10.0 ** (-precision)
 
     # Create arguments
-    data = list(args)
+    if ignore_return_type:
+        return_dtype = scalar_type
+        data = list(args)
+    else:
+        A, return_dtype = impero_c.return_variable
+        data = [lp.GlobalArg(A.name, shape=A.shape, dtype=return_dtype)] + list(args)
     for i, (temp, dtype) in enumerate(assign_dtypes(impero_c.temporaries, scalar_type)):
         name = "t%d" % i
         if isinstance(temp, gem.Constant):
@@ -240,7 +247,7 @@ def generate(impero_c, args, precision, scalar_type, kernel_name="loopy_kernel",
         insn_new.append(insn.copy(priority=len(knl.instructions) - i))
     knl = knl.copy(instructions=insn_new)
 
-    return knl
+    return knl, return_dtype
 
 
 @singledispatch

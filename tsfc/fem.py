@@ -67,6 +67,14 @@ class ContextBase(ProxyKernelInterface):
             raise ValueError("unexpected keyword argument '{0}'".format(invalid_keywords.pop()))
         self.__dict__.update(kwargs)
 
+    def reify(self, expr):
+        if self.complex_mode:
+            indices = gem.indices(len(expr.shape))
+            return gem.ComponentTensor(gem.MathFunction("real", gem.Indexed(expr, indices)),
+                                       indices)
+        else:
+            return expr
+
     @cached_property
     def fiat_cell(self):
         return as_fiat_cell(self.ufl_cell)
@@ -136,7 +144,7 @@ class CoordinateMapping(PhysicalGeometry):
         return config
 
     def cell_size(self):
-        return self.interface.cell_size(self.mt.restriction)
+        return self.interface.reify(self.interface.cell_size(self.mt.restriction))
 
     def jacobian_at(self, point):
         expr = Jacobian(self.mt.terminal.ufl_domain())
@@ -427,7 +435,7 @@ def translate_spatialcoordinate(terminal, mt, ctx):
     # Rebuild modified terminal
     expr = construct_modified_terminal(mt, terminal)
     # Translate replaced UFL snippet
-    return ctx.translator(expr)
+    return ctx.reify(ctx.translator(expr))
 
 
 class CellVolumeKernelInterface(ProxyKernelInterface):
