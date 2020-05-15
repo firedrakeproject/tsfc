@@ -27,7 +27,7 @@ def make_builder(*args, **kwargs):
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
                  "domain_number", "needs_cell_sizes", "tabulations", "quadrature_rule",
-                 "coefficient_numbers", "__weakref__")
+                 "return_dtype", "coefficient_numbers", "__weakref__")
     """A compiled Kernel object.
 
     :kwarg ast: The COFFEE ast for the kernel.
@@ -40,12 +40,14 @@ class Kernel(object):
     :kwarg coefficient_numbers: A list of which coefficients from the
         form the kernel needs.
     :kwarg quadrature_rule: The finat quadrature rule used to generate this kernel
+    :kwarg return_dtype: numpy dtype of the return value.
     :kwarg tabulations: The runtime tabulations this kernel requires
     :kwarg needs_cell_sizes: Does the kernel require cell sizes.
     """
     def __init__(self, ast=None, integral_type=None, oriented=False,
                  subdomain_id=None, domain_number=None, quadrature_rule=None,
                  coefficient_numbers=(),
+                 return_dtype=None,
                  needs_cell_sizes=False):
         # Defaults
         self.ast = ast
@@ -55,6 +57,7 @@ class Kernel(object):
         self.subdomain_id = subdomain_id
         self.coefficient_numbers = coefficient_numbers
         self.needs_cell_sizes = needs_cell_sizes
+        self.return_dtype = return_dtype
         super(Kernel, self).__init__()
 
 
