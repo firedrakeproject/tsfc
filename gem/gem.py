@@ -191,10 +191,11 @@ class Literal(Constant):
             return super(Literal, cls).__new__(cls)
 
     def __init__(self, array):
+        array = asarray(array)
         try:
-            self.array = asarray(array, dtype=float)
+            self.array = array.astype(float, casting="safe")
         except TypeError:
-            self.array = asarray(array, dtype=complex)
+            self.array = array.astype(complex)
 
     def is_equal(self, other):
         if type(self) != type(other):
@@ -208,10 +209,8 @@ class Literal(Constant):
 
     @property
     def value(self):
-        try:
-            return float(self.array)
-        except TypeError:
-            return complex(self.array)
+        assert self.shape == ()
+        return self.array.dtype.type(self.array)
 
     @property
     def shape(self):
