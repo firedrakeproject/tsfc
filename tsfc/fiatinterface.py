@@ -115,7 +115,7 @@ def convert_finiteelement(element, vector_is_mixed):
             raise ValueError("Quadrature scheme and degree must be specified!")
 
         quad_rule = FIAT.create_quadrature(cell, degree, scheme)
-        return FIAT.QuadratureElement(cell, quad_rule.get_points())
+        return FIAT.QuadratureElement(cell, quad_rule.get_points(), weights=quad_rule.get_weights())
     lmbda = supported_elements[element.family()]
     if lmbda is None:
         if element.cell().cellname() == "quadrilateral":
@@ -131,7 +131,7 @@ def convert_finiteelement(element, vector_is_mixed):
 
     kind = element.variant()
     if kind is None:
-        kind = 'equispaced'  # default variant
+        kind = 'spectral' if element.cell().cellname() == 'interval' else 'equispaced'  # default variant
 
     if element.family() == "Lagrange":
         if kind == 'equispaced':
