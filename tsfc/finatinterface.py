@@ -149,6 +149,12 @@ def convert_finiteelement(element, **kwargs):
     elif element.family() == "Nedelec 1st kind H(curl)":
         kind = element.variant()
         lmbda = partial(finat.Nedelec, variant=kind)
+    elif element.family() == "Brezzi-Douglas-Marini":
+        kind = element.variant()
+        lmbda = partial(finat.BrezziDouglasMarini, variant=kind)
+    elif element.family() == "Nedelec 2nd kind H(curl)":
+        kind = element.variant()
+        lmbda = partial(finat.NedelecSecondKind, variant=kind)
     elif element.family() in ["Discontinuous Lagrange", "Discontinuous Lagrange L2"]:
         if kind == 'equispaced':
             lmbda = finat.DiscontinuousLagrange
