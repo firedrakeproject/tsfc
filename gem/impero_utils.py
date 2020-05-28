@@ -59,7 +59,7 @@ def compile_gem(assignments, prefix_ordering, remove_zeros=False):
     indices = list(collections.OrderedDict.fromkeys(chain.from_iterable(
         node.index_ordering()
         for node in traversal(expressions)
-        if isinstance(node, (gem.Indexed, gem.FlexiblyIndexed))
+        if isinstance(node, (gem.Indexed, gem.FlexiblyIndexed, gem.StructuredSparseVariable))
     )))
 
     # Build ordered index map
@@ -70,7 +70,6 @@ def compile_gem(assignments, prefix_ordering, remove_zeros=False):
 
     # Build operation ordering
     ops = scheduling.emit_operations(assignments, get_indices)
-    print('\nops:', ops)
 
     # Empty kernel
     if len(ops) == 0:

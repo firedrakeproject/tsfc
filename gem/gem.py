@@ -229,34 +229,6 @@ class Variable(Terminal):
         self.shape = shape
 
 
-class StructuredSparseVariable(Terminal):
-    """Structured sparse variable tensor"""
-
-    __slots__ = ('name', 'shape')
-    # __front__ = ('name', 'shape')
-
-    def __init__(self, name, shape):
-        self.name = name
-        self.shape = shape
-
-    def _key_var_to_ssvar(self, key):
-        """Translate index key in Variable to index in SSVar"""
-        return key
-
-    def _key_ssvar_to_var(self, key):
-        """Translate index key in SSVar to index in Variable"""
-        return key
-    
-    def __getitem__(self, key):
-        return super().__getitem__(self._key_var_to_ssvar(key))
-    
-    def __setitem__(self, key, value):
-        return super().__setitem__(self._key_var_to_ssvar(key))
-
-    def __delitem__(self, key):
-        return super().__delitem__(self._key_var_to_ssvar(key))
-
-
 class Sum(Scalar):
     __slots__ = ('children',)
 
@@ -638,6 +610,67 @@ class FlexiblyIndexed(Scalar):
                      for _, idxs in self.dim2idxs
                      for index, _ in idxs
                      if isinstance(index, Index))
+
+
+class StructuredSparseVariable(Terminal):
+    """Structured sparse variable tensor"""
+    
+    __slots__ = ('children', 'dim2idxs')
+    __back__ = ('dim2idxs',)
+
+    def __init__(self, node):
+        self.children = node.children
+        self.dim2idxs = node.dim2idxs
+        self.free_indices = node.free_indices
+
+    def index_ordering(self):
+        """Running indices in the order of indexing in this node."""
+        return tuple(index
+                     for _, idxs in self.dim2idxs
+                     for index, _ in idxs
+                     if isinstance(index, Index))
+
+    # __slots__ = ('children',)
+
+    # def __init__(self, flexibly_indexed_node):
+    #     assert isinstance(flexibly_indexed_node, FlexiblyIndexed)
+
+    #     child, = flexibly_indexed_node.children #e.g. Variable('A', (6, 6))
+    #     dim2idxs = flexibly_indexed_node.dim2idxs
+        
+    #     for offset, idxs in dim2idxs:
+    #         if offset:
+    #             #TODO
+    #             print('')
+    #         for index, stride in idxs:
+    #             print('')
+    #     # self.ops_to_make_tensor = None
+        
+    #     self.children = (child,)
+    #     # self.dim2idxs = tuple(dim2idxs)
+    #     #self.free_indices = unique(free_indices)
+
+    # def _get_shape_from_tensor_shape(self, tensor_shape):
+    #     print('\n====tensorshape:',tensor_shape)
+    #     return (int(tensor_shape[0]/2), int(tensor_shape[0]/2))
+
+    # def _index_var_to_ssvar(self, index):
+    #     """Translate index in Variable to index in SSVar"""
+    #     return int(index/2)
+
+    # def _index_ssvar_to_var(self, index):
+    #     """Translate index in SSVar to index in Variable"""
+    #     return index*2
+    
+    # def __getitem__(self, key):
+    #     return super().__getitem__(self._index_var_to_ssvar(key))
+    
+    # def __setitem__(self, key, value):
+    #     return super().__setitem__(self._index_var_to_ssvar(key))
+
+    # def __delitem__(self, key):
+    #     return super().__delitem__(self._index_var_to_ssvar(key))
+
 
 
 class ComponentTensor(Node):

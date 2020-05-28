@@ -126,7 +126,7 @@ def generate(impero_c, args, precision, scalar_type, kernel_name="loopy_kernel",
     ctx.epsilon = 10.0 ** (-precision)
 
     # Create arguments
-    data = list(args)
+    data = []
     for i, temp in enumerate(impero_c.temporaries):
         name = "t%d" % i
         if isinstance(temp, gem.Constant):
@@ -147,6 +147,12 @@ def generate(impero_c, args, precision, scalar_type, kernel_name="loopy_kernel",
 
     if not domains:
         domains = [isl.BasicSet("[] -> {[]}")]
+
+    # TODO have same ctx as in expression() so can set local tensor A arg shape to what is needed.
+    args[0].shape = (3,2,3)
+    # args[0].shape = (6,6,6)
+    # args[0].shape = (5,5)
+    data.extend(args)
 
     # Create loopy kernel
     knl = lp.make_function(domains, instructions, data, name=kernel_name, target=lp.CTarget(),
@@ -413,8 +419,36 @@ def _expression_variable(expr, ctx):
 
 
 @_expression.register(gem.StructuredSparseVariable)
-def _expression_stucturedsparsevariable(expr, ctx):
-    return ctx.pymbolic_variable(expr)
+def _expression_stucturedsparsevariable(expr, ctx): 
+    # var = expression(expr.children[0], ctx)
+    # print('type(var): ', type(var))
+    shape_needed = ()
+    seen_indices = set()
+
+    rank = []
+    for offset, idxs in expr.dim2idxs:
+        for index, stride in idxs:
+            assert isinstance(index, gem.Index)
+
+        for index, stride in idxs:
+            rank_ = [offset]
+            # Repeated index is a delta elimination
+            if index not in seen_indices:
+                seen_indices.add(index)
+                current_index_extent = ctx.index_extent[ctx.active_indices[index].name]
+                shape_needed = shape_needed + (current_index_extent,)
+                # rank_.append(p.Product((ctx.active_indices[index], stride)))
+                rank_.append(ctx.active_indices[index])
+                rank.append(p.Sum(tuple(rank_)))
+                # rank.append(p.Sum(offset, p.Product((ctx.active_indices[index], 1))))
+    print('\n\n shape needed: ', shape_needed)
+    print('\n\n rank: ', rank)
+
+    old_child = expr.children[0]  # Variable('A', (6,6))
+    new_child = gem.Variable(old_child.name, shape_needed)
+    print('\n===new child: ', new_child)
+    var = expression(new_child, ctx)
+    return p.Subscript(var, tuple(rank))
 
 
 @_expression.register(gem.Indexed)

@@ -33,12 +33,12 @@ def Integrals(expressions, quadrature_multiindex, argument_multiindices, paramet
     # Rewrite: a / b => a * (1 / b)
     expressions = replace_division(expressions)
 
-    # Unroll
-    max_extent = parameters["unroll_indexsum"]
-    if max_extent:
-        def predicate(index):
-            return index.extent <= max_extent
-        expressions = unroll_indexsum(expressions, predicate=predicate)
+    # # Unroll
+    # max_extent = parameters["unroll_indexsum"]
+    # if max_extent:
+    #     def predicate(index):
+    #         return index.extent <= max_extent
+    #     expressions = unroll_indexsum(expressions, predicate=predicate)
 
     expressions = [index_sum(e, quadrature_multiindex) for e in expressions]
     argument_indices = tuple(chain(*argument_multiindices))

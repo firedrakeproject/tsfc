@@ -106,7 +106,7 @@ class Queue(object):
 
 def handle(ops, push, decref, node):
     """Helper function for scheduling"""
-    if isinstance(node, gem.Variable) or isinstance(node, gem.StructuredSparseVariable):
+    if isinstance(node, gem.Variable):
         # Declared in the kernel header
         pass
     elif isinstance(node, gem.Constant):
@@ -115,7 +115,7 @@ def handle(ops, push, decref, node):
             ops.append(impero.Evaluate(node))
     elif isinstance(node, gem.Zero):  # should rarely happen
         assert not node.shape
-    elif isinstance(node, (gem.Indexed, gem.FlexiblyIndexed)):
+    elif isinstance(node, (gem.Indexed, gem.FlexiblyIndexed, gem.StructuredSparseVariable)):
         # Indexing always inlined
         decref(node.children[0])
     elif isinstance(node, gem.IndexSum):

@@ -613,11 +613,13 @@ def translate_coefficient(terminal, mt, ctx):
             indices = tuple(i for i in var.index_ordering() if i not in ctx.unsummed_coefficient_indices)
             value = gem.IndexSum(gem.Product(expr, var), indices)
             summands.append(gem.optimise.contraction(value))
+            # summands.append(value)
         optimised_value = gem.optimise.make_sum(summands)
         value_dict[alpha] = gem.ComponentTensor(optimised_value, zeta)
 
     # Change from FIAT to UFL arrangement
     result = fiat_to_ufl(value_dict, mt.local_derivatives)
+    print('\nin fem translate_coefficient, result:', result)
     assert result.shape == mt.expr.ufl_shape
     assert set(result.free_indices) - ctx.unsummed_coefficient_indices <= set(ctx.point_indices)
 

@@ -64,6 +64,7 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
         kernel = compile_integral(integral_data, fd, prefix, parameters, interface=interface, coffee=coffee, diagonal=diagonal)
         if kernel is not None:
             kernels.append(kernel)
+        print('\n\n\n in driver compile_form, kernel  ast:', kernel.ast)
         logger.info(GREEN % "compile_integral finished in %g seconds.", time.time() - start)
 
     logger.info(GREEN % "TSFC finished in %g seconds.", time.time() - cpu_time)
@@ -81,6 +82,10 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     :arg diagonal: Are we building a kernel for the diagonal of a rank-2 element tensor?
     :returns: a kernel constructed by the kernel interface
     """
+    # print('\n in driver.py, compile integral. form_data:', form_data)
+    # print('\n in driver.py, compile integral. form_data.integral_data:', form_data.integral_data)
+    # print('\n in driver.py, compile integral. form_data.original_form:', form_data.original_form)
+    # print('\n in driver.py, compile integral. form_data.preprocessed_form:', form_data.preprocessed_form)
     if parameters is None:
         parameters = default_parameters()
     else:
@@ -107,6 +112,8 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     mesh = integral_data.domain
     cell = integral_data.domain.ufl_cell()
     arguments = form_data.preprocessed_form.arguments()
+    # print('\nin driver, arguments[0]', arguments[0])
+    # print('\nin driver, arguments[1]', arguments[1])
     kernel_name = "%s_%s_integral_%s" % (prefix, integral_type, integral_data.subdomain_id)
     # Handle negative subdomain_id
     kernel_name = kernel_name.replace("-", "_")
@@ -202,31 +209,52 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
 
         config = kernel_cfg.copy()
         config.update(quadrature_rule=quad_rule)
+        print('\n in driver, compile integral. config.coefficient_map:', config['interface'].coefficient_map)
+        print('\n in driver, compile integral. config.kernel:', config['interface'].kernel)
+        print('\n in driver, compile integral. config.local_tensor:', config['interface'].local_tensor)
         expressions = fem.compile_ufl(integrand,
                                       interior_facet=interior_facet,
                                       **config)
+        print('\nin driver, compile integral. expressions:', expressions)
         reps = mode.Integrals(expressions, quadrature_multiindex,
                               argument_multiindices, params)
+        print('\nin driver, compile integral. reps:', reps)
         for var, rep in zip(return_variables, reps):
             mode_irs[mode].setdefault(var, []).append(rep)
 
+    print('\nin driver, compile integral. mode_irs:', mode_irs)
     # Finalise mode representations into a set of assignments
     assignments = []
     for mode, var_reps in mode_irs.items():
+        print('\nin driver, compile integral. mode:', mode)
+        print('\nin driver, compile integral. var_reps:', var_reps)
         assignments.extend(mode.flatten(var_reps.items(), index_cache))
 
+
+    print('\nin driver, compile integral. assigments:', assignments)
     if assignments:
         return_variables, expressions = zip(*assignments)
     else:
         return_variables = []
         expressions = []
-
+    
+    print('\nin driver, compile integral. return_variables:', return_variables)
     # Need optimised roots
     options = dict(reduce(operator.and_,
                           [mode.finalise_options.items()
                            for mode in mode_irs.keys()]))
     expressions = impero_utils.preprocess_gem(expressions, **options)
     assignments = list(zip(return_variables, expressions))
+
+    # TODO here loop through return_variables in assignments and change to SSVars?
+    print('\n======type assignments:', type(assignments))
+    assignments_ = []
+    for return_variable, expression in assignments:
+        if isinstance(return_variable, gem.FlexiblyIndexed):
+            return_variable = gem.StructuredSparseVariable(return_variable)
+        assignments_.append((return_variable, expression))
+    assignments = assignments_
+            
 
     # Let the kernel interface inspect the optimised IR to register
     # what kind of external data is required (e.g., cell orientations,
@@ -243,6 +271,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
         # No operations, construct empty kernel
         return builder.construct_empty_kernel(kernel_name)
 
+    # print('\nin driver, compiler integral, impero_c:', impero_c)
     # Generate COFFEE
     index_names = []
 
