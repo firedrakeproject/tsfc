@@ -124,6 +124,8 @@ def generate(impero_c, args, precision, scalar_type, kernel_name="loopy_kernel",
     ctx.precision = precision
     ctx.scalar_type = scalar_type
     ctx.epsilon = 10.0 ** (-precision)
+    # Mapping from structured sparse args to their required shape
+    ctx.arg_to_shape = {}
 
     # Create arguments
     data = []
@@ -136,7 +138,7 @@ def generate(impero_c, args, precision, scalar_type, kernel_name="loopy_kernel",
             data.append(lp.TemporaryVariable(name, shape=shape, dtype=numpy.float64, initializer=None, address_space=lp.AddressSpace.LOCAL, read_only=False))
         ctx.gem_to_pymbolic[temp] = p.Variable(name)
 
-    # Create instructions
+    # Create instructions, fill arg_to_shape
     instructions = statement(impero_c.tree, ctx)
 
     # Create domains
@@ -148,10 +150,10 @@ def generate(impero_c, args, precision, scalar_type, kernel_name="loopy_kernel",
     if not domains:
         domains = [isl.BasicSet("[] -> {[]}")]
 
-    # TODO have same ctx as in expression() so can set local tensor A arg shape to what is needed.
-    args[0].shape = (3,2,3)
-    # args[0].shape = (6,6,6)
-    # args[0].shape = (5,5)
+    # Set structured sparse args to their required shape
+    for arg in args:
+        if arg.name in ctx.arg_to_shape:
+            arg.shape = ctx.arg_to_shape[arg.name] 
     data.extend(args)
 
     # Create loopy kernel
@@ -420,8 +422,7 @@ def _expression_variable(expr, ctx):
 
 @_expression.register(gem.StructuredSparseVariable)
 def _expression_stucturedsparsevariable(expr, ctx): 
-    # var = expression(expr.children[0], ctx)
-    # print('type(var): ', type(var))
+    var = expression(expr.children[0], ctx)
     shape_needed = ()
     seen_indices = set()
 
@@ -437,17 +438,10 @@ def _expression_stucturedsparsevariable(expr, ctx):
                 seen_indices.add(index)
                 current_index_extent = ctx.index_extent[ctx.active_indices[index].name]
                 shape_needed = shape_needed + (current_index_extent,)
-                # rank_.append(p.Product((ctx.active_indices[index], stride)))
                 rank_.append(ctx.active_indices[index])
                 rank.append(p.Sum(tuple(rank_)))
-                # rank.append(p.Sum(offset, p.Product((ctx.active_indices[index], 1))))
-    print('\n\n shape needed: ', shape_needed)
-    print('\n\n rank: ', rank)
-
-    old_child = expr.children[0]  # Variable('A', (6,6))
-    new_child = gem.Variable(old_child.name, shape_needed)
-    print('\n===new child: ', new_child)
-    var = expression(new_child, ctx)
+    expr_name = expr.children[0].name
+    ctx.arg_to_shape[expr_name] = shape_needed
     return p.Subscript(var, tuple(rank))
 
 

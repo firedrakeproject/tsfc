@@ -112,8 +112,6 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     mesh = integral_data.domain
     cell = integral_data.domain.ufl_cell()
     arguments = form_data.preprocessed_form.arguments()
-    # print('\nin driver, arguments[0]', arguments[0])
-    # print('\nin driver, arguments[1]', arguments[1])
     kernel_name = "%s_%s_integral_%s" % (prefix, integral_type, integral_data.subdomain_id)
     # Handle negative subdomain_id
     kernel_name = kernel_name.replace("-", "_")
@@ -209,36 +207,25 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
 
         config = kernel_cfg.copy()
         config.update(quadrature_rule=quad_rule)
-        print('\n in driver, compile integral. config.coefficient_map:', config['interface'].coefficient_map)
-        print('\n in driver, compile integral. config.kernel:', config['interface'].kernel)
-        print('\n in driver, compile integral. config.local_tensor:', config['interface'].local_tensor)
         expressions = fem.compile_ufl(integrand,
                                       interior_facet=interior_facet,
                                       **config)
-        print('\nin driver, compile integral. expressions:', expressions)
         reps = mode.Integrals(expressions, quadrature_multiindex,
                               argument_multiindices, params)
-        print('\nin driver, compile integral. reps:', reps)
         for var, rep in zip(return_variables, reps):
             mode_irs[mode].setdefault(var, []).append(rep)
 
-    print('\nin driver, compile integral. mode_irs:', mode_irs)
     # Finalise mode representations into a set of assignments
     assignments = []
     for mode, var_reps in mode_irs.items():
-        print('\nin driver, compile integral. mode:', mode)
-        print('\nin driver, compile integral. var_reps:', var_reps)
         assignments.extend(mode.flatten(var_reps.items(), index_cache))
 
-
-    print('\nin driver, compile integral. assigments:', assignments)
     if assignments:
         return_variables, expressions = zip(*assignments)
     else:
         return_variables = []
         expressions = []
     
-    print('\nin driver, compile integral. return_variables:', return_variables)
     # Need optimised roots
     options = dict(reduce(operator.and_,
                           [mode.finalise_options.items()
@@ -246,8 +233,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     expressions = impero_utils.preprocess_gem(expressions, **options)
     assignments = list(zip(return_variables, expressions))
 
-    # TODO here loop through return_variables in assignments and change to SSVars?
-    print('\n======type assignments:', type(assignments))
+    # Change return variables corresponding to local tensors to be structured sparse
     assignments_ = []
     for return_variable, expression in assignments:
         if isinstance(return_variable, gem.FlexiblyIndexed):
@@ -271,7 +257,6 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
         # No operations, construct empty kernel
         return builder.construct_empty_kernel(kernel_name)
 
-    # print('\nin driver, compiler integral, impero_c:', impero_c)
     # Generate COFFEE
     index_names = []
 
