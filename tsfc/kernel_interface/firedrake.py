@@ -275,7 +275,6 @@ class KernelBuilder(KernelBuilderBase):
         :returns: :class:`Kernel` object
         """
         body = generate_coffee(impero_c, index_names, precision, self.scalar_type)
-        print('\nin firedrake.py construct_kernel. body (becomes kind of kernel.ast):', body)
 
         args = [self.local_tensor, self.coordinates_arg]
         if self.kernel.oriented:

@@ -236,8 +236,6 @@ def delta_elimination(sum_indices, factors):
     :arg factors: product factors
     :returns: optimised (sum_indices, factors)
     """
-    # print('\n\nihihihihihihihihihihihihihihihihihihihihihihihihihihi\n\n')
-    # print('\n in delta_elimination, sum_indices:', sum_indices, ' \nfactors:', factors)
     sum_indices = list(sum_indices)  # copy for modification
 
     def substitute(expression, from_, to_):
@@ -264,7 +262,6 @@ def delta_elimination(sum_indices, factors):
                        for f in factors if isinstance(f, Delta)
                        for index in (f.i, f.j) if index in sum_indices]
 
-    # print('\n end of delta_elimination, sum_indices:', sum_indices, ' \nfactors:', factors)
     return sum_indices, factors
 
 
@@ -567,7 +564,6 @@ def _replace_delta_delta(node, self):
 
 def replace_delta(expressions):
     """Lowers all Deltas in a multi-root expression DAG."""
-    print('\n IN REPLACE_DELTA')
     mapper = Memoizer(_replace_delta)
     return list(map(mapper, expressions))
 

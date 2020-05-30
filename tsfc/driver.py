@@ -64,7 +64,6 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
         kernel = compile_integral(integral_data, fd, prefix, parameters, interface=interface, coffee=coffee, diagonal=diagonal)
         if kernel is not None:
             kernels.append(kernel)
-        print('\n\n\n in driver compile_form, kernel  ast:', kernel.ast)
         logger.info(GREEN % "compile_integral finished in %g seconds.", time.time() - start)
 
     logger.info(GREEN % "TSFC finished in %g seconds.", time.time() - cpu_time)
@@ -82,10 +81,6 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     :arg diagonal: Are we building a kernel for the diagonal of a rank-2 element tensor?
     :returns: a kernel constructed by the kernel interface
     """
-    # print('\n in driver.py, compile integral. form_data:', form_data)
-    # print('\n in driver.py, compile integral. form_data.integral_data:', form_data.integral_data)
-    # print('\n in driver.py, compile integral. form_data.original_form:', form_data.original_form)
-    # print('\n in driver.py, compile integral. form_data.preprocessed_form:', form_data.preprocessed_form)
     if parameters is None:
         parameters = default_parameters()
     else:
@@ -225,7 +220,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     else:
         return_variables = []
         expressions = []
-    
+
     # Need optimised roots
     options = dict(reduce(operator.and_,
                           [mode.finalise_options.items()

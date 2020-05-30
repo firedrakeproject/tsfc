@@ -422,12 +422,13 @@ def _expression_variable(expr, ctx):
 
 @_expression.register(gem.StructuredSparseVariable)
 def _expression_stucturedsparsevariable(expr, ctx): 
-    var = expression(expr.children[0], ctx)
+    node = expr.node  # Access the underlying FlexiblyIndexed node
+    var = expression(node.children[0], ctx)
     shape_needed = ()
     seen_indices = set()
 
     rank = []
-    for offset, idxs in expr.dim2idxs:
+    for offset, idxs in node.dim2idxs:
         for index, stride in idxs:
             assert isinstance(index, gem.Index)
 
@@ -440,8 +441,8 @@ def _expression_stucturedsparsevariable(expr, ctx):
                 shape_needed = shape_needed + (current_index_extent,)
                 rank_.append(ctx.active_indices[index])
                 rank.append(p.Sum(tuple(rank_)))
-    expr_name = expr.children[0].name
-    ctx.arg_to_shape[expr_name] = shape_needed
+    node_name = node.children[0].name
+    ctx.arg_to_shape[node_name] = shape_needed
     return p.Subscript(var, tuple(rank))
 
 

@@ -151,19 +151,6 @@ def _evaluate_variable(e, self):
     return Result(val)
 
 
-@_evaluate.register(gem.StructuredSparseVariable)
-def _evaluate_structuredsparsevariable(e, self):
-    """Look up variables in the provided bindings."""
-    try:
-        val = self.bindings[e]
-    except KeyError:
-        raise ValueError("Binding for %s not found" % e)
-    if val.shape != e.shape:
-        raise ValueError("Binding for %s has wrong shape.  %s, not %s." %
-                         (e, val.shape, e.shape))
-    return Result(val)
-
-
 @_evaluate.register(gem.Power)
 @_evaluate.register(gem.Division)
 @_evaluate.register(gem.Product)
