@@ -436,7 +436,9 @@ def compile_expression_dual_evaluation(expression, element, *,
         basis_indices = point_set.indices
         ir = gem.Indexed(expr, shape_indices)
     else:
-        print('old')
+        # basis_indices is temporary before including kernel body in method
+        basis_indices, ir = element.dual_evaluation(expr, fem.compile_ufl, kernel_cfg)
+        """
         # This is general code but is more unrolled than necssary.
         dual_expressions = []   # one for each functional
         broadcast_shape = len(expression.ufl_shape) - len(to_element.value_shape())
@@ -472,6 +474,7 @@ def compile_expression_dual_evaluation(expression, element, *,
             dual_expressions.append(qexprs)
         basis_indices = (gem.Index(), )
         ir = gem.Indexed(gem.ListTensor(dual_expressions), basis_indices)
+        """
 
     # Build kernel body
     return_indices = basis_indices + shape_indices + tuple(chain(*argument_multiindices))
