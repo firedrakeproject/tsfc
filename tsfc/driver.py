@@ -267,7 +267,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     return builder.construct_kernel(kernel_name, impero_c, index_names, quad_rule)
 
 
-def compile_expression_dual_evaluation(expression, to_element, *,
+def compile_expression_dual_evaluation(expression, element, *,
                                        domain=None, interface=None,
                                        parameters=None, coffee=False):
     """Compile a UFL expression to be evaluated against a compile-time known reference element's dual basis.
@@ -275,7 +275,7 @@ def compile_expression_dual_evaluation(expression, to_element, *,
     Useful for interpolating UFL expressions into e.g. N1curl spaces.
 
     :arg expression: UFL expression
-    :arg to_element: A FInAT element for the target space
+    :arg element: A FInAT element for the target space
     :arg domain: optional UFL domain the expression is defined on (required when expression contains no domain).
     :arg interface: backend module for the kernel interface
     :arg parameters: parameters object
@@ -286,7 +286,7 @@ def compile_expression_dual_evaluation(expression, to_element, *,
 
     # Just convert FInAT element to FIAT for now.
     # Dual evaluation in FInAT will bring a thorough revision.
-    to_element = to_element.fiat_equivalent
+    to_element = element.fiat_equivalent
 
     if any(len(dual.deriv_dict) != 0 for dual in to_element.dual_basis()):
         raise NotImplementedError("Can only interpolate onto dual basis functionals without derivative evaluation, sorry!")
@@ -385,6 +385,9 @@ def compile_expression_dual_evaluation(expression, to_element, *,
         basis_indices = point_set.indices
         ir = gem.Indexed(expr, shape_indices)
     else:
+        # basis_indices is temporary before including kernel body in method
+        basis_indices, ir = element.dual_evaluation(expr, fem.compile_ufl, kernel_cfg)
+        """
         # This is general code but is more unrolled than necssary.
         dual_expressions = []   # one for each functional
         broadcast_shape = len(expression.ufl_shape) - len(to_element.value_shape())
@@ -420,6 +423,7 @@ def compile_expression_dual_evaluation(expression, to_element, *,
             dual_expressions.append(qexprs)
         basis_indices = (gem.Index(), )
         ir = gem.Indexed(gem.ListTensor(dual_expressions), basis_indices)
+        """
 
     # Build kernel body
     return_indices = basis_indices + shape_indices + tuple(chain(*argument_multiindices))
