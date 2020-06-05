@@ -22,10 +22,12 @@ from numbers import Integral, Number
 import numpy
 from numpy import asarray
 
+from sparse import as_coo
+
 from gem.node import Node as NodeBase
 
 
-__all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
+__all__ = ['Node', 'Identity', 'Literal', 'SparseLiteral', 'Zero', 'Failure',
            'Variable', 'Sum', 'Product', 'Division', 'Power',
            'MathFunction', 'MinValue', 'MaxValue', 'Comparison',
            'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
@@ -164,7 +166,7 @@ class Constant(Terminal):
     """Abstract base class for constant types.
 
     Convention:
-     - array: numpy array of values
+     - array: numpy array or sparse.SparseArray of values
      - value: float or complex value (scalars only)
     """
     __slots__ = ()
@@ -238,6 +240,52 @@ class Literal(Constant):
     def value(self):
         assert self.shape == ()
         return self.array.dtype.type(self.array)
+
+    @property
+    def shape(self):
+        return self.array.shape
+
+
+class SparseLiteral(Constant):
+    """Sparse Tensor-valued constant, stored in COO format. Can be initialised
+    with sparse.SparseArray, numpy.ndarray, scipy.sparse.spmatrix or Iterable
+    or anything supported by :ref:`sparse.as_coo <sparse.as_coo>`.
+    """
+
+    __slots__ = ('array',)
+    __front__ = ('array',)
+
+    def __new__(cls, array):
+        array = as_coo(array)
+        if (array == 0).all():
+            # All zeros, make symbolic zero
+            return Zero(array.shape)
+        else:
+            return super(SparseLiteral, cls).__new__(cls)
+
+    def __init__(self, array):
+        array = as_coo(array)
+        try:
+            self.array = array.astype(float, casting="safe")
+        except TypeError:
+            self.array = array.astype(complex)
+
+    def is_equal(self, other):
+        if type(self) != type(other):
+            return False
+        if self.shape != other.shape:
+            return False
+        if tuple(self.array.data) != tuple(other.array.data):
+            return False
+        return tuple(self.array.coords.flat) == tuple(other.array.coords.flat)
+
+    def get_hash(self):
+        return hash((type(self), self.shape, tuple(self.array.data), tuple(self.array.coords.flat)))
+
+    @property
+    def value(self):
+        assert self.shape == ()
+        return self.array.dtype.type(self.array.todense())
 
     @property
     def shape(self):
@@ -866,9 +914,9 @@ def index_sum(expression, indices):
 
 
 def partial_indexed(tensor, indices):
-    """Generalised indexing into a tensor.  The number of indices may
-    be less than or equal to the rank of the tensor, so the result may
-    have a non-empty shape.
+    """Generalised indexing into a tensor by eating shape off the front.
+    The number of indices may be less than or equal to the rank of the tensor,
+    so the result may have a non-empty shape.
 
     :arg tensor: tensor-valued GEM expression
     :arg indices: indices, at most as many as the rank of the tensor
