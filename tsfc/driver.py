@@ -267,7 +267,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     return builder.construct_kernel(kernel_name, impero_c, index_names, quad_rule)
 
 
-def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
+def compile_expression_dual_evaluation(expression, element, coordinates, *,
                                        domain=None, interface=None,
                                        parameters=None, coffee=False):
     """Compile a UFL expression to be evaluated against a compile-time known reference element's dual basis.
@@ -287,7 +287,7 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
 
     # Just convert FInAT element to FIAT for now.
     # Dual evaluation in FInAT will bring a thorough revision.
-    to_element = to_element.fiat_equivalent
+    to_element = element.fiat_equivalent
 
     if any(len(dual.deriv_dict) != 0 for dual in to_element.dual_basis()):
         raise NotImplementedError("Can only interpolate onto dual basis functionals without derivative evaluation, sorry!")
@@ -379,6 +379,9 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
         basis_indices = point_set.indices
         ir = gem.Indexed(expr, shape_indices)
     else:
+        # basis_indices is temporary before including kernel body in method
+        basis_indices, ir = element.dual_evaluation(expr, fem.compile_ufl, kernel_cfg)
+        """
         # This is general code but is more unrolled than necssary.
         dual_expressions = []   # one for each functional
         broadcast_shape = len(expression.ufl_shape) - len(to_element.value_shape())
@@ -411,6 +414,7 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
             dual_expressions.append(qexprs)
         basis_indices = (gem.Index(), )
         ir = gem.Indexed(gem.ListTensor(dual_expressions), basis_indices)
+        """
 
     # Build kernel body
     return_indices = basis_indices + shape_indices + tuple(chain(*argument_multiindices))
