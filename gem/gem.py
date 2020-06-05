@@ -866,9 +866,9 @@ def index_sum(expression, indices):
 
 
 def partial_indexed(tensor, indices):
-    """Generalised indexing into a tensor.  The number of indices may
-    be less than or equal to the rank of the tensor, so the result may
-    have a non-empty shape.
+    """Generalised indexing into a tensor by eating shape off the front.
+    The number of indices may be less than or equal to the rank of the tensor,
+    so the result may have a non-empty shape.
 
     :arg tensor: tensor-valued GEM expression
     :arg indices: indices, at most as many as the rank of the tensor
