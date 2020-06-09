@@ -50,14 +50,7 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
     assert isinstance(form, Form)
 
     # Determine whether in complex mode:
-    # complex nodes would break the refactoriser.
     complex_mode = parameters and is_complex(parameters.get("scalar_type"))
-    if complex_mode:
-        logger.warning("Disabling whole expression optimisations"
-                       " in GEM for supporting complex mode.")
-        parameters = parameters.copy()
-        parameters["mode"] = 'vanilla'
-
     fd = ufl_utils.compute_form_data(form, complex_mode=complex_mode)
     logger.info(GREEN % "compute_form_data finished in %g seconds.", time.time() - cpu_time)
 
@@ -98,6 +91,10 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
             # Delayed import, loopy is a runtime dependency
             import tsfc.kernel_interface.firedrake_loopy as firedrake_interface_loopy
             interface = firedrake_interface_loopy.KernelBuilder
+    if coffee:
+        scalar_type = parameters["scalar_type_c"]
+    else:
+        scalar_type = parameters["scalar_type"]
 
     # Remove these here, they're handled below.
     if parameters.get("quadrature_degree") in ["auto", "default", None, -1, "-1"]:
@@ -123,7 +120,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     domain_numbering = form_data.original_form.domain_numbering()
     builder = interface(integral_type, integral_data.subdomain_id,
                         domain_numbering[integral_data.domain],
-                        parameters["scalar_type"],
+                        scalar_type,
                         diagonal=diagonal)
     argument_multiindices = tuple(builder.create_element(arg.ufl_element()).get_indices()
                                   for arg in arguments)
@@ -154,11 +151,11 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     kernel_cfg = dict(interface=builder,
                       ufl_cell=cell,
                       integral_type=integral_type,
-                      precision=parameters["precision"],
                       integration_dim=integration_dim,
                       entity_ids=entity_ids,
                       argument_multiindices=argument_multiindices,
-                      index_cache=index_cache)
+                      index_cache=index_cache,
+                      scalar_type=parameters["scalar_type"])
 
     mode_irs = collections.OrderedDict()
     for integral in integral_data.integrals:
@@ -267,7 +264,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     for multiindex, name in zip(argument_multiindices, ['j', 'k']):
         name_multiindex(multiindex, name)
 
-    return builder.construct_kernel(kernel_name, impero_c, parameters["precision"], index_names, quad_rule)
+    return builder.construct_kernel(kernel_name, impero_c, index_names, quad_rule)
 
 
 def compile_expression_dual_evaluation(expression, to_element, coordinates, interface=None,
@@ -343,9 +340,9 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, inte
     # Translate to GEM
     kernel_cfg = dict(interface=builder,
                       ufl_cell=coordinates.ufl_domain().ufl_cell(),
-                      precision=parameters["precision"],
                       argument_multiindices=argument_multiindices,
-                      index_cache={})
+                      index_cache={},
+                      scalar_type=parameters["scalar_type"])
 
     if all(isinstance(dual, PointEvaluation) for dual in to_element.dual_basis()):
         # This is an optimisation for point-evaluation nodes which
@@ -366,7 +363,7 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, inte
         # Allow interpolation onto QuadratureElements to refer to the quadrature
         # rule they represent
         if isinstance(to_element, FIAT.QuadratureElement):
-            assert all(qpoints == to_element._points)
+            assert allclose(asarray(qpoints), asarray(to_element._points))
             quad_rule = QuadratureRule(point_set, to_element._weights)
             config["quadrature_rule"] = quad_rule
 
@@ -427,7 +424,7 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, inte
     # Handle kernel interface requirements
     builder.register_requirements([ir])
     # Build kernel tuple
-    return builder.construct_kernel(return_arg, impero_c, parameters["precision"], index_names)
+    return builder.construct_kernel(return_arg, impero_c, index_names)
 
 
 def lower_integral_type(fiat_cell, integral_type):

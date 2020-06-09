@@ -141,7 +141,7 @@ def handle(ops, push, decref, node):
         raise AssertionError("no handler for node type %s" % type(node))
 
 
-def emit_operations(assignments, get_indices):
+def emit_operations(assignments, get_indices, emit_return_accumulate=True):
     """Makes an ordering of operations to evaluate a multi-root
     expression DAG.
 
@@ -150,6 +150,9 @@ def emit_operations(assignments, get_indices):
                       upon execution.
     :arg get_indices: mapping from GEM nodes to an ordering of free
                       indices
+    :arg emit_return_accumulate: emit ReturnAccumulate nodes? Set to
+                      False if the output variables are not guaranteed
+                      zero on entry to the kernel.
     :returns: list of Impero terminals correctly ordered to evaluate
               the assignments
     """
@@ -159,7 +162,8 @@ def emit_operations(assignments, get_indices):
     # Stage return operations
     staging = []
     for variable, expression in assignments:
-        if refcount[expression] == 1 and isinstance(expression, gem.IndexSum) \
+        if emit_return_accumulate and \
+                refcount[expression] == 1 and isinstance(expression, gem.IndexSum) \
                 and set(variable.free_indices) == set(expression.free_indices):
             staging.append(impero.ReturnAccumulate(variable, expression))
             refcount[expression] -= 1
