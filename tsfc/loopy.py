@@ -419,32 +419,38 @@ def _expression_scalar(expr, parameters):
 def _expression_variable(expr, ctx):
     return ctx.pymbolic_variable(expr)
 
-
 @_expression.register(gem.StructuredSparseVariable)
 def _expression_stucturedsparsevariable(expr, ctx): 
     node = expr.node  # Access the underlying FlexiblyIndexed node
     var = expression(node.children[0], ctx)
-    shape_needed = ()
+    index_order = []
+    index_to_offset = {}  # Don't need the stride
     seen_indices = set()
 
+    shape_needed = ()
     rank = []
-    for offset, idxs in node.dim2idxs:
-        for index, stride in idxs:
-            assert isinstance(index, gem.Index)
 
-        for index, stride in idxs:
-            rank_ = [offset]
-            # Repeated index is a delta elimination
+    for offset, idxs in node.dim2idxs:
+        for index, _ in idxs:
+            index_to_offset[index] = offset
             if index not in seen_indices:
-                seen_indices.add(index)
-                current_index_extent = ctx.index_extent[ctx.active_indices[index].name]
-                shape_needed = shape_needed + (current_index_extent,)
-                rank_.append(ctx.active_indices[index])
-                rank.append(p.Sum(tuple(rank_)))
+                index_order.append(index)
+            else: # Repeated index is a delta elimination
+                index_order.remove(index)
+                index_order.insert(0, index)
+            seen_indices.add(index)
+
+    for index in index_order:
+            offset = index_to_offset[index]
+            rank_ = [offset]
+            current_index_extent = ctx.index_extent[ctx.active_indices[index].name]
+            shape_needed = shape_needed + (current_index_extent,)
+            rank_.append(ctx.active_indices[index])
+            rank.append(p.Sum(tuple(rank_)))
+
     node_name = node.children[0].name
     ctx.arg_to_shape[node_name] = shape_needed
     return p.Subscript(var, tuple(rank))
-
 
 @_expression.register(gem.Indexed)
 def _expression_indexed(expr, ctx):
