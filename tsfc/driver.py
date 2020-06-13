@@ -383,7 +383,7 @@ def compile_expression_dual_evaluation(expression, element, coordinates, *,
         shape_indices = tuple(gem.Index() for _ in expr.shape)
         basis_indices = point_set.indices
         ir = gem.Indexed(expr, shape_indices)
-    elif isinstance(to_element, FiatElement):
+    elif isinstance(element, FiatElement):
         print('new')
         def fn(point_set):
             '''Wrapper function for converting UFL `expression` into GEM expression.
@@ -395,7 +395,7 @@ def compile_expression_dual_evaluation(expression, element, coordinates, *,
             return gem_expr, lambda: expression.ufl_shape, lambda: argument_multiindices
 
         # basis_indices is temporary before including kernel body in method
-        basis_indices, ir = element.dual_evaluation(fn)
+        basis_indices, ir, shape_indices = element.dual_evaluation(fn)
     else:
         print('old')
         # This is general code but is more unrolled than necssary.
