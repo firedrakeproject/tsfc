@@ -361,49 +361,17 @@ def compile_expression_dual_evaluation(expression, element, *,
 
     if isinstance(element, FiatElement):
         print('new')
+        def fn(point_set):
+            '''Wrapper function for converting UFL `expression` into GEM expression.
+            '''
+            config = kernel_cfg.copy()
+            config.update(point_set=point_set)
+            gem_expr, = fem.compile_ufl(expression, **config, point_sum=False)
 
-        class UFLtoGEMCallback(object):
-            def __init__(self, dimension):
-                # Geometric dimension or topological dimension
-                # For differentiating UFL Zero
-                self.dimension = dimension
+            return gem_expr, lambda: expression.ufl_shape, lambda: argument_multiindices
 
-            def __call__(self, point_set, derivative=0):
-                '''Wrapper function for converting UFL `expression` into GEM expression.
-
-                :param point_set: FInAT PointSet
-                :param derivative: Maximum order of differentiation
-                '''
-                from ufl.differentiation import ReferenceGrad
-                # from ufl.operators import grad
-                config = kernel_cfg.copy()
-                config.update(point_set=point_set)
-
-                # Using expression directly changes scope
-                dexpression = expression
-                print('before dloop', dexpression, dexpression.ufl_domain())
-                for _ in range(derivative):
-                    print('in dloop', dexpression, dexpression.ufl_domain())
-                    print(type(dexpression))
-                    # Hack since UFL derivative of ConstantValue has no dimension
-                    if isinstance(dexpression, ufl.constantvalue.Zero):
-                        shape = dexpression.ufl_shape
-                        free_indices = dexpression.ufl_free_indices
-                        index_dimension = expression.ufl_index_dimensions
-                        dexpression = ufl.constantvalue.Zero(
-                            shape + (self.dimension,), free_indices, index_dimension)
-                        print(dexpression)
-                    else:
-                        dexpression = ReferenceGrad(dexpression)
-                gem_expr, = fem.compile_ufl(dexpression, **config, point_sum=False)
-
-                return gem_expr
-
-        ir_shape = element.dual_evaluation(UFLtoGEMCallback(expression.geometric_dimension()))
-        broadcast_shape = len(expression.ufl_shape) - len(to_element.value_shape())
-        shape_indices = tuple(gem.Index() for _ in expression.ufl_shape[:broadcast_shape])
-        basis_indices = (gem.Index(), )
-        ir = gem.Indexed(ir_shape, basis_indices)
+        # basis_indices is temporary before including kernel body in method
+        basis_indices, ir, shape_indices = element.dual_evaluation(fn)
     elif all(isinstance(dual, PointEvaluation) for dual in to_element.dual_basis()):
         print('point')
         # This is an optimisation for point-evaluation nodes which
@@ -435,19 +403,6 @@ def compile_expression_dual_evaluation(expression, element, *,
         shape_indices = tuple(gem.Index() for _ in expr.shape)
         basis_indices = point_set.indices
         ir = gem.Indexed(expr, shape_indices)
-    elif isinstance(element, FiatElement):
-        print('new')
-        def fn(point_set):
-            '''Wrapper function for converting UFL `expression` into GEM expression.
-            '''
-            config = kernel_cfg.copy()
-            config.update(point_set=point_set)
-            gem_expr, = fem.compile_ufl(expression, **config, point_sum=False)
-
-            return gem_expr, lambda: expression.ufl_shape, lambda: argument_multiindices
-
-        # basis_indices is temporary before including kernel body in method
-        basis_indices, ir, shape_indices = element.dual_evaluation(fn)
     else:
         print('old')
         # This is general code but is more unrolled than necssary.
