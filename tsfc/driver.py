@@ -359,7 +359,21 @@ def compile_expression_dual_evaluation(expression, element, *,
                       index_cache={},
                       scalar_type=parameters["scalar_type"])
 
-    if all(isinstance(dual, PointEvaluation) for dual in to_element.dual_basis()):
+    if isinstance(element, FiatElement):
+        print('new')
+        def fn(point_set):
+            '''Wrapper function for converting UFL `expression` into GEM expression.
+            '''
+            config = kernel_cfg.copy()
+            config.update(point_set=point_set)
+            gem_expr, = fem.compile_ufl(expression, **config, point_sum=False)
+
+            return gem_expr, lambda: expression.ufl_shape, lambda: argument_multiindices
+
+        # basis_indices is temporary before including kernel body in method
+        basis_indices, ir, shape_indices = element.dual_evaluation(fn)
+    elif all(isinstance(dual, PointEvaluation) for dual in to_element.dual_basis()):
+        print('point')
         # This is an optimisation for point-evaluation nodes which
         # should go away once FInAT offers the interface properly
         qpoints = []
@@ -389,19 +403,6 @@ def compile_expression_dual_evaluation(expression, element, *,
         shape_indices = tuple(gem.Index() for _ in expr.shape)
         basis_indices = point_set.indices
         ir = gem.Indexed(expr, shape_indices)
-    elif isinstance(element, FiatElement):
-        print('new')
-        def fn(point_set):
-            '''Wrapper function for converting UFL `expression` into GEM expression.
-            '''
-            config = kernel_cfg.copy()
-            config.update(point_set=point_set)
-            gem_expr, = fem.compile_ufl(expression, **config, point_sum=False)
-
-            return gem_expr, lambda: expression.ufl_shape, lambda: argument_multiindices
-
-        # basis_indices is temporary before including kernel body in method
-        basis_indices, ir, shape_indices = element.dual_evaluation(fn)
     else:
         print('old')
         # This is general code but is more unrolled than necssary.
