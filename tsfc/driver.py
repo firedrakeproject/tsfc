@@ -365,10 +365,13 @@ def compile_expression_dual_evaluation(expression, element, coordinates, *,
             config.update(point_set=point_set)
             gem_expr, = fem.compile_ufl(expression, **config, point_sum=False)
 
-            return gem_expr, lambda: expression.ufl_shape, lambda: argument_multiindices
+            return gem_expr
 
-        # basis_indices is temporary before including kernel body in method
-        basis_indices, ir, shape_indices = element.dual_evaluation(fn)
+        ir_shape = element.dual_evaluation(fn)
+        broadcast_shape = len(expression.ufl_shape) - len(to_element.value_shape())
+        shape_indices = tuple(gem.Index() for _ in expression.ufl_shape[:broadcast_shape])
+        basis_indices = (gem.Index(), )
+        ir = gem.Indexed(ir_shape, basis_indices)
     elif all(isinstance(dual, PointEvaluation) for dual in to_element.dual_basis()):
         print('point')
         # This is an optimisation for point-evaluation nodes which
@@ -432,7 +435,6 @@ def compile_expression_dual_evaluation(expression, element, coordinates, *,
         basis_indices = (gem.Index(), )
         ir = gem.Indexed(gem.ListTensor(dual_expressions), basis_indices)
         
-
     # Build kernel body
     return_indices = basis_indices + shape_indices + tuple(chain(*argument_multiindices))
     return_shape = tuple(i.extent for i in return_indices)
