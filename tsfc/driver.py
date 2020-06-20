@@ -361,6 +361,7 @@ def compile_expression_dual_evaluation(expression, element, *,
 
     if isinstance(element, FiatElement):
         print('new')
+
         def fn(point_set):
             '''Wrapper function for converting UFL `expression` into GEM expression.
             '''
@@ -443,7 +444,7 @@ def compile_expression_dual_evaluation(expression, element, *,
             dual_expressions.append(qexprs)
         basis_indices = (gem.Index(), )
         ir = gem.Indexed(gem.ListTensor(dual_expressions), basis_indices)
-        
+
     # Build kernel body
     return_indices = basis_indices + shape_indices + tuple(chain(*argument_multiindices))
     return_shape = tuple(i.extent for i in return_indices)
