@@ -366,19 +366,20 @@ def compile_expression_dual_evaluation(expression, element, *,
             '''Wrapper function for converting UFL `expression` into GEM expression.
             '''
             # Is exterior derivative required?
-            from ufl.operators import Dx, Dn, div, grad, nabla_div, nabla_grad, curl, \
-                                      rot, diff
-            deriv_dict = {'Dx': Dx, 'Dn': Dn, 'div': div, 'grad': grad, 'nabla_div': nabla_div, \
-                          'nabla_grad': nabla_grad, 'curl': curl, 'rot': rot, 'diff': diff}
+            from ufl.operators import Dn, div, grad, nabla_div, nabla_grad, curl, rot
+            deriv_oper = {'Dn': Dn, 'div': div, 'grad': grad, 'nabla_div': nabla_div,
+                          'nabla_grad': nabla_grad, 'curl': curl, 'rot': rot}
             config = kernel_cfg.copy()
             config.update(point_set=point_set)
             if deriv is None:
                 dexpression = expression
-            elif isinstance(deriv, (tuple, list)):
-                # TODO: How to do Dx and diff?
+            elif type(deriv) is int:
+                # Dx requires GEM indexing in FInAT
                 dexpression = expression
+                for _ in range(deriv):
+                    dexpression = grad(dexpression)
             else:
-                dexpression = deriv_dict[deriv](expression)
+                dexpression = deriv_oper[deriv](expression)
             gem_expr, = fem.compile_ufl(dexpression, **config, point_sum=False)
 
             return gem_expr
