@@ -365,14 +365,14 @@ def compile_expression_dual_evaluation(expression, element, coordinates, *,
             :param point_set: FInAT PointSet
             :param derivative: Maximum order of differentiation
             '''
-            from ufl.operators import grad
+            from ufl.differentiation import ReferenceGrad
             config = kernel_cfg.copy()
             config.update(point_set=point_set)
-            
+
             # Using expression directly changes scope
             dexpression = expression
             for _ in range(derivative):
-                dexpression = grad(dexpression)
+                dexpression = ReferenceGrad(dexpression)
             gem_expr, = fem.compile_ufl(dexpression, **config, point_sum=False)
 
             return gem_expr
