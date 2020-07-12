@@ -210,10 +210,10 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     for i, (temp, dtype) in enumerate(assign_dtypes(impero_c.temporaries, scalar_type)):
         name = "t%d" % i
         if isinstance(temp, gem.Constant):
-            data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=dtype, initializer=temp.array, address_space=lp.AddressSpace.GLOBAL, read_only=True))
+            data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=dtype, initializer=temp.array, address_space=lp.AddressSpace.LOCAL, read_only=True))
         else:
             shape = tuple([i.extent for i in ctx.indices[temp]]) + temp.shape
-            data.append(lp.TemporaryVariable(name, shape=shape, dtype=dtype, initializer=None, address_space=lp.AddressSpace.PRIVATE, read_only=False))
+            data.append(lp.TemporaryVariable(name, shape=shape, dtype=dtype, initializer=None, address_space=lp.AddressSpace.LOCAL, read_only=False))
         ctx.gem_to_pymbolic[temp] = p.Variable(name)
 
     # Create instructions
