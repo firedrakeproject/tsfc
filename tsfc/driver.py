@@ -25,6 +25,7 @@ from FIAT.functional import PointEvaluation
 from finat.point_set import PointSet
 from finat.quadrature import AbstractQuadratureRule, make_quadrature, QuadratureRule
 from finat.fiat_elements import FiatElement
+from finat.tensorfiniteelement import TensorFiniteElement
 
 from tsfc import fem, ufl_utils
 from tsfc.finatinterface import as_fiat_cell
@@ -286,9 +287,11 @@ def compile_expression_dual_evaluation(expression, element, coordinates, *,
     import coffee.base as ast
     import loopy as lp
 
-    # TODO: Temporary fix to maintain old code
+    # TODO: Temporary fix to maintain old code, TensorFiniteElement?
     if isinstance(element, FiatElement):
         to_element = element._element
+    elif isinstance(element, TensorFiniteElement):
+        to_element = element._base_element._element
     else:
         # Just convert FInAT element to FIAT for now.
         # Dual evaluation in FInAT will bring a thorough revision.
@@ -356,14 +359,16 @@ def compile_expression_dual_evaluation(expression, element, coordinates, *,
                       index_cache={},
                       scalar_type=parameters["scalar_type"])
 
-    if isinstance(element, FiatElement):
+    print(element)
+    if isinstance(element, (FiatElement, TensorFiniteElement)):
         print('new')
 
         class UFLtoGEMCallback(object):
-            def __init__(self, dimension):
+            def __init__(self, expression):
                 # Geometric dimension or topological dimension
                 # For differentiating UFL Zero
-                self.dimension = dimension
+                self.expression = expression
+                self.dimension = expression.geometric_dimension()
 
             def __call__(self, point_set, derivative=0):
                 '''Wrapper function for converting UFL `expression` into GEM expression.
@@ -377,11 +382,8 @@ def compile_expression_dual_evaluation(expression, element, coordinates, *,
                 config.update(point_set=point_set)
 
                 # Using expression directly changes scope
-                dexpression = expression
-                print('before dloop', dexpression, dexpression.ufl_domain())
+                dexpression = self.expression
                 for _ in range(derivative):
-                    print('in dloop', dexpression, dexpression.ufl_domain())
-                    print(type(dexpression))
                     # Hack since UFL derivative of ConstantValue has no dimension
                     if isinstance(dexpression, ufl.constantvalue.Zero):
                         shape = dexpression.ufl_shape
@@ -389,14 +391,14 @@ def compile_expression_dual_evaluation(expression, element, coordinates, *,
                         index_dimension = expression.ufl_index_dimensions
                         dexpression = ufl.constantvalue.Zero(
                             shape + (self.dimension,), free_indices, index_dimension)
-                        print(dexpression)
                     else:
                         dexpression = ReferenceGrad(dexpression)
+                    dexpression = ufl_utils.preprocess_expression(dexpression, complex_mode=complex_mode)
                 gem_expr, = fem.compile_ufl(dexpression, **config, point_sum=False)
 
                 return gem_expr
 
-        ir_shape = element.dual_evaluation(UFLtoGEMCallback(expression.geometric_dimension()))
+        ir_shape = element.dual_evaluation(UFLtoGEMCallback(expression))
         broadcast_shape = len(expression.ufl_shape) - len(to_element.value_shape())
         shape_indices = tuple(gem.Index() for _ in expression.ufl_shape[:broadcast_shape])
         basis_indices = (gem.Index(), )
