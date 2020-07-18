@@ -320,11 +320,7 @@ def _evaluate_listtensor(e, self):
     """List tensors just turn into arrays."""
     ops = [self(o) for o in e.children]
     tmp = Result.empty(*ops)
-    arrs = []
-    for o in ops:
-        arr = numpy.empty(tmp.fshape)
-        arr[:] = o.broadcast(tmp.fids)
-        arrs.append(arr)
+    arrs = [numpy.broadcast_to(o.broadcast(tmp.fids), tmp.fshape) for o in ops]
     arrs = numpy.moveaxis(numpy.asarray(arrs), 0, -1).reshape(tmp.fshape + e.shape)
     return Result(arrs, tmp.fids)
 

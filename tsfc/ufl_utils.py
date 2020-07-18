@@ -332,8 +332,11 @@ def _simplify_abs_expr(o, self, in_abs):
 
 @_simplify_abs.register(Sqrt)
 def _simplify_abs_sqrt(o, self, in_abs):
-    # Square root is always non-negative
-    return ufl_reuse_if_untouched(o, self(o.ufl_operands[0], False))
+    result = ufl_reuse_if_untouched(o, self(o.ufl_operands[0], False))
+    if self.complex_mode and in_abs:
+        return Abs(result)
+    else:
+        return result
 
 
 @_simplify_abs.register(ScalarValue)
@@ -385,14 +388,16 @@ def _simplify_abs_abs(o, self, in_abs):
     return self(o.ufl_operands[0], True)
 
 
-def simplify_abs(expression):
+def simplify_abs(expression, complex_mode):
     """Simplify absolute values in a UFL expression.  Its primary
     purpose is to "neutralise" CellOrientation nodes that are
     surrounded by absolute values and thus not at all necessary."""
-    return MemoizerArg(_simplify_abs)(expression, False)
+    mapper = MemoizerArg(_simplify_abs)
+    mapper.complex_mode = complex_mode
+    return mapper(expression, False)
 
 
-def apply_mapping(expression, mapping):
+def apply_mapping(expression, mapping, domain):
     """
     This applies the appropriate transformation to the
     given expression for interpolation to a specific
@@ -441,6 +446,10 @@ def apply_mapping(expression, mapping):
     """
 
     mesh = expression.ufl_domain()
+    if mesh is None:
+        mesh = domain
+    if domain is not None and mesh != domain:
+        raise NotImplementedError("Multiple domains not supported")
     rank = len(expression.ufl_shape)
     if mapping == "affine":
         return expression
@@ -450,18 +459,15 @@ def apply_mapping(expression, mapping):
         expression = Indexed(expression, MultiIndex((*i, k)))
         return as_tensor(J.T[j, k] * expression, (*i, j))
     elif mapping == "contravariant piola":
-        mesh = expression.ufl_domain()
         K = JacobianInverse(mesh)
         detJ = JacobianDeterminant(mesh)
         *i, j, k = indices(len(expression.ufl_shape) + 1)
         expression = Indexed(expression, MultiIndex((*i, k)))
         return as_tensor(detJ * K[j, k] * expression, (*i, j))
     elif mapping == "double covariant piola" and rank == 2:
-        mesh = expression.ufl_domain()
         J = Jacobian(mesh)
         return J.T * expression * J
     elif mapping == "double contravariant piola" and rank == 2:
-        mesh = expression.ufl_domain()
         K = JacobianInverse(mesh)
         detJ = JacobianDeterminant(mesh)
         return (detJ)**2 * K * expression * K.T
