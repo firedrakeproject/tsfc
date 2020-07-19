@@ -364,11 +364,17 @@ def compile_expression_dual_evaluation(expression, element, coordinates, *,
         print('new')
 
         class UFLtoGEMCallback(object):
-            def __init__(self, expression):
+            def __init__(self, expression, complex_mode):
                 # Geometric dimension or topological dimension
                 # For differentiating UFL Zero
                 self.expression = expression
-                self.dimension = expression.geometric_dimension()
+                # Fix for Zero expressions with no dimension
+                from ufl.log import UFLException
+                try:
+                    self.dimension = expression.geometric_dimension()
+                except UFLException:
+                    self.dimension = 0
+                self.complex_mode = complex_mode
 
             def __call__(self, point_set, derivative=0):
                 '''Wrapper function for converting UFL `expression` into GEM expression.
@@ -393,12 +399,12 @@ def compile_expression_dual_evaluation(expression, element, coordinates, *,
                             shape + (self.dimension,), free_indices, index_dimension)
                     else:
                         dexpression = ReferenceGrad(dexpression)
-                    dexpression = ufl_utils.preprocess_expression(dexpression, complex_mode=complex_mode)
+                    dexpression = ufl_utils.preprocess_expression(dexpression, complex_mode=self.complex_mode)
                 gem_expr, = fem.compile_ufl(dexpression, **config, point_sum=False)
 
                 return gem_expr
 
-        ir_shape = element.dual_evaluation(UFLtoGEMCallback(expression))
+        ir_shape = element.dual_evaluation(UFLtoGEMCallback(expression, complex_mode))
         broadcast_shape = len(expression.ufl_shape) - len(to_element.value_shape())
         shape_indices = tuple(gem.Index() for _ in expression.ufl_shape[:broadcast_shape])
         basis_indices = (gem.Index(), )
