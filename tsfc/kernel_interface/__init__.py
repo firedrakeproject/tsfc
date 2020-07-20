@@ -18,8 +18,8 @@ class KernelInterface(metaclass=ABCMeta):
         expressions."""
 
     @abstractmethod
-    def topological_coefficient(self, ufl_topological_coefficient, restriction):
-        """A function that maps :class:`ufl.TopologicalCoefficient`s to GEM
+    def subspace(self, ufl_subspace, restriction):
+        """A function that maps :class:`ufl.Subspace`s to GEM
         expressions."""
 
     @abstractmethod

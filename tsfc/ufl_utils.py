@@ -149,7 +149,7 @@ class ModifiedTerminalMixin(object):
     # Unlike UFL, we do not regard Indexed as a terminal modifier.
     # indexed = _modified_terminal
 
-    transformed = _modified_terminal
+    masked = _modified_terminal
 
     positive_restricted = _modified_terminal
     negative_restricted = _modified_terminal
@@ -189,7 +189,7 @@ class CoefficientSplitter(MultiFunction, ModifiedTerminalMixin):
         # Coefficient split
         _split = self._split[terminal]
 
-        # TopologicalCoefficient(filter) split
+        # Subspace(filter) split
         if mt.filter:
             _filter_split = self._filter_split[mt.filter]
             assert len(_filter_split) == len(_split), "Number of split components does not match"
@@ -235,7 +235,7 @@ class TopologicalCoefficientSplitter(MultiFunction):
 
     expr = MultiFunction.reuse_if_untouched
 
-    def topological_coefficient(self, o):
+    def subspace(self, o):
 
         if type(o.ufl_element()) != MixedElement:
             # Only split mixed topological coefficients
@@ -253,7 +253,7 @@ class TopologicalCoefficientSplitter(MultiFunction):
         return as_tensor(components)
 
 
-def split_topological_coefficients(expression, split):
+def split_subspaces(expression, split):
     """Split mixed topological coefficients, so mixed elements need not be
     implemented.
 

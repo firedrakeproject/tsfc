@@ -22,7 +22,7 @@
 
 from ufl.classes import (ReferenceValue, ReferenceGrad,
                          NegativeRestricted, PositiveRestricted,
-                         Restricted, Transformed, ConstantValue,
+                         Restricted, Masked, ConstantValue,
                          Jacobian, SpatialCoordinate, Zero)
 from ufl.checks import is_cellwise_constant
 
@@ -39,7 +39,7 @@ class ModifiedTerminal(object):
         local_derivatives  - tuple of ints, each meaning derivative in that local direction
         reference_value    - bool, whether this is represented in reference frame
         restriction        - None, '+' or '-'
-        filter             - None or UFL TopologicalCoefficient object
+        filter             - None or UFL Subspace object
     """
 
     def __init__(self, expr, terminal, local_derivatives, restriction, reference_value, fltr):
@@ -134,8 +134,8 @@ def analyse_modified_terminal(expr):
             restriction = t._side
             t, = t.ufl_operands
 
-        elif isinstance(t, Transformed):
-            assert fltr is None, "Got twice transformed terminal!"
+        elif isinstance(t, Masked):
+            assert fltr is None, "Got twice masked terminal!"
             t, fltr = t.ufl_operands
 
         elif t._ufl_terminal_modifiers_:
@@ -169,7 +169,7 @@ def construct_modified_terminal(mt, terminal):
     dim = expr.ufl_domain().topological_dimension()
 
     if mt.filter:
-        expr = Transformed(expr, mt.filter)
+        expr = Masked(expr, mt.filter)
 
     for n in range(mt.local_derivatives):
         # Return zero if expression is trivially constant. This has to

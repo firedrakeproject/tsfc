@@ -3,7 +3,7 @@ from collections import namedtuple
 from itertools import chain, product
 from functools import partial
 
-from ufl import Coefficient, TopologicalCoefficient, MixedElement as ufl_MixedElement, FunctionSpace, TopologicalFunctionSpace, FiniteElement
+from ufl import Coefficient, Subspace, MixedElement as ufl_MixedElement, FunctionSpace, TopologicalFunctionSpace, FiniteElement
 
 import coffee.base as coffee
 
@@ -27,7 +27,7 @@ def make_builder(*args, **kwargs):
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
                  "domain_number", "needs_cell_sizes", "tabulations", "quadrature_rule",
-                 "coefficient_numbers", "topological_coefficient_numbers", "topological_coefficient_parts", "__weakref__")
+                 "coefficient_numbers", "subspace_numbers", "subspace_parts", "__weakref__")
     """A compiled Kernel object.
 
     :kwarg ast: The COFFEE ast for the kernel.
@@ -39,12 +39,12 @@ class Kernel(object):
         original_form.ufl_domains() to get the correct domain).
     :kwarg coefficient_numbers: A list of which coefficients from the
         form the kernel needs.
-    :kwarg topological_coefficient_numbers: A list of which topological coefficients from the
+    :kwarg subspace_numbers: A list of which subspaces from the
         form the kernel needs.
-    :kwarg topological_coefficient_parts: A list of lists of topological coefficient components
+    :kwarg subspace_parts: A list of lists of subspace components
         that are actually used in the given integral_data. If `None` is given
         instead of a list of components, it is assumed that all components of
-        that topological coefficient are to be used.
+        that subspace are to be used.
     :kwarg quadrature_rule: The finat quadrature rule used to generate this kernel
     :kwarg tabulations: The runtime tabulations this kernel requires
     :kwarg needs_cell_sizes: Does the kernel require cell sizes.
@@ -52,8 +52,8 @@ class Kernel(object):
     def __init__(self, ast=None, integral_type=None, oriented=False,
                  subdomain_id=None, domain_number=None, quadrature_rule=None,
                  coefficient_numbers=(),
-                 topological_coefficient_numbers=(),
-                 topological_coefficient_parts=None,
+                 subspace_numbers=(),
+                 subspace_parts=None,
                  needs_cell_sizes=False):
         # Defaults
         self.ast = ast
@@ -62,8 +62,8 @@ class Kernel(object):
         self.domain_number = domain_number
         self.subdomain_id = subdomain_id
         self.coefficient_numbers = coefficient_numbers
-        self.topological_coefficient_numbers = topological_coefficient_numbers
-        self.topological_coefficient_parts = topological_coefficient_parts
+        self.subspace_numbers = subspace_numbers
+        self.subspace_parts = subspace_parts
         self.needs_cell_sizes = needs_cell_sizes
         super(Kernel, self).__init__()
 
@@ -99,16 +99,16 @@ class KernelBuilderBase(_KernelBuilderBase):
         self.coefficient_map[coefficient] = expression
         return funarg
 
-    def _topological_coefficient(self, topo_coeff, name):
-        """Prepare a topological coefficient. Adds glue code for the topological coefficient
-        and adds the topological coefficient to the topological coefficient map.
+    def _subspace(self, subspace, name):
+        """Prepare a subspace. Adds glue code for the subspace
+        and adds the subspace to the subspace map.
 
-        :arg topo_coeff: :class:`ufl.TopologicalCoefficient`
-        :arg name: topological coefficient name
-        :returns: COFFEE function argument for the topological coefficient
+        :arg subspace: :class:`ufl.Subspace`
+        :arg name: subspace name
+        :returns: COFFEE function argument for the subspace
         """
-        funarg, expression = prepare_coefficient_filter(topo_coeff, name, self.scalar_type, interior_facet=self.interior_facet)
-        self.topological_coefficient_map[topo_coeff] = expression
+        funarg, expression = prepare_coefficient_filter(subspace, name, self.scalar_type, interior_facet=self.interior_facet)
+        self.subspace_map[subspace] = expression
         return funarg
 
     def set_cell_sizes(self, domain):
@@ -211,8 +211,8 @@ class KernelBuilder(KernelBuilderBase):
         self.coordinates_arg = None
         self.coefficient_args = []
         self.coefficient_split = {}
-        self.topological_coefficient_args = []
-        self.topological_coefficient_split = {}
+        self.subspace_args = []
+        self.subspace_split = {}
         self.dont_split = frozenset(dont_split)
 
         # Facet number
@@ -287,19 +287,19 @@ class KernelBuilder(KernelBuilderBase):
             self.coefficient_args.append(self._coefficient(obj, "w_%d" % i))
         self.kernel.coefficient_numbers = tuple(object_numbers)
 
-    def set_topological_coefficients(self, integral_data, form_data):
-        """Prepare the topological coefficients of the form.
+    def set_subspaces(self, integral_data, form_data):
+        """Prepare the subspaces of the form.
 
         :arg integral_data: UFL integral data
         :arg form_data: UFL form data
         """
         objects = []
         object_numbers = []
-        # enabled_topological_coefficients is a boolean array that indicates which
-        # of reduced_topological_coefficients the integral requires.
-        enabled_objects = integral_data.enabled_topological_coefficients
-        reduced_objects = form_data.reduced_topological_coefficients
-        replace_map = form_data.topological_coefficient_replace_map
+        # enabled_subspaces is a boolean array that indicates which
+        # of reduced_subspaces the integral requires.
+        enabled_objects = integral_data.enabled_subspaces
+        reduced_objects = form_data.reduced_subspaces
+        replace_map = form_data.subspace_replace_map
         for i in range(len(enabled_objects)):
             if enabled_objects[i]:
                 original = reduced_objects[i]
@@ -307,24 +307,24 @@ class KernelBuilder(KernelBuilderBase):
                 if type(obj.ufl_element()) == ufl_MixedElement:
                     if original in self.dont_split:
                         objects.append(obj)
-                        self.topological_coefficient_split[obj] = [obj]
+                        self.subspace_split[obj] = [obj]
                     else:
-                        split = [TopologicalCoefficient(TopologicalFunctionSpace(obj.ufl_domain(), element))
+                        split = [Subspace(TopologicalFunctionSpace(obj.ufl_domain(), element))
                                  for element in obj.ufl_element().sub_elements()]
                         objects.extend(split)
-                        self.topological_coefficient_split[obj] = split
+                        self.subspace_split[obj] = split
                 else:
                     objects.append(obj)
-                # This is which topological coefficient in the original form the
-                # current topological coefficient is.
-                object_numbers.append(form_data.original_topological_coefficient_positions[i])
+                # This is which subspace in the original form the
+                # current subspace is.
+                object_numbers.append(form_data.original_subspace_positions[i])
         for i, obj in enumerate(objects):
-            self.topological_coefficient_args.append(self._topological_coefficient(obj, "r_%d" % i))
-        self.kernel.topological_coefficient_numbers = tuple(object_numbers)
+            self.subspace_args.append(self._subspace(obj, "r_%d" % i))
+        self.kernel.subspace_numbers = tuple(object_numbers)
         # TODO: Remove redundant components by appropriately setting this.
-        # For now, this is only necessary for 'topological_coefficient' to deal with
+        # For now, this is only necessary for 'subspace' to deal with
         # splitting of arguments.
-        self.kernel.topological_coefficient_parts = [None for _ in self.kernel.topological_coefficient_numbers]
+        self.kernel.subspace_parts = [None for _ in self.kernel.subspace_numbers]
 
     def register_requirements(self, ir):
         """Inspect what is referenced by the IR that needs to be
@@ -352,7 +352,7 @@ class KernelBuilder(KernelBuilderBase):
             args.append(cell_orientations_coffee_arg)
         if self.kernel.needs_cell_sizes:
             args.append(self.cell_sizes_arg)
-        args.extend(self.coefficient_args + self.topological_coefficient_args)
+        args.extend(self.coefficient_args + self.subspace_args)
         if self.kernel.integral_type in ["exterior_facet", "exterior_facet_vert"]:
             args.append(coffee.Decl("unsigned int",
                                     coffee.Symbol("facet", rank=(1,)),
@@ -399,14 +399,14 @@ def check_requirements(ir):
 
 def prepare_coefficient_filter(obj, name, scalar_type, interior_facet=False):
     """Bridges the kernel interface and the GEM abstraction for
-    Coefficients/TopologicalCoefficient.
+    Coefficients/Subspace.
 
-    :arg obj: UFL Coefficient/TopologicalCoefficient
-    :arg name: unique name to refer to the Coefficient/TopologicalCoefficient in the kernel
+    :arg obj: UFL Coefficient/Subspace
+    :arg name: unique name to refer to the Coefficient/Subspace in the kernel
     :arg interior_facet: interior facet integral?
     :returns: (funarg, expression)
          funarg     - :class:`coffee.Decl` function argument
-         expression - GEM expression referring to the Coefficient/TopologicalCoefficient
+         expression - GEM expression referring to the Coefficient/Subspace
                       values
     """
     assert isinstance(interior_facet, bool)
