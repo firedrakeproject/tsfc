@@ -228,7 +228,7 @@ def split_coefficients(expression, split, filter_split=None):
     return map_expr_dag(splitter, expression)
 
 
-class TopologicalCoefficientSplitter(MultiFunction):
+class SubspaceSplitter(MultiFunction):
     def __init__(self, split):
         MultiFunction.__init__(self)
         self._split = split
@@ -254,17 +254,17 @@ class TopologicalCoefficientSplitter(MultiFunction):
 
 
 def split_subspaces(expression, split):
-    """Split mixed topological coefficients, so mixed elements need not be
+    """Split mixed subspaces, so mixed elements need not be
     implemented.
 
-    :arg split: A :py:class:`dict` mapping each mixed topological coefficient to a
-                sequence of subcoefficients.  If None, calling this
+    :arg split: A :py:class:`dict` mapping each mixed subspace to a
+                sequence of sub-subspaces.  If None, calling this
                 function is a no-op.
     """
     if split is None:
         return expression
 
-    splitter = TopologicalCoefficientSplitter(split)
+    splitter = SubspaceSplitter(split)
     return map_expr_dag(splitter, expression)
 
 

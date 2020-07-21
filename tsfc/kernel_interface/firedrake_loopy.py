@@ -3,7 +3,7 @@ from collections import namedtuple
 from itertools import chain, product
 from functools import partial
 
-from ufl import Coefficient, Subspace, MixedElement as ufl_MixedElement, FunctionSpace, TopologicalFunctionSpace, FiniteElement
+from ufl import Coefficient, Subspace, MixedElement as ufl_MixedElement, FunctionSpace, FiniteElement
 
 import gem
 from gem.optimise import remove_componenttensors as prune
@@ -311,7 +311,7 @@ class KernelBuilder(KernelBuilderBase):
                         objects.append(obj)
                         self.subspace_split[obj] = [obj]
                     else:
-                        split = [Subspace(TopologicalFunctionSpace(obj.ufl_domain(), element))
+                        split = [Subspace(FunctionSpace(obj.ufl_domain(), element))
                                  for element in obj.ufl_element().sub_elements()]
                         objects.extend(split)
                         self.subspace_split[obj] = split
