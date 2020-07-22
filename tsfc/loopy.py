@@ -186,23 +186,24 @@ def active_indices(mapping, ctx):
         ctx.active_indices.pop(key)
 
 
-def generate(impero_c, args, precision, scalar_type, kernel_name="loopy_kernel", index_names=[]):
+def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_names=[],
+             return_increments=True):
     """Generates loopy code.
 
     :arg impero_c: ImperoC tuple with Impero AST and other data
     :arg args: list of loopy.GlobalArgs
-    :arg precision: floating-point precision for printing
     :arg scalar_type: type of scalars as C typename string
     :arg kernel_name: function name of the kernel
     :arg index_names: pre-assigned index names
+    :arg return_increments: Does codegen for Return nodes increment the lvalue, or assign?
     :returns: loopy kernel
     """
     ctx = LoopyContext()
     ctx.indices = impero_c.indices
     ctx.index_names = defaultdict(lambda: "i", index_names)
-    ctx.precision = precision
+    ctx.epsilon = numpy.finfo(scalar_type).resolution
     ctx.scalar_type = scalar_type
-    ctx.epsilon = 10.0 ** (-precision)
+    ctx.return_increments = return_increments
 
     # Create arguments
     data = list(args)
@@ -219,13 +220,7 @@ def generate(impero_c, args, precision, scalar_type, kernel_name="loopy_kernel",
     instructions = statement(impero_c.tree, ctx)
 
     # Create domains
-    domains = []
-    for idx, extent in ctx.index_extent.items():
-        inames = isl.make_zero_and_vars([idx])
-        domains.append(((inames[0].le_set(inames[idx])) & (inames[idx].lt_set(inames[0] + extent))))
-
-    if not domains:
-        domains = [isl.BasicSet("[] -> {[]}")]
+    domains = create_domains(ctx.index_extent.items())
 
     # Create loopy kernel
     knl = lp.make_function(domains, instructions, data, name=kernel_name, target=lp.CTarget(),
@@ -241,6 +236,22 @@ def generate(impero_c, args, precision, scalar_type, kernel_name="loopy_kernel",
     knl = knl.copy(instructions=insn_new)
 
     return knl
+
+
+def create_domains(indices):
+    """ Create ISL domains from indices
+
+    :arg indices: iterable of (index_name, extent) pairs
+    :returns: A list of ISL sets representing the iteration domain of the indices."""
+
+    domains = []
+    for idx, extent in indices:
+        inames = isl.make_zero_and_vars([idx])
+        domains.append(((inames[0].le_set(inames[idx])) & (inames[idx].lt_set(inames[0] + extent))))
+
+    if not domains:
+        domains = [isl.BasicSet("[] -> {[]}")]
+    return domains
 
 
 @singledispatch
@@ -286,7 +297,9 @@ def statement_accumulate(leaf, ctx):
 @statement.register(imp.Return)
 def statement_return(leaf, ctx):
     lhs = expression(leaf.variable, ctx)
-    rhs = lhs + expression(leaf.expression, ctx)
+    rhs = expression(leaf.expression, ctx)
+    if ctx.return_increments:
+        rhs = lhs + rhs
     return [lp.Assignment(lhs, rhs, within_inames=ctx.active_inames())]
 
 
@@ -357,12 +370,12 @@ def expression(expr, ctx, top=False):
 
 
 @singledispatch
-def _expression(expr, parameters):
+def _expression(expr, ctx):
     raise AssertionError("cannot generate expression from %s" % type(expr))
 
 
 @_expression.register(gem.Failure)
-def _expression_failure(expr, parameters):
+def _expression_failure(expr, ctx):
     raise expr.exception
 
 
@@ -460,13 +473,13 @@ def _expression_conditional(expr, ctx):
 
 
 @_expression.register(gem.Constant)
-def _expression_scalar(expr, parameters):
+def _expression_scalar(expr, ctx):
     assert not expr.shape
     v = expr.value
     if numpy.isnan(v):
         return p.Variable("NAN")
     r = numpy.round(v, 1)
-    if r and numpy.abs(v - r) < parameters.epsilon:
+    if r and numpy.abs(v - r) < ctx.epsilon:
         return r
     return v
 
