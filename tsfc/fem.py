@@ -580,12 +580,16 @@ def translate_argument(terminal, mt, ctx):
         fltr = ListTensor(*tuple(_remove_list_tensors(fltr)))
         fltr = tuple(extract_type(fltr, Subspace))
         fltr = fltr[0]
-        vec = ctx.subspace(fltr, mt.restriction)
-        #vec_i, = gem.optimise.remove_componenttensors([gem.Indexed(vec, argument_multiindex)])
-        #return gem.ComponentTensor(gem.Product(vec_i, gem.Indexed(table, argument_multiindex + sigma)), sigma)
-        return gem.ComponentTensor(gem.Product(gem.Indexed(vec, argument_multiindex), gem.Indexed(table, argument_multiindex + sigma)), sigma)
+        #vec = ctx.subspace(fltr, mt.restriction)
+        ##vec_i, = gem.optimise.remove_componenttensors([gem.Indexed(vec, argument_multiindex)])
+        ##return gem.ComponentTensor(gem.Product(vec_i, gem.Indexed(table, argument_multiindex + sigma)), sigma)
+        #return gem.ComponentTensor(gem.Product(gem.Indexed(vec, argument_multiindex), gem.Indexed(table, argument_multiindex + sigma)), sigma)
+        mat = ctx.subspace(fltr, mt.restriction)
+        jj = tuple(gem.Index(extent=ix.extent) for ix in argument_multiindex)
+        a = gem.IndexSum(gem.Product(gem.Indexed(mat, argument_multiindex + jj), gem.Indexed(table, jj + sigma)), jj)
     else:
-        return gem.ComponentTensor(gem.Indexed(table, argument_multiindex + sigma), sigma)
+        a = gem.Indexed(table, argument_multiindex + sigma)
+    return gem.ComponentTensor(a, sigma)
 
 
 @translate.register(Coefficient)
@@ -593,12 +597,12 @@ def translate_coefficient(terminal, mt, ctx):
     vec = ctx.coefficient(terminal, mt.restriction)
 
     if mt.filter:
-        filter_vec = ctx.subspace(mt.filter, mt.restriction)
+        filter_mat = ctx.subspace(mt.filter, mt.restriction)
 
     if terminal.ufl_element().family() == 'Real':
         assert mt.local_derivatives == 0
         if mt.filter:
-            return gem.Product(filter_vec, vec)
+            return gem.Product(filter_mat, vec)
         else:
             return vec
 
@@ -635,7 +639,8 @@ def translate_coefficient(terminal, mt, ctx):
     zeta = element.get_value_indices()
     vec_beta, = gem.optimise.remove_componenttensors([gem.Indexed(vec, beta)])
     if mt.filter:
-        filter_vec_beta, = gem.optimise.remove_componenttensors([gem.Indexed(filter_vec, beta)])
+        gamma = tuple(gem.Index(extent=ix.extent) for ix in beta)
+        filter_mat_beta_gamma, = gem.optimise.remove_componenttensors([gem.Indexed(filter_mat, beta + gamma)])
     value_dict = {}
     for alpha, table in per_derivative.items():
         table_qi = gem.Indexed(table, beta + zeta)
@@ -643,7 +648,8 @@ def translate_coefficient(terminal, mt, ctx):
         for var, expr in unconcatenate([(vec_beta, table_qi)], ctx.index_cache):
             indices = tuple(i for i in var.index_ordering() if i not in ctx.unsummed_coefficient_indices)
             if mt.filter:
-                value = gem.IndexSum(gem.Product(gem.Product(filter_vec_beta, expr), var), indices)
+                transformed_expr = gem.IndexSum(gem.Product(filter_mat_beta_gamma, gem.Indexed(gem.ComponentTensor(expr, beta), gamma)), gamma)
+                value = gem.IndexSum(gem.Product(transformed_expr, var), indices)
             else:
                 value = gem.IndexSum(gem.Product(expr, var), indices)
             summands.append(gem.optimise.contraction(value))

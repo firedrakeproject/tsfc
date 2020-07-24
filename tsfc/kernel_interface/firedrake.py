@@ -108,7 +108,19 @@ class KernelBuilderBase(_KernelBuilderBase):
         :returns: COFFEE function argument for the subspace
         """
         funarg, expression = prepare_coefficient_filter(subspace, name, self.scalar_type, interior_facet=self.interior_facet)
-        self.subspace_map[subspace] = expression
+        shape = expression.shape
+        ii = tuple(gem.Index(extent=extent) for extent in shape)
+        jj = tuple(gem.Index(extent=extent) for extent in shape)
+        if True:
+            # diag(mat) = phi
+            eye = gem.Literal(1)
+            for i, j in zip(ii, jj):
+                eye = gem.Product(eye, gem.Delta(i, j))
+            mat = gem.ComponentTensor(gem.Product(eye, expression[ii]), ii + jj)
+        else:
+            # mat = phi * phi^T
+            mat = gem.ComponentTensor(gem.Product(expression[ii], expression[jj]), ii + jj)
+        self.subspace_map[subspace] = mat
         return funarg
 
     def set_cell_sizes(self, domain):
