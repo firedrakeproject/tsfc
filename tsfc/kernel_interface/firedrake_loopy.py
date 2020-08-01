@@ -102,27 +102,35 @@ class KernelBuilderBase(_KernelBuilderBase):
         self.coefficient_map[coefficient] = expression
         return funarg
 
-    def _subspace(self, subspace, name):
+    def _subspace(self, subspace, name, subspace_type):
         """Prepare a subspace. Adds glue code for the subspace
         and adds the subspace to the subspace map.
 
         :arg subspace: :class:`ufl.Subspace`
         :arg name: subspace name
+        :arg subspace_type: 'Subspace' or `'TransformedSubspace'
         :returns: loopy argument for the subspace
         """
         funarg, expression = prepare_coefficient_filter(subspace, name, self.scalar_type, interior_facet=self.interior_facet)
         shape = expression.shape
         ii = tuple(gem.Index(extent=extent) for extent in shape)
         jj = tuple(gem.Index(extent=extent) for extent in shape)
-        if True:
+        if subspace_type.__name__ == 'Subspace':
             # diag(mat) = phi
             eye = gem.Literal(1)
             for i, j in zip(ii, jj):
                 eye = gem.Product(eye, gem.Delta(i, j))
             mat = gem.ComponentTensor(gem.Product(eye, expression[ii]), ii + jj)
-        else:
+        elif subspace_type.__name__ == 'TransformedSubspace':
             # mat = phi * phi^T
-            mat = gem.ComponentTensor(gem.Product(expression[ii], expression[jj]), ii + jj)
+            indicators = []
+            indicators.append(gem.Literal([0., 1., 1., 0., 0., 0., 0., 0., 0., 0.]))
+            indicators.append(gem.Literal([0., 0., 0., 0., 1., 1., 0., 0., 0., 0.]))
+            indicators.append(gem.Literal([0., 0., 0., 0., 0., 0., 0., 1., 1., 0.]))
+            comp = gem.Zero()
+            for indicator in indicators:
+                comp = gem.Sum(comp, gem.Product(gem.Product(expression[ii], indicator[ii]), gem.Product(expression[jj], indicator[jj])))
+            mat = gem.ComponentTensor(comp, ii + jj)
         self.subspace_map[subspace] = mat
         return funarg
 
@@ -309,6 +317,7 @@ class KernelBuilder(KernelBuilderBase):
         """
         objects = []
         object_numbers = []
+        subspace_types = []
         # enabled_subspaces is a boolean array that indicates which
         # of reduced_subspaces the integral requires.
         enabled_objects = integral_data.enabled_subspaces
@@ -322,18 +331,21 @@ class KernelBuilder(KernelBuilderBase):
                     if original in self.dont_split:
                         objects.append(obj)
                         self.subspace_split[obj] = [obj]
+                        subspace_types.append(type(original))
                     else:
                         split = [Subspace(FunctionSpace(obj.ufl_domain(), element))
                                  for element in obj.ufl_element().sub_elements()]
                         objects.extend(split)
                         self.subspace_split[obj] = split
+                        subspace_types.extend([type(original)] * len(split))
                 else:
                     objects.append(obj)
+                    subspace_types.append(type(original))
                 # This is which subspace in the original form the
                 # current subspace is.
                 object_numbers.append(form_data.original_subspace_positions[i])
         for i, obj in enumerate(objects):
-            self.subspace_args.append(self._subspace(obj, "r_%d" % i))
+            self.subspace_args.append(self._subspace(obj, "r_%d" % i, subspace_types[i]))
         self.kernel.subspace_numbers = tuple(object_numbers)
         # TODO: Remove redundant components by appropriately setting this.
         # For now, this is only necessary for 'subspace' to deal with
