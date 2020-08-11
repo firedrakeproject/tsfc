@@ -24,8 +24,10 @@ from FIAT.functional import PointEvaluation
 
 from finat.point_set import PointSet
 from finat.quadrature import AbstractQuadratureRule, make_quadrature, QuadratureRule
+from finat.finiteelementbase import FiniteElementBase
 from finat.fiat_elements import FiatElement
 from finat.tensorfiniteelement import TensorFiniteElement
+from finat.tensor_product import TensorProductElement
 
 from tsfc import fem, ufl_utils
 from tsfc.finatinterface import as_fiat_cell
@@ -287,15 +289,17 @@ def compile_expression_dual_evaluation(expression, element, coordinates, *,
     import coffee.base as ast
     import loopy as lp
 
-    # TODO: Temporary fix to maintain old code, TensorFiniteElement?
-    if isinstance(element, FiatElement):
-        to_element = element._element
-    elif isinstance(element, TensorFiniteElement):
-        to_element = element._base_element._element
+    # TODO: Temporary fix to maintain old code, fix mapping name
+    if isinstance(element, FiniteElementBase):
+        # FInAT mapping outputs string, FIAT mapping outputs tuple
+        temp_mapping = (element.mapping,)
+        if isinstance(element, FiatElement):
+            to_element = element._element
     else:
         # Just convert FInAT element to FIAT for now.
         # Dual evaluation in FInAT will bring a thorough revision.
         to_element = element.fiat_equivalent
+        temp_mapping = to_element.mapping()
 
     # if any(len(dual.deriv_dict) != 0 for dual in to_element.dual_basis()):
     #     raise NotImplementedError("Can only interpolate onto dual basis functionals without derivative evaluation, sorry!")
@@ -312,7 +316,8 @@ def compile_expression_dual_evaluation(expression, element, coordinates, *,
 
     # Find out which mapping to apply
     try:
-        mapping, = set(to_element.mapping())
+        mapping, = set(temp_mapping)
+        # mapping, = set(to_element.mapping())
     except ValueError:
         raise NotImplementedError("Don't know how to interpolate onto zany spaces, sorry")
     expression = apply_mapping(expression, mapping, domain)
@@ -359,8 +364,7 @@ def compile_expression_dual_evaluation(expression, element, coordinates, *,
                       index_cache={},
                       scalar_type=parameters["scalar_type"])
 
-    print(element)
-    if isinstance(element, (FiatElement, TensorFiniteElement)):
+    if isinstance(element, (FiatElement, TensorFiniteElement, TensorProductElement)):
         print('new')
 
         class UFLtoGEMCallback(object):
@@ -405,7 +409,7 @@ def compile_expression_dual_evaluation(expression, element, coordinates, *,
                 return gem_expr
 
         ir_shape = element.dual_evaluation(UFLtoGEMCallback(expression, complex_mode))
-        broadcast_shape = len(expression.ufl_shape) - len(to_element.value_shape())
+        broadcast_shape = len(expression.ufl_shape) - len(element.value_shape)
         shape_indices = tuple(gem.Index() for _ in expression.ufl_shape[:broadcast_shape])
         basis_indices = (gem.Index(), )
         ir = gem.Indexed(ir_shape, basis_indices)
