@@ -28,6 +28,8 @@ from finat.finiteelementbase import FiniteElementBase
 from finat.fiat_elements import FiatElement
 from finat.tensorfiniteelement import TensorFiniteElement
 from finat.tensor_product import TensorProductElement
+from finat.enriched import EnrichedElement
+from finat.cube import FlattenedDimensions
 
 from tsfc import fem, ufl_utils
 from tsfc.finatinterface import as_fiat_cell
@@ -364,7 +366,8 @@ def compile_expression_dual_evaluation(expression, element, coordinates, *,
                       index_cache={},
                       scalar_type=parameters["scalar_type"])
 
-    if isinstance(element, (FiatElement, TensorFiniteElement, TensorProductElement)):
+    elements_with_basis = (FiatElement, TensorProductElement, EnrichedElement, FlattenedDimensions)
+    if isinstance(element, elements_with_basis):
         print('new')
 
         class UFLtoGEMCallback(object):
