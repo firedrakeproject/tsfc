@@ -105,20 +105,20 @@ class KernelBuilderBase(_KernelBuilderBase):
 
         :arg subspace: :class:`ufl.Subspace`
         :arg name: subspace name
-        :arg subspace_type: 'Subspace' or `'TransformedSubspace'
+        :arg subspace_type: 'ScalarSubspace' or `'RotatedSubspace'
         :returns: COFFEE function argument for the subspace
         """
         funarg, expression = prepare_coefficient_filter(subspace, name, self.scalar_type, interior_facet=self.interior_facet)
         shape = expression.shape
         ii = tuple(gem.Index(extent=extent) for extent in shape)
         jj = tuple(gem.Index(extent=extent) for extent in shape)
-        if subspace_type.__name__ == 'Subspace':
+        if subspace_type.__name__ == 'ScalarSubspace':
             # diag(mat) = phi
             eye = gem.Literal(1)
             for i, j in zip(ii, jj):
                 eye = gem.Product(eye, gem.Delta(i, j))
             mat = gem.ComponentTensor(gem.Product(eye, expression[ii]), ii + jj)
-        elif subspace_type.__name__ == 'TransformedSubspace':
+        elif subspace_type.__name__ == 'RotatedSubspace':
             # mat = phi * phi^T
             indicators = []
             indicators.append(gem.Literal([0., 1., 1., 0., 0., 0., 0., 0., 0., 0.]))
