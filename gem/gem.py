@@ -874,10 +874,16 @@ def strides_of(shape):
 
 
 def decompose_variable_view(expression):
-    """Extract ComponentTensor + FlexiblyIndexed view onto a variable."""
-    if isinstance(expression, Variable):
+    """Extract information from a shaped node.
+       Decompose ComponentTensor + FlexiblyIndexed."""
+    if (isinstance(expression, (Variable, Inverse, Solve))):
         variable = expression
         indexes = tuple(Index(extent=extent) for extent in expression.shape)
+        dim2idxs = tuple((0, ((index, 1),)) for index in indexes)
+    elif (isinstance(expression, ComponentTensor) and
+          not isinstance(expression.children[0], FlexiblyIndexed)):
+        variable = expression
+        indexes = expression.multiindex
         dim2idxs = tuple((0, ((index, 1),)) for index in indexes)
     elif isinstance(expression, ComponentTensor) and isinstance(expression.children[0], FlexiblyIndexed):
         variable = expression.children[0].children[0]
@@ -922,10 +928,10 @@ def reshape(expression, *shapes):
 
 
 def view(expression, *slices):
-    """View a part of a variable.
+    """View a part of a shaped object.
 
-    :arg expression: view of a :py:class:`Variable`
-    :arg slices: one slice object for each dimension of the variable.
+    :arg expression: a node that has a shape
+    :arg slices: one slice object for each dimension of the expression.
     """
     variable, dim2idxs, indexes = decompose_variable_view(expression)
     assert len(indexes) == len(slices)
