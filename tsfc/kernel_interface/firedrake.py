@@ -11,6 +11,8 @@ import gem
 from gem.node import traversal
 from gem.optimise import remove_componenttensors as prune
 
+import finat
+
 from tsfc.finatinterface import create_element
 from tsfc.kernel_interface.common import KernelBuilderBase as _KernelBuilderBase
 from tsfc.coffee import generate as generate_coffee
@@ -120,10 +122,19 @@ class KernelBuilderBase(_KernelBuilderBase):
             mat = gem.ComponentTensor(gem.Product(eye, expression[ii]), ii + jj)
         elif subspace_type.__name__ == 'RotatedSubspace':
             # mat = phi * phi^T
+            # Only implement vertex-wise rotations for now.
+            finat_element = create_element(subspace.ufl_element())
+            if type(finat_element) not in (finat.hermite.Hermite,
+                                           finat.bell.Bell,
+                                           finat.argyris.Argyris):
+                raise NotImplementedError("`RotatedSubspace` interface not implemented for %s." % type(finat_element).__name__)
+            entity_dofs = finat_element.entity_dofs()
             indicators = []
-            indicators.append(gem.Literal([0., 1., 1., 0., 0., 0., 0., 0., 0., 0.]))
-            indicators.append(gem.Literal([0., 0., 0., 0., 1., 1., 0., 0., 0., 0.]))
-            indicators.append(gem.Literal([0., 0., 0., 0., 0., 0., 0., 1., 1., 0.]))
+            for vert, dofs in entity_dofs[0].items():
+                a = numpy.zeros(shape, dtype=self.scalar_type)
+                for dof in dofs:
+                    a[(dof, )] = 1.
+                indicators.append(gem.Literal(a))
             comp = gem.Zero()
             for indicator in indicators:
                 comp = gem.Sum(comp, gem.Product(gem.Product(expression[ii], indicator[ii]), gem.Product(expression[jj], indicator[jj])))
