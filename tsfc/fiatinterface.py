@@ -46,6 +46,7 @@ supported_elements = {
     "Discontinuous Raviart-Thomas": FIAT.DiscontinuousRaviartThomas,
     "Gauss-Lobatto-Legendre": FIAT.GaussLobattoLegendre,
     "Gauss-Legendre": FIAT.GaussLegendre,
+    "KongMulderVeldhuizen": FIAT.KongMulderVeldhuizen,
     "Lagrange": FIAT.Lagrange,
     "Nedelec 1st kind H(curl)": FIAT.Nedelec,
     "Nedelec 2nd kind H(curl)": FIAT.NedelecSecondKind,
