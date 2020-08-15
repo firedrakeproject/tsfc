@@ -369,7 +369,7 @@ def compile_expression_dual_evaluation(expression, element, *,
                       index_cache={},
                       scalar_type=parameters["scalar_type"])
 
-    elements_with_basis = (FiatElement, TensorProductElement, EnrichedElement, FlattenedDimensions)
+    elements_with_basis = (FiatElement, TensorProductElement, EnrichedElement, FlattenedDimensions, TensorFiniteElement)
     if isinstance(element, elements_with_basis):
         print('new')
 
