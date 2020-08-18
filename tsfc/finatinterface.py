@@ -72,6 +72,7 @@ supported_elements = {
     "Gauss-Legendre L2": finat.GaussLegendre,
     "DQ L2": None,
     "Sdirect": finat.DirectSerendipity,
+    "ModifiedBR": finat.ModifiedBR,
 }
 """A :class:`.dict` mapping UFL element family names to their
 FInAT-equivalent constructors.  If the value is ``None``, the UFL
