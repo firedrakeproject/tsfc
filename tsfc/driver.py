@@ -30,6 +30,7 @@ from finat.tensorfiniteelement import TensorFiniteElement
 from finat.tensor_product import TensorProductElement
 from finat.enriched import EnrichedElement
 from finat.cube import FlattenedDimensions
+from finat.discontinuous import DiscontinuousElement
 
 from tsfc import fem, ufl_utils
 from tsfc.finatinterface import as_fiat_cell
@@ -366,7 +367,8 @@ def compile_expression_dual_evaluation(expression, element, coordinates, *,
                       index_cache={},
                       scalar_type=parameters["scalar_type"])
 
-    elements_with_basis = (FiatElement, TensorProductElement, EnrichedElement, FlattenedDimensions, TensorFiniteElement)
+    elements_with_basis = (FiatElement, TensorFiniteElement, TensorProductElement,
+                           EnrichedElement, FlattenedDimensions, DiscontinuousElement)
     if isinstance(element, elements_with_basis):
         print('new')
 
