@@ -323,7 +323,6 @@ def compile_expression_dual_evaluation(expression, element, coordinates, *,
     # Replace coordinates (if any)
     domain = expression.ufl_domain()
     if domain:
-        assert coordinates.ufl_domain() == domain
         builder.domain_coordinate[domain] = coordinates
         builder.set_cell_sizes(domain)
 
