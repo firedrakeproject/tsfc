@@ -333,7 +333,6 @@ def simplify_abs(expression, complex_mode):
     """Simplify absolute values in a UFL expression.  Its primary
     purpose is to "neutralise" CellOrientation nodes that are
     surrounded by absolute values and thus not at all necessary."""
-
     mapper = MemoizerArg(_simplify_abs)
     mapper.complex_mode = complex_mode
     return mapper(expression, False)

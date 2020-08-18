@@ -282,7 +282,6 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
     :arg parameters: parameters object
     :arg coffee: compile coffee kernel instead of loopy kernel
     """
-
     import coffee.base as ast
     import loopy as lp
     if any(len(dual.deriv_dict) != 0 for dual in to_element.dual_basis()):
@@ -343,15 +342,9 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
     # Translate to GEM
     kernel_cfg = dict(interface=builder,
                       ufl_cell=coordinates.ufl_domain().ufl_cell(),
-# <<<<<<< HEAD
-#                       precision=parameters["precision"],
-#                       argument_multiindices=argument_multiindices,
-#                       index_cache={})
-# =======
                       argument_multiindices=argument_multiindices,
                       index_cache={},
                       scalar_type=parameters["scalar_type"])
-# >>>>>>> origin/master
 
     if all(isinstance(dual, PointEvaluation) for dual in to_element.dual_basis()):
         # This is an optimisation for point-evaluation nodes which
