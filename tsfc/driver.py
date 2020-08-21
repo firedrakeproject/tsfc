@@ -410,7 +410,12 @@ class UFLtoGEMCallback(object):
         :param derivative: Maximum order of differentiation
         '''
         config = self.kernel_cfg.copy()
-        config.update(point_set=point_set)
+        if isinstance(point_set.expression, gem.Variable):
+            # config for fem.GemPointContext
+            config.update(point_indices=point_set.indices, point_expr=point_set.expression)
+        else:
+            # config for fem.PointSetContext
+            config.update(point_set=point_set)
 
         # Using expression directly changes scope
         dexpression = self.expression
