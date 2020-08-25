@@ -10,7 +10,7 @@ import numpy
 from gem.utils import groupby
 from gem.node import (Memoizer, MemoizerArg, reuse_if_untouched,
                       reuse_if_untouched_arg, traversal)
-from gem.gem import (Node, Terminal, Failure, Identity, Literal, Zero,
+from gem.gem import (Node, Failure, Identity, Literal, Zero,
                      Product, Sum, Comparison, Conditional, Division,
                      Index, VariableIndex, Indexed, FlexiblyIndexed,
                      IndexSum, ComponentTensor, ListTensor, Delta,
@@ -128,7 +128,6 @@ def replace_indices_indexed(node, self, subst):
 @replace_indices.register(FlexiblyIndexed)
 def replace_indices_flexiblyindexed(node, self, subst):
     child, = node.children
-    assert isinstance(child, Terminal)
     assert not child.free_indices
 
     substitute = dict(subst)
