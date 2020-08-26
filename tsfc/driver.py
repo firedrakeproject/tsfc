@@ -6,7 +6,7 @@ import sys
 from functools import reduce
 from itertools import chain
 
-from numpy import asarray, allclose
+from numpy import asarray
 
 import ufl
 from ufl.algorithms import extract_arguments, extract_coefficients
@@ -18,12 +18,9 @@ from ufl.utils.sequences import max_degree
 import gem
 import gem.impero_utils as impero_utils
 
-import FIAT
 from FIAT.reference_element import TensorProductCell
-from FIAT.functional import PointEvaluation
 
-from finat.point_set import PointSet
-from finat.quadrature import AbstractQuadratureRule, make_quadrature, QuadratureRule
+from finat.quadrature import AbstractQuadratureRule, make_quadrature
 
 from tsfc import fem, ufl_utils
 from tsfc.finatinterface import as_fiat_cell
