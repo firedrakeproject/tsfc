@@ -47,12 +47,17 @@ def collect_variables(expressions):
     return tuple(vset)
 
 
-def compile_gem(assignments, prefix_ordering, remove_zeros=False):
+def compile_gem(assignments, prefix_ordering, remove_zeros=False,
+                emit_return_accumulate=True):
     """Compiles GEM to Impero.
 
     :arg assignments: list of (return variable, expression DAG root) pairs
     :arg prefix_ordering: outermost loop indices
     :arg remove_zeros: remove zero assignment to return variables
+    :arg emit_return_accumulate: emit ReturnAccumulate nodes (see
+         :func:`~.scheduling.emit_operations`)? If False,
+         split into Accumulate/Return pairs. Set to False if the
+         output tensor of kernels is not guaranteed to be zero on entry.
     """
     # Remove zeros
     if remove_zeros:
@@ -78,7 +83,7 @@ def compile_gem(assignments, prefix_ordering, remove_zeros=False):
     get_indices = lambda expr: apply_ordering(expr.free_indices)
 
     # Build operation ordering
-    ops = scheduling.emit_operations(assignments, get_indices)
+    ops = scheduling.emit_operations(assignments, get_indices, emit_return_accumulate)
 
     # Empty kernel
     if len(ops) == 0:

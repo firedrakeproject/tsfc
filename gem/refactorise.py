@@ -8,7 +8,7 @@ from sys import intern
 
 from gem.node import Memoizer, traversal
 from gem.gem import (Node, Conditional, Zero, Product, Sum, Indexed,
-                     ListTensor, one)
+                     ListTensor, one, MathFunction)
 from gem.optimise import (remove_componenttensors, sum_factorise,
                           traverse_product, traverse_sum, unroll_indexsum,
                           make_rename_map, make_renamer)
@@ -169,7 +169,7 @@ def _collect_monomials(expression, self):
     sums = []
     for expr in compounds:
         summands = traverse_sum(expr, stop_at=stop_at)
-        if len(summands) <= 1 and not isinstance(expr, Conditional):
+        if len(summands) <= 1 and not isinstance(expr, (Conditional, MathFunction)):
             # Compound term is not an addition, avoid infinite
             # recursion and fail gracefully raising an exception.
             raise FactorisationError(expr)
@@ -209,6 +209,29 @@ def _collect_monomials(expression, self):
 
         result.add(sum_indices, atomics, rest)
     return result
+
+
+@_collect_monomials.register(MathFunction)
+def _collect_monomials_mathfunction(expression, self):
+    name = expression.name
+    if name in {"conj", "real", "imag"}:
+        # These are allowed to be applied to arguments, and hence must
+        # be dealt with specially. Just push the function onto each
+        # entry in the monomialsum of the child.
+        # NOTE: This presently assumes that the "atomics" part of a
+        # MonomialSum are real. This is true for the coffee, tensor,
+        # spectral modes: the atomics are indexed tabulation matrices
+        # (which are guaranteed real).
+        # If the classifier puts (potentially) complex expressions in
+        # atomics, then this code needs fixed.
+        child_ms, = map(self, expression.children)
+        result = MonomialSum()
+        for k, v in child_ms.monomials.items():
+            result.monomials[k] = MathFunction(name, v)
+        result.ordering = child_ms.ordering.copy()
+        return result
+    else:
+        return _collect_monomials.dispatch(MathFunction.mro()[1])(expression, self)
 
 
 @_collect_monomials.register(Conditional)
