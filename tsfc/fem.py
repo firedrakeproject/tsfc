@@ -13,7 +13,7 @@ from ufl.corealg.multifunction import MultiFunction
 from ufl.classes import (Argument, CellCoordinate, CellEdgeVectors,
                          CellFacetJacobian, CellOrientation,
                          CellOrigin, CellVertices, CellVolume,
-                         Coefficient, Subspace,
+                         Coefficient, AbstractSubspace,
                          FacetArea, FacetCoordinate,
                          GeometricQuantity, Jacobian,
                          NegativeRestricted, QuadratureWeight,
@@ -578,7 +578,7 @@ def translate_argument(terminal, mt, ctx):
             else:
                 yield purge_list_tensors(a)
         fltr = ListTensor(*tuple(_remove_list_tensors(fltr)))
-        fltr = tuple(extract_type(fltr, Subspace))
+        fltr = tuple(extract_type(fltr, AbstractSubspace))
         fltr = fltr[0]
         #vec = ctx.subspace(fltr, mt.restriction)
         ##vec_i, = gem.optimise.remove_componenttensors([gem.Indexed(vec, argument_multiindex)])

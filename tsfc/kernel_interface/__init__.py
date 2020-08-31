@@ -19,7 +19,7 @@ class KernelInterface(metaclass=ABCMeta):
 
     @abstractmethod
     def subspace(self, ufl_subspace, restriction):
-        """A function that maps :class:`ufl.Subspace`s to GEM
+        """A function that maps :class:`ufl.AbstractSubspace`s to GEM
         expressions."""
 
     @abstractmethod

@@ -3,7 +3,7 @@ from collections import namedtuple
 from itertools import chain, product
 from functools import partial
 
-from ufl import Coefficient, Subspace, MixedElement as ufl_MixedElement, FunctionSpace, FiniteElement
+from ufl import Coefficient, Subspace, RotatedSubspace, MixedElement as ufl_MixedElement, FunctionSpace, FiniteElement
 
 import coffee.base as coffee
 
@@ -101,26 +101,25 @@ class KernelBuilderBase(_KernelBuilderBase):
         self.coefficient_map[coefficient] = expression
         return funarg
 
-    def _subspace(self, subspace, name, subspace_type):
+    def _subspace(self, subspace, name):
         """Prepare a subspace. Adds glue code for the subspace
         and adds the subspace to the subspace map.
 
-        :arg subspace: :class:`ufl.Subspace`
+        :arg subspace: :class:`ufl.AbstractSubspace`
         :arg name: subspace name
-        :arg subspace_type: 'ScalarSubspace' or `'RotatedSubspace'
         :returns: COFFEE function argument for the subspace
         """
         funarg, expression = prepare_coefficient_filter(subspace, name, self.scalar_type, interior_facet=self.interior_facet)
         shape = expression.shape
         ii = tuple(gem.Index(extent=extent) for extent in shape)
         jj = tuple(gem.Index(extent=extent) for extent in shape)
-        if subspace_type.__name__ == 'ScalarSubspace':
+        if subspace._ufl_class_ is Subspace:
             # diag(mat) = phi
             eye = gem.Literal(1)
             for i, j in zip(ii, jj):
                 eye = gem.Product(eye, gem.Delta(i, j))
             mat = gem.ComponentTensor(gem.Product(eye, expression[ii]), ii + jj)
-        elif subspace_type.__name__ == 'RotatedSubspace':
+        elif subspace._ufl_class_ is RotatedSubspace:
             # mat = phi * phi^T
             # Only implement vertex-wise rotations for now.
             finat_element = create_element(subspace.ufl_element())
@@ -326,7 +325,6 @@ class KernelBuilder(KernelBuilderBase):
         """
         objects = []
         object_numbers = []
-        subspace_types = []
         # enabled_subspaces is a boolean array that indicates which
         # of reduced_subspaces the integral requires.
         enabled_objects = integral_data.enabled_subspaces
@@ -340,21 +338,18 @@ class KernelBuilder(KernelBuilderBase):
                     if original in self.dont_split:
                         objects.append(obj)
                         self.subspace_split[obj] = [obj]
-                        subspace_types.append(type(original))
                     else:
-                        split = [Subspace(FunctionSpace(obj.ufl_domain(), element))
+                        split = [obj._ufl_class_(FunctionSpace(obj.ufl_domain(), element))
                                  for element in obj.ufl_element().sub_elements()]
                         objects.extend(split)
                         self.subspace_split[obj] = split
-                        subspace_types.extend([type(original)] * len(split))
                 else:
                     objects.append(obj)
-                    subspace_types.append(type(original))
                 # This is which subspace in the original form the
                 # current subspace is.
                 object_numbers.append(form_data.original_subspace_positions[i])
         for i, obj in enumerate(objects):
-            self.subspace_args.append(self._subspace(obj, "r_%d" % i, subspace_types[i]))
+            self.subspace_args.append(self._subspace(obj, "r_%d" % i))
         self.kernel.subspace_numbers = tuple(object_numbers)
         # TODO: Remove redundant components by appropriately setting this.
         # For now, this is only necessary for 'subspace' to deal with
@@ -434,14 +429,14 @@ def check_requirements(ir):
 
 def prepare_coefficient_filter(obj, name, scalar_type, interior_facet=False):
     """Bridges the kernel interface and the GEM abstraction for
-    Coefficients/Subspace.
+    Coefficients/AbstractSubspace.
 
-    :arg obj: UFL Coefficient/Subspace
-    :arg name: unique name to refer to the Coefficient/Subspace in the kernel
+    :arg obj: UFL Coefficient/AbstractSubspace
+    :arg name: unique name to refer to the Coefficient/AbstractSubspace in the kernel
     :arg interior_facet: interior facet integral?
     :returns: (funarg, expression)
          funarg     - :class:`coffee.Decl` function argument
-         expression - GEM expression referring to the Coefficient/Subspace
+         expression - GEM expression referring to the Coefficient/AbstractSubspace
                       values
     """
     assert isinstance(interior_facet, bool)

@@ -52,7 +52,7 @@ class KernelBuilderBase(KernelInterface):
             return kernel_arg[{'+': 0, '-': 1}[restriction]]
 
     def subspace(self, ufl_subspace, restriction):
-        """A function that maps :class:`ufl.Subspace`s to GEM
+        """A function that maps :class:`ufl.AbstractSubspace`s to GEM
         expressions."""
         kernel_arg = self.subspace_map[ufl_subspace]
         if ufl_subspace.ufl_element().family() == 'Real':
