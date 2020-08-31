@@ -172,7 +172,7 @@ class CoordinateMapping(PhysicalGeometry):
             raise NotImplementedError("Only works for triangles for now")
         cn = (self.interface.fiat_cell.compute_normal if normalized
               else self.interface.fiat_cell.compute_scaled_normal)
-        return gem.Literal(numpy.asarray([cn for i in range(3)]))
+        return gem.Literal(numpy.asarray([cn(i) for i in range(3)]))
 
     def reference_edge_tangents(self, normalized=False):
         ct = (self.interface.fiat_cell.compute_normalized_edge_tangent
