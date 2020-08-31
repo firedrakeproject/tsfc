@@ -166,14 +166,19 @@ class CoordinateMapping(PhysicalGeometry):
         context = PointSetContext(**config)
         return map_expr_dag(context.translator, expr)
 
-    def reference_normals(self):
+    def reference_normals(self, normalized=True):
         if not (isinstance(self.interface.fiat_cell, UFCSimplex) and
                 self.interface.fiat_cell.get_spatial_dimension() == 2):
             raise NotImplementedError("Only works for triangles for now")
-        return gem.Literal(numpy.asarray([self.interface.fiat_cell.compute_normal(i) for i in range(3)]))
+        cn = (self.interface.fiat_cell.compute_normal if normalized
+              else self.interface.fiat_cell.compute_scaled_normal)
+        return gem.Literal(numpy.asarray([cn for i in range(3)]))
 
-    def reference_edge_tangents(self):
-        return gem.Literal(numpy.asarray([self.interface.fiat_cell.compute_edge_tangent(i) for i in range(3)]))
+    def reference_edge_tangents(self, normalized=False):
+        ct = (self.interface.fiat_cell.compute_normalized_edge_tangent
+              if normalized else self.interface.fiat_cell.compute_edge_tangent)
+
+        return gem.Literal(numpy.asarray([ct(i) for i in range(3)]))
 
     def physical_tangents(self):
         if not (isinstance(self.interface.fiat_cell, UFCSimplex) and
