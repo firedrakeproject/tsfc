@@ -550,7 +550,6 @@ def translate_argument(terminal, mt, ctx):
     argument_multiindex = ctx.argument_multiindices[terminal.number()]
     sigma = tuple(gem.Index(extent=d) for d in mt.expr.ufl_shape)
     element = ctx.create_element(terminal.ufl_element(), restriction=mt.restriction)
-
     def callback(entity_id):
         finat_dict = ctx.basis_evaluation(element, mt, entity_id)
         # Filter out irrelevant derivatives
@@ -571,14 +570,15 @@ def translate_argument(terminal, mt, ctx):
         # TODO: add more regorous checks here.
         fltr = mt.filter
         # Remove internal list tensors.
-        def _remove_list_tensors(a):
-            if isinstance(a, ListTensor):
-                for i in range(a.ufl_shape[0]):
-                    yield from _remove_list_tensors(a[i])
+        def _remove_list_tensors(t):
+            if isinstance(t, ListTensor):
+                for i in range(t.ufl_shape[0]):
+                    yield from _remove_list_tensors(t[i])
             else:
-                yield purge_list_tensors(a)
+                yield purge_list_tensors(t)
         fltr = ListTensor(*tuple(_remove_list_tensors(fltr)))
         fltr = tuple(extract_type(fltr, AbstractSubspace))
+        assert len(fltr) == 1
         fltr = fltr[0]
         if fltr._ufl_class_ is ufl.Subspace:
             vec = ctx.subspace(fltr, mt.restriction)
@@ -589,19 +589,19 @@ def translate_argument(terminal, mt, ctx):
             finat_element = create_element(mt.filter.ufl_element())
             entity_dofs = finat_element.entity_dofs()
             shape = finat_element.index_shape
-            print("shape:;;", shape)
-            print("multii::::", argument_multiindex)
-            for ii in argument_multiindex:
-                print("--- multii i::", ii.extent)
             a = gem.Zero()
             gamma = tuple(gem.Index(extent=ix.extent) for ix in argument_multiindex)
-            for vert, dofs in entity_dofs[0].items():
-                ind = numpy.zeros(shape, dtype=ctx.scalar_type)
-                for dof in dofs:
-                    ind[(dof, )] = 1.
-                part = gem.Product(gem.Literal(ind)[gamma], vec[gamma])
-                proj = gem.IndexSum(gem.Product(part, gem.Indexed(table, gamma + sigma)), gamma)
-                a = gem.Sum(a, gem.Product(gem.Indexed(gem.ComponentTensor(part, gamma), argument_multiindex), proj))
+            for d in entity_dofs:
+                for _, dofs in entity_dofs[d].items():
+                    if len(dofs) == 0 or (len(dofs) == 1 and len(shape) == 1):
+                        continue
+                    ind = numpy.zeros(shape, dtype=ctx.scalar_type)
+                    for dof in dofs:
+                        for ndind in numpy.ndindex(shape[1:]):
+                            ind[(dof, ) + ndind] = 1.
+                    part = gem.Product(gem.Literal(ind)[gamma], vec[gamma])
+                    proj = gem.IndexSum(gem.Product(part, gem.Indexed(table, gamma + sigma)), gamma)
+                    a = gem.Sum(a, gem.Product(gem.Indexed(gem.ComponentTensor(part, gamma), argument_multiindex), proj))
     else:
         a = gem.Indexed(table, argument_multiindex + sigma)
     return gem.ComponentTensor(a, sigma)
@@ -663,25 +663,64 @@ def translate_coefficient(terminal, mt, ctx):
             indices = tuple(i for i in var.index_ordering() if i not in ctx.unsummed_coefficient_indices)
             if mt.filter:
                 if mt.filter._ufl_class_ is ufl.Subspace:
+                    # Basic subspace:
+                    # Linear combination of weighted basis:
+                    #
+                    # u = \sum [ u_i * (w_i * \phi_i) ]
+                    #       i
+                    # 
+                    # u     : function
+                    # u_i   : ith coefficient
+                    # \phi_i: ith basis
+                    # w_i   : ith weight (stored in the subspace object)
+                    #         w_i = 0 to deselect the associated basis.
+                    #         w_i = 1 to select.
                     transformed_expr = gem.Product(subspace_beta, expr)
                     value = gem.IndexSum(gem.Product(transformed_expr, var), indices)
                 elif mt.filter._ufl_class_ is ufl.RotatedSubspace:
+                    # Rotation subspace:
+                    # 
+                    # u = \sum [ u_i * \sum [ \psi(e)_i * \sum [ \psi(e)_k * \phi(e)_k ] ] ]
+                    #       i            e                  k
+                    # 
+                    # u       : function
+                    # u_i     : ith coefficient
+                    # \phi(e) : basis vector whose elements not associated with
+                    #           entity e are set zero.
+                    # \psi(e) : rotation vector whose elements not associated with
+                    #           entity e are set zero.
                     assert mt.filter.ufl_element() == terminal.ufl_element()
                     finat_element = create_element(mt.filter.ufl_element())
-                    entity_dofs = finat_element.entity_dofs()
                     shape = finat_element.index_shape
+                    if len(shape) == 1:
+                        entity_dofs = finat_element.entity_dofs()
+                    else:
+                        entity_dofs = finat_element.base_element.entity_dofs()
                     basis_beta = gem.Zero()
                     gamma = tuple(gem.Index(extent=ix.extent) for ix in beta)
-                    for vert, dofs in entity_dofs[0].items():
-                        a = numpy.zeros(shape, dtype=ctx.scalar_type)
-                        for dof in dofs:
-                            a[(dof, )] = 1.
-                        part = gem.Product(gem.Literal(a)[beta], subspace_beta)
-                        proj = gem.IndexSum(gem.Product(gem.Indexed(gem.ComponentTensor(part, beta), gamma),
-                                                        gem.Indexed(gem.ComponentTensor(expr, beta), gamma)), gamma)
-                        basis_beta = gem.Sum(basis_beta, gem.Product(part, proj))
+                    for d in entity_dofs:
+                        for _, dofs in entity_dofs[d].items():
+                            if len(dofs) == 0 or (len(dofs) == 1 and len(shape) == 1):
+                                continue
+                            ind = numpy.zeros(shape, dtype=ctx.scalar_type)
+                            for dof in dofs:
+                                for ndind in numpy.ndindex(shape[1:]):
+                                    ind[(dof, ) + ndind] = 1.
+                            part = gem.Product(gem.Literal(ind)[beta], subspace_beta)
+                            proj = gem.IndexSum(gem.Product(gem.Indexed(gem.ComponentTensor(part, beta), gamma),
+                                                            gem.Indexed(gem.ComponentTensor(expr, beta), gamma)), gamma)
+                            basis_beta = gem.Sum(basis_beta, gem.Product(part, proj))
                     value = gem.IndexSum(gem.Product(basis_beta, var), indices)
             else:
+                # Classical implementation of functions/function spaces.
+                # Linear combination of basis:
+                #
+                # u = \sum [ u_i * \phi_i ]
+                #       i
+                #
+                # u     : function
+                # u_i   : ith coefficient
+                # \phi_i: ith basis
                 value = gem.IndexSum(gem.Product(expr, var), indices)
             summands.append(gem.optimise.contraction(value))
         optimised_value = gem.optimise.make_sum(summands)
