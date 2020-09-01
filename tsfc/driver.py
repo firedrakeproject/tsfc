@@ -362,6 +362,20 @@ def compile_expression_dual_evaluation(expression, element, *,
     else:
         return_arg = lp.GlobalArg("A", dtype=parameters["scalar_type"], shape=return_shape)
 
+    # TODO: Remove this horrible temporary hack
+    other_args = []
+    from finat.tensorfiniteelement import TensorFiniteElement
+    from finat.quadrature_element import QuadratureElement
+    if isinstance(element, TensorFiniteElement):
+        element = element.base_element
+    if isinstance(element, QuadratureElement):
+        expr = element._rule.point_set.expression
+        if isinstance(expr, gem.Variable):
+            if coffee:
+                other_args.append(ast.Decl(parameters["scalar_type"], ast.Symbol('X', rank=(expr.shape,))))
+            else:
+                other_args.append(lp.GlobalArg(expr.name, dtype=parameters["scalar_type"], shape=expr.shape))
+
     return_expr = gem.Indexed(return_var, return_indices)
 
     # TODO: one should apply some GEM optimisations as in assembly,
@@ -372,7 +386,7 @@ def compile_expression_dual_evaluation(expression, element, *,
     # Handle kernel interface requirements
     builder.register_requirements([ir])
     # Build kernel tuple
-    return builder.construct_kernel(return_arg, impero_c, index_names, first_coefficient_fake_coords)
+    return builder.construct_kernel(return_arg, impero_c, index_names, first_coefficient_fake_coords, other_args=other_args)
 
 
 class UFLtoGEMCallback(object):

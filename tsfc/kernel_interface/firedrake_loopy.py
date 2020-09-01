@@ -153,7 +153,7 @@ class ExpressionKernelBuilder(KernelBuilderBase):
         provided by the kernel interface."""
         self.oriented, self.cell_sizes, self.tabulations = check_requirements(ir)
 
-    def construct_kernel(self, return_arg, impero_c, index_names, first_coefficient_fake_coords):
+    def construct_kernel(self, return_arg, impero_c, index_names, first_coefficient_fake_coords, other_args=None):
         """Constructs an :class:`ExpressionKernel`.
 
         :arg return_arg: loopy.GlobalArg for the return value
@@ -161,6 +161,8 @@ class ExpressionKernelBuilder(KernelBuilderBase):
         :arg index_names: pre-assigned index names
         :arg first_coefficient_fake_coords: If true, the kernel's first
             coefficient is a constructed UFL coordinate field
+        :arg other_args: A list of other loopy.GlobalArgs to include in
+            the kernel (TEMPORARY).
         :returns: :class:`ExpressionKernel` object
         """
         args = [return_arg]
@@ -171,7 +173,10 @@ class ExpressionKernelBuilder(KernelBuilderBase):
         args.extend(self.kernel_args)
         for name_, shape in self.tabulations:
             args.append(lp.GlobalArg(name_, dtype=self.scalar_type, shape=shape))
-
+        # TODO: deal with this properly, probably by making sure self.tabulations has the correct stuff in it!
+        if other_args is not None:
+            for arg in other_args:
+                args.append(arg)
         loopy_kernel = generate_loopy(impero_c, args, self.scalar_type,
                                       "expression_kernel", index_names)
         return ExpressionKernel(loopy_kernel, self.oriented, self.cell_sizes,
