@@ -118,10 +118,11 @@ class KernelBuilderBase(_KernelBuilderBase):
         jj = tuple(gem.Index(extent=extent) for extent in shape)
         if subspace._ufl_class_ is Subspace:
             # diag(mat) = phi
-            eye = gem.Literal(1)
-            for i, j in zip(ii, jj):
-                eye = gem.Product(eye, gem.Delta(i, j))
-            mat = gem.ComponentTensor(gem.Product(eye, expression[ii]), ii + jj)
+            #eye = gem.Literal(1)
+            #for i, j in zip(ii, jj):
+            #    eye = gem.Product(eye, gem.Delta(i, j))
+            #mat = gem.ComponentTensor(gem.Product(eye, expression[ii]), ii + jj)
+            self.subspace_map[subspace] = expression
         elif subspace._ufl_class_ is RotatedSubspace:
             # mat = phi * phi^T
             # Only implement vertex-wise rotations for now.
@@ -141,7 +142,7 @@ class KernelBuilderBase(_KernelBuilderBase):
             for indicator in indicators:
                 comp = gem.Sum(comp, gem.Product(gem.Product(expression[ii], indicator[ii]), gem.Product(expression[jj], indicator[jj])))
             mat = gem.ComponentTensor(comp, ii + jj)
-        self.subspace_map[subspace] = mat
+            self.subspace_map[subspace] = mat
         return funarg
 
     def set_cell_sizes(self, domain):
