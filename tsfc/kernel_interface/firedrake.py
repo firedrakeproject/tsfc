@@ -110,35 +110,7 @@ class KernelBuilderBase(_KernelBuilderBase):
         :returns: COFFEE function argument for the subspace
         """
         funarg, expression = prepare_coefficient_filter(subspace, name, self.scalar_type, interior_facet=self.interior_facet)
-        shape = expression.shape
-        ii = tuple(gem.Index(extent=extent) for extent in shape)
-        jj = tuple(gem.Index(extent=extent) for extent in shape)
-        if subspace._ufl_class_ is Subspace:
-            # diag(mat) = phi
-            eye = gem.Literal(1)
-            for i, j in zip(ii, jj):
-                eye = gem.Product(eye, gem.Delta(i, j))
-            mat = gem.ComponentTensor(gem.Product(eye, expression[ii]), ii + jj)
-        elif subspace._ufl_class_ is RotatedSubspace:
-            # mat = phi * phi^T
-            # Only implement vertex-wise rotations for now.
-            finat_element = create_element(subspace.ufl_element())
-            if type(finat_element) not in (finat.hermite.Hermite,
-                                           finat.bell.Bell,
-                                           finat.argyris.Argyris):
-                raise NotImplementedError("`RotatedSubspace` interface not implemented for %s." % type(finat_element).__name__)
-            entity_dofs = finat_element.entity_dofs()
-            indicators = []
-            for vert, dofs in entity_dofs[0].items():
-                a = numpy.zeros(shape, dtype=self.scalar_type)
-                for dof in dofs:
-                    a[(dof, )] = 1.
-                indicators.append(gem.Literal(a))
-            comp = gem.Zero()
-            for indicator in indicators:
-                comp = gem.Sum(comp, gem.Product(gem.Product(expression[ii], indicator[ii]), gem.Product(expression[jj], indicator[jj])))
-            mat = gem.ComponentTensor(comp, ii + jj)
-        self.subspace_map[subspace] = mat
+        self.subspace_map[subspace] = expression
         return funarg
 
     def set_cell_sizes(self, domain):
