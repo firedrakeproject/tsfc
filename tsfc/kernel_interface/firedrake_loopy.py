@@ -3,7 +3,7 @@ from collections import namedtuple
 from itertools import chain, product
 from functools import partial
 
-from ufl import Coefficient, Subspace, RotatedSubspace, MixedElement as ufl_MixedElement, FunctionSpace, FiniteElement
+from ufl import Coefficient, Subspace, MixedElement as ufl_MixedElement, FunctionSpace, FiniteElement
 
 import gem
 from gem.optimise import remove_componenttensors as prune
@@ -100,20 +100,23 @@ class KernelBuilderBase(_KernelBuilderBase):
         :arg name: coefficient name
         :returns: loopy argument for the coefficient
         """
-        funarg, expression = prepare_coefficient_filter(coefficient, name, self.scalar_type, interior_facet=self.interior_facet)
+        funarg, expression = prepare_coefficient_subspace(coefficient, name, self.scalar_type, interior_facet=self.interior_facet)
         self.coefficient_map[coefficient] = expression
         return funarg
 
-    def _subspace(self, subspace, name):
+    def _subspace(self, subspace, name, matrix_constructor):
         """Prepare a subspace. Adds glue code for the subspace
         and adds the subspace to the subspace map.
 
-        :arg subspace: :class:`ufl.AbstractSubspace`
+        :arg subspace: :class:`ufl.Subspace`
         :arg name: subspace name
         :returns: loopy argument for the subspace
         """
-        funarg, expression = prepare_coefficient_filter(subspace, name, self.scalar_type, interior_facet=self.interior_facet)
-        self.subspace_map[subspace] = expression
+        funarg, expression = prepare_coefficient_subspace(subspace, name, self.scalar_type, interior_facet=self.interior_facet)
+        if not self.interior_facet:
+            self.subspace_map[subspace] = matrix_constructor(subspace.ufl_function_space().ufl_element(), expression, self.scalar_type)
+        else:
+            self.subspace_map[subspace] = tuple(matrix_constructor(subspace.ufl_function_space().ufl_element(), e, self.scalar_type) for e in expression)
         return funarg
 
     def set_cell_sizes(self, domain):
@@ -134,7 +137,7 @@ class KernelBuilderBase(_KernelBuilderBase):
             # topological_dimension is 0 and the concept of "cell size"
             # is not useful for a vertex.
             f = Coefficient(FunctionSpace(domain, FiniteElement("P", domain.ufl_cell(), 1)))
-            funarg, expression = prepare_coefficient_filter(f, "cell_sizes", self.scalar_type, interior_facet=self.interior_facet)
+            funarg, expression = prepare_coefficient_subspace(f, "cell_sizes", self.scalar_type, interior_facet=self.interior_facet)
             self.cell_sizes_arg = funarg
             self._cell_sizes = expression
 
@@ -299,6 +302,7 @@ class KernelBuilder(KernelBuilderBase):
         """
         objects = []
         object_numbers = []
+        matrix_constructors = []
         # enabled_subspaces is a boolean array that indicates which
         # of reduced_subspaces the integral requires.
         enabled_objects = integral_data.enabled_subspaces
@@ -312,18 +316,21 @@ class KernelBuilder(KernelBuilderBase):
                     if original in self.dont_split:
                         objects.append(obj)
                         self.subspace_split[obj] = [obj]
+                        matrix_constructors.append(original.transform_matrix)
                     else:
-                        split = [obj._ufl_class_(FunctionSpace(obj.ufl_domain(), element))
+                        split = [Subspace(FunctionSpace(obj.ufl_domain(), element))
                                  for element in obj.ufl_element().sub_elements()]
                         objects.extend(split)
                         self.subspace_split[obj] = split
+                        matrix_constructors.extend([original.transform_matrix for _ in split])
                 else:
                     objects.append(obj)
+                    matrix_constructors.append(original.transform_matrix)
                 # This is which subspace in the original form the
                 # current subspace is.
                 object_numbers.append(form_data.original_subspace_positions[i])
         for i, obj in enumerate(objects):
-            self.subspace_args.append(self._subspace(obj, "r_%d" % i))
+            self.subspace_args.append(self._subspace(obj, "r_%d" % i, matrix_constructors[i]))
         self.kernel.subspace_numbers = tuple(object_numbers)
         # TODO: Remove redundant components by appropriately setting this.
         # For now, this is only necessary for 'subspace' to deal with
@@ -376,16 +383,16 @@ class KernelBuilder(KernelBuilderBase):
         return None
 
 
-def prepare_coefficient_filter(obj, name, scalar_type, interior_facet=False):
+def prepare_coefficient_subspace(obj, name, scalar_type, interior_facet=False):
     """Bridges the kernel interface and the GEM abstraction for
-    Coefficients/AbstractSubspace.
+    Coefficients/Subspace.
 
-    :arg obj: UFL Coefficient/AbstractSubspace
-    :arg name: unique name to refer to the Coefficient/AbstractSubspace in the kernel
+    :arg obj: UFL Coefficient/Subspace
+    :arg name: unique name to refer to the Coefficient/Subspace in the kernel
     :arg interior_facet: interior facet integral?
     :returns: (funarg, expression)
          funarg     - :class:`loopy.GlobalArg` function argument
-         expression - GEM expression referring to the Coefficient/AbstractSubspace
+         expression - GEM expression referring to the Coefficient/Subspace
                       values
     """
     assert isinstance(interior_facet, bool)
@@ -405,9 +412,9 @@ def prepare_coefficient_filter(obj, name, scalar_type, interior_facet=False):
     if not interior_facet:
         expression = gem.reshape(gem.Variable(name, (size,)), shape)
     else:
-        varexp = gem.Variable(name, (2*size,))
+        varexp = gem.Variable(name, (2 * size,))
         plus = gem.view(varexp, slice(size))
-        minus = gem.view(varexp, slice(size, 2*size))
+        minus = gem.view(varexp, slice(size, 2 * size))
         expression = (gem.reshape(plus, shape), gem.reshape(minus, shape))
         size = size * 2
     funarg = lp.GlobalArg(name, dtype=scalar_type, shape=(size,))
@@ -428,7 +435,6 @@ def prepare_arguments(arguments, multiindices, scalar_type, interior_facet=False
          expressions - GEM expressions referring to the argument
                        tensor
     """
-
     assert isinstance(interior_facet, bool)
 
     if len(arguments) == 0:

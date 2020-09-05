@@ -13,7 +13,7 @@ from ufl.corealg.multifunction import MultiFunction
 from ufl.classes import (Argument, CellCoordinate, CellEdgeVectors,
                          CellFacetJacobian, CellOrientation,
                          CellOrigin, CellVertices, CellVolume,
-                         Coefficient, AbstractSubspace,
+                         Coefficient, Subspace,
                          FacetArea, FacetCoordinate,
                          GeometricQuantity, Jacobian,
                          NegativeRestricted, QuadratureWeight,
@@ -550,6 +550,7 @@ def translate_argument(terminal, mt, ctx):
     argument_multiindex = ctx.argument_multiindices[terminal.number()]
     sigma = tuple(gem.Index(extent=d) for d in mt.expr.ufl_shape)
     element = ctx.create_element(terminal.ufl_element(), restriction=mt.restriction)
+
     def callback(entity_id):
         finat_dict = ctx.basis_evaluation(element, mt, entity_id)
         # Filter out irrelevant derivatives
@@ -570,38 +571,18 @@ def translate_argument(terminal, mt, ctx):
         # TODO: add more regorous checks here.
         fltr = mt.filter
         # Remove internal list tensors.
-        def _remove_list_tensors(t):
-            if isinstance(t, ListTensor):
-                for i in range(t.ufl_shape[0]):
-                    yield from _remove_list_tensors(t[i])
+        def _remove_list_tensors(a):
+            if isinstance(a, ListTensor):
+                for i in range(a.ufl_shape[0]):
+                    yield from _remove_list_tensors(a[i])
             else:
-                yield purge_list_tensors(t)
+                yield purge_list_tensors(a)
         fltr = ListTensor(*tuple(_remove_list_tensors(fltr)))
-        fltr = tuple(extract_type(fltr, AbstractSubspace))
-        assert len(fltr) == 1
+        fltr = tuple(extract_type(fltr, Subspace))
         fltr = fltr[0]
-        if fltr._ufl_class_ is ufl.Subspace:
-            vec = ctx.subspace(fltr, mt.restriction)
-            a = gem.Product(gem.Indexed(vec, argument_multiindex), gem.Indexed(table, argument_multiindex + sigma))
-        elif fltr._ufl_class_ is ufl.RotatedSubspace:
-            vec = ctx.subspace(fltr, mt.restriction)
-            assert fltr.ufl_element() == terminal.ufl_element()
-            finat_element = create_element(mt.filter.ufl_element())
-            entity_dofs = finat_element.entity_dofs()
-            shape = finat_element.index_shape
-            a = gem.Zero()
-            gamma = tuple(gem.Index(extent=ix.extent) for ix in argument_multiindex)
-            for d in entity_dofs:
-                for _, dofs in entity_dofs[d].items():
-                    if len(dofs) == 0 or (len(dofs) == 1 and len(shape) == 1):
-                        continue
-                    ind = numpy.zeros(shape, dtype=ctx.scalar_type)
-                    for dof in dofs:
-                        for ndind in numpy.ndindex(shape[1:]):
-                            ind[(dof, ) + ndind] = 1.
-                    part = gem.Product(gem.Literal(ind)[gamma], vec[gamma])
-                    proj = gem.IndexSum(gem.Product(part, gem.Indexed(table, gamma + sigma)), gamma)
-                    a = gem.Sum(a, gem.Product(gem.Indexed(gem.ComponentTensor(part, gamma), argument_multiindex), proj))
+        mat = ctx.subspace(fltr, mt.restriction)
+        jj = tuple(gem.Index(extent=ix.extent) for ix in argument_multiindex)
+        a = gem.IndexSum(gem.Product(gem.Indexed(mat, argument_multiindex + jj), gem.Indexed(table, jj + sigma)), jj)
     else:
         a = gem.Indexed(table, argument_multiindex + sigma)
     return gem.ComponentTensor(a, sigma)
@@ -654,7 +635,8 @@ def translate_coefficient(terminal, mt, ctx):
     zeta = element.get_value_indices()
     vec_beta, = gem.optimise.remove_componenttensors([gem.Indexed(vec, beta)])
     if mt.filter:
-        subspace_beta, = gem.optimise.remove_componenttensors([gem.Indexed(filter_mat, beta)])
+        gamma = tuple(gem.Index(extent=ix.extent) for ix in beta)
+        transform_mat_beta_gamma, = gem.optimise.remove_componenttensors([gem.Indexed(filter_mat, beta + gamma)])
     value_dict = {}
     for alpha, table in per_derivative.items():
         table_qi = gem.Indexed(table, beta + zeta)
@@ -662,65 +644,9 @@ def translate_coefficient(terminal, mt, ctx):
         for var, expr in unconcatenate([(vec_beta, table_qi)], ctx.index_cache):
             indices = tuple(i for i in var.index_ordering() if i not in ctx.unsummed_coefficient_indices)
             if mt.filter:
-                if mt.filter._ufl_class_ is ufl.Subspace:
-                    # Basic subspace:
-                    # Linear combination of weighted basis:
-                    #
-                    # u = \sum [ u_i * (w_i * \phi_i) ]
-                    #       i
-                    # 
-                    # u     : function
-                    # u_i   : ith coefficient
-                    # \phi_i: ith basis
-                    # w_i   : ith weight (stored in the subspace object)
-                    #         w_i = 0 to deselect the associated basis.
-                    #         w_i = 1 to select.
-                    transformed_expr = gem.Product(subspace_beta, expr)
-                    value = gem.IndexSum(gem.Product(transformed_expr, var), indices)
-                elif mt.filter._ufl_class_ is ufl.RotatedSubspace:
-                    # Rotation subspace:
-                    # 
-                    # u = \sum [ u_i * \sum [ \psi(e)_i * \sum [ \psi(e)_k * \phi(e)_k ] ] ]
-                    #       i            e                  k
-                    # 
-                    # u       : function
-                    # u_i     : ith coefficient
-                    # \phi(e) : basis vector whose elements not associated with
-                    #           entity e are set zero.
-                    # \psi(e) : rotation vector whose elements not associated with
-                    #           entity e are set zero.
-                    assert mt.filter.ufl_element() == terminal.ufl_element()
-                    finat_element = create_element(mt.filter.ufl_element())
-                    shape = finat_element.index_shape
-                    if len(shape) == 1:
-                        entity_dofs = finat_element.entity_dofs()
-                    else:
-                        entity_dofs = finat_element.base_element.entity_dofs()
-                    basis_beta = gem.Zero()
-                    gamma = tuple(gem.Index(extent=ix.extent) for ix in beta)
-                    for d in entity_dofs:
-                        for _, dofs in entity_dofs[d].items():
-                            if len(dofs) == 0 or (len(dofs) == 1 and len(shape) == 1):
-                                continue
-                            ind = numpy.zeros(shape, dtype=ctx.scalar_type)
-                            for dof in dofs:
-                                for ndind in numpy.ndindex(shape[1:]):
-                                    ind[(dof, ) + ndind] = 1.
-                            part = gem.Product(gem.Literal(ind)[beta], subspace_beta)
-                            proj = gem.IndexSum(gem.Product(gem.Indexed(gem.ComponentTensor(part, beta), gamma),
-                                                            gem.Indexed(gem.ComponentTensor(expr, beta), gamma)), gamma)
-                            basis_beta = gem.Sum(basis_beta, gem.Product(part, proj))
-                    value = gem.IndexSum(gem.Product(basis_beta, var), indices)
+                transformed_expr = gem.IndexSum(gem.Product(transform_mat_beta_gamma, gem.Indexed(gem.ComponentTensor(expr, beta), gamma)), gamma)
+                value = gem.IndexSum(gem.Product(transformed_expr, var), indices)
             else:
-                # Classical implementation of functions/function spaces.
-                # Linear combination of basis:
-                #
-                # u = \sum [ u_i * \phi_i ]
-                #       i
-                #
-                # u     : function
-                # u_i   : ith coefficient
-                # \phi_i: ith basis
                 value = gem.IndexSum(gem.Product(expr, var), indices)
             summands.append(gem.optimise.contraction(value))
         optimised_value = gem.optimise.make_sum(summands)

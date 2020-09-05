@@ -235,7 +235,7 @@ class SubspaceSplitter(MultiFunction):
 
     expr = MultiFunction.reuse_if_untouched
 
-    def abstract_subspace(self, o):
+    def subspace(self, o):
 
         if type(o.ufl_element()) != MixedElement:
             # Only split mixed topological coefficients
