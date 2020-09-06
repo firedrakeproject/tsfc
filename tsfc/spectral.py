@@ -2,7 +2,7 @@ from collections import OrderedDict, defaultdict, namedtuple
 from functools import partial, reduce
 from itertools import chain, zip_longest
 
-from gem.gem import Delta, Indexed, FlexiblyIndexed, Sum, index_sum, one
+from gem.gem import Delta, Literal, Indexed, FlexiblyIndexed, Sum, index_sum, one
 from gem.node import Memoizer
 from gem.optimise import delta_elimination as _delta_elimination
 from gem.optimise import remove_componenttensors, replace_division, unroll_indexsum
@@ -125,18 +125,20 @@ def classify(argument_indices, expression, delta_inside):
     if n == 0:
         return OTHER
     elif n == 1:
-        if isinstance(expression, (Indexed, FlexiblyIndexed)):
-            if n == len(expression.free_indices):
-                # Return ATOMIC if expression is a filter.
+        if isinstance(expression, (FlexiblyIndexed, )):
+            #if n == len(expression.free_indices):
+            if expression.children[0].name.startswith('r_'):
                 return ATOMIC
         if isinstance(expression, (Delta, Indexed)) and not delta_inside(expression):
             return ATOMIC
         else:
             return COMPOUND
     else:
-        if isinstance(expression, (Indexed, FlexiblyIndexed)):
-            if n == len(expression.free_indices):
-                # Return ATOMIC if expression is a filter.
+        if isinstance(expression, Indexed) and isinstance(expression.children[0], Literal):
+            return ATOMIC
+        if isinstance(expression, (FlexiblyIndexed, )):
+            #if n == len(expression.free_indices):
+            if expression.children[0].name.startswith('r_'):
                 return ATOMIC
         return COMPOUND
 
