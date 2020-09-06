@@ -125,7 +125,7 @@ def classify(argument_indices, expression, delta_inside):
     if n == 0:
         return OTHER
     elif n == 1:
-        if isinstance(expression, FlexiblyIndexed):
+        if isinstance(expression, (Indexed, FlexiblyIndexed)):
             if n == len(expression.free_indices):
                 # Return ATOMIC if expression is a filter.
                 return ATOMIC
@@ -134,7 +134,7 @@ def classify(argument_indices, expression, delta_inside):
         else:
             return COMPOUND
     else:
-        if isinstance(expression, FlexiblyIndexed):
+        if isinstance(expression, (Indexed, FlexiblyIndexed)):
             if n == len(expression.free_indices):
                 # Return ATOMIC if expression is a filter.
                 return ATOMIC
