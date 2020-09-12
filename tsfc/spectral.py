@@ -136,7 +136,9 @@ def classify(argument_indices, expression, delta_inside):
         if isinstance(expression, (FlexiblyIndexed, )):
             if isinstance(expression.children[0], Variable):
                 return ATOMIC
-        if isinstance(expression, Indexed):
+        if isinstance(expression, Delta):
+            return ATOMIC
+        if isinstance(expression, (Indexed, )):
             if isinstance(expression.children[0], Literal):
                 return ATOMIC
         return COMPOUND

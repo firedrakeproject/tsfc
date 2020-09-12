@@ -28,7 +28,7 @@ def make_builder(*args, **kwargs):
 
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
-                 "domain_number", "needs_cell_sizes", "tabulations", "quadrature_rule",
+                 "domain_number", "needs_cell_sizes", "tabulations",
                  "coefficient_numbers", "subspace_numbers", "subspace_parts", "__weakref__")
     """A compiled Kernel object.
 
@@ -47,12 +47,11 @@ class Kernel(object):
         that are actually used in the given integral_data. If `None` is given
         instead of a list of components, it is assumed that all components of
         that subspace are to be used.
-    :kwarg quadrature_rule: The finat quadrature rule used to generate this kernel
     :kwarg tabulations: The runtime tabulations this kernel requires
     :kwarg needs_cell_sizes: Does the kernel require cell sizes.
     """
     def __init__(self, ast=None, integral_type=None, oriented=False,
-                 subdomain_id=None, domain_number=None, quadrature_rule=None,
+                 subdomain_id=None, domain_number=None,
                  coefficient_numbers=(),
                  subspace_numbers=(),
                  subspace_parts=None,
@@ -341,7 +340,7 @@ class KernelBuilder(KernelBuilderBase):
         knl = self.kernel
         knl.oriented, knl.needs_cell_sizes, knl.tabulations = check_requirements(ir)
 
-    def construct_kernel(self, name, impero_c, index_names, quadrature_rule):
+    def construct_kernel(self, name, impero_c, index_names):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument
@@ -350,7 +349,6 @@ class KernelBuilder(KernelBuilderBase):
         :arg name: function name
         :arg impero_c: ImperoC tuple with Impero AST and other data
         :arg index_names: pre-assigned index names
-        :arg quadrature rule: quadrature rule
 
         :returns: :class:`Kernel` object
         """
@@ -374,8 +372,6 @@ class KernelBuilder(KernelBuilderBase):
         for name_, shape in self.kernel.tabulations:
             args.append(coffee.Decl(self.scalar_type, coffee.Symbol(
                 name_, rank=shape), qualifiers=["const"]))
-
-        self.kernel.quadrature_rule = quadrature_rule
 
         self.kernel.ast = KernelBuilderBase.construct_kernel(self, name, args, body)
         return self.kernel

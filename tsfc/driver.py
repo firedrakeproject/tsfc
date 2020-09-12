@@ -3,7 +3,7 @@ import operator
 import string
 import time
 import sys
-from functools import reduce
+from functools import reduce, singledispatch
 from itertools import chain
 
 from numpy import asarray, allclose
@@ -17,6 +17,8 @@ from ufl.utils.sequences import max_degree
 
 import gem
 import gem.impero_utils as impero_utils
+from gem.node import MemoizerArg, reuse_if_untouched_arg
+from gem.optimise import filtered_replace_indices
 
 import FIAT
 from FIAT.reference_element import TensorProductCell
@@ -77,12 +79,8 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     :arg diagonal: Are we building a kernel for the diagonal of a rank-2 element tensor?
     :returns: a kernel constructed by the kernel interface
     """
-    if parameters is None:
-        parameters = default_parameters()
-    else:
-        _ = default_parameters()
-        _.update(parameters)
-        parameters = _
+    parameters = preprocess_parameters(parameters)
+
     if interface is None:
         if coffee:
             import tsfc.kernel_interface.firedrake as firedrake_interface_coffee
@@ -91,39 +89,28 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
             # Delayed import, loopy is a runtime dependency
             import tsfc.kernel_interface.firedrake_loopy as firedrake_interface_loopy
             interface = firedrake_interface_loopy.KernelBuilder
-    if coffee:
-        scalar_type = parameters["scalar_type_c"]
-    else:
-        scalar_type = parameters["scalar_type"]
 
-    # Remove these here, they're handled below.
-    if parameters.get("quadrature_degree") in ["auto", "default", None, -1, "-1"]:
-        del parameters["quadrature_degree"]
-    if parameters.get("quadrature_rule") in ["auto", "default", None]:
-        del parameters["quadrature_rule"]
-
-    integral_type = integral_data.integral_type
-    interior_facet = integral_type.startswith("interior_facet")
     mesh = integral_data.domain
-    cell = integral_data.domain.ufl_cell()
-    arguments = form_data.preprocessed_form.arguments()
-    kernel_name = "%s_%s_integral_%s" % (prefix, integral_type, integral_data.subdomain_id)
-    # Handle negative subdomain_id
-    kernel_name = kernel_name.replace("-", "_")
-
-    fiat_cell = as_fiat_cell(cell)
-    integration_dim, entity_ids = lower_integral_type(fiat_cell, integral_type)
-
-    quadrature_indices = []
+    integral_type = integral_data.integral_type
+    subdomain_id = integral_data.subdomain_id
 
     # Dict mapping domains to index in original_form.ufl_domains()
+    # The same builder (in principle) can be used to compile different forms.
     domain_numbering = form_data.original_form.domain_numbering()
-    builder = interface(integral_type, integral_data.subdomain_id,
-                        domain_numbering[integral_data.domain],
-                        scalar_type,
+    builder = interface(integral_type, subdomain_id,
+                        domain_numbering[mesh],
+                        parameters["scalar_type_c"] if coffee else parameters["scalar_type"],
                         diagonal=diagonal)
+    builder.set_coordinates(mesh)
+    builder.set_cell_sizes(mesh)
+    builder.set_coefficients(integral_data, form_data)
+    builder.set_subspaces(integral_data, form_data)
+
+    # Form specific setups
+    arguments = form_data.preprocessed_form.arguments()
     argument_multiindices = tuple(builder.create_element(arg.ufl_element()).get_indices()
                                   for arg in arguments)
+    argument_multiindices_dummy = tuple(tuple(gem.Index(extent=a.extent) for a in arg) for arg in argument_multiindices)
     if diagonal:
         # Error checking occurs in the builder constructor.
         # Diagonal assembly is obtained by using the test indices for
@@ -132,13 +119,71 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
         argument_multiindices = (a, a)
 
     return_variables = builder.set_arguments(arguments, argument_multiindices)
+    kernel_cfg = get_kernel_cfg(builder, mesh, integral_type, argument_multiindices, argument_multiindices_dummy, parameters["scalar_type"])
+    functions = list(arguments) + [builder.coordinate(mesh)] + list(integral_data.integral_coefficients)
 
-    builder.set_coordinates(mesh)
-    builder.set_cell_sizes(mesh)
+    mode_irs = collections.OrderedDict()
+    quadrature_indices = []
+    for integral in integral_data.integrals:
+        params = parameters.copy()
+        params.update(integral.metadata())  # integral metadata overrides
+        # Set quad_rule
+        quad_rule = get_quad_rule(mesh.ufl_cell(), integral_type, params, functions)
+        quadrature_multiindex = quad_rule.point_set.indices
+        quadrature_indices.extend(quadrature_multiindex)
+        # Set config
+        config = kernel_cfg.copy()
+        config.update(quadrature_rule=quad_rule)
+        # Preprocess integrand
+        integrand = integral.integrand()
+        integrand = ufl.replace(integrand, form_data.function_replace_map)
+        integrand = ufl.replace(integrand, form_data.subspace_replace_map)
+        # ---- Split coefficient along with filters here
+        integrand = ufl_utils.split_coefficients(integrand, builder.coefficient_split, builder.subspace_split)
+        # ---- Split rest of the topological coefficients
+        integrand = ufl_utils.split_subspaces(integrand, builder.subspace_split)
+        # Compile: ufl -> gem
+        expressions = fem.compile_ufl(integrand,
+                                      interior_facet=integral_type.startswith("interior_facet"),
+                                      **config)
+        # Replace dummy argument multiindices
+        expressions = replace_argument_multiindices_dummy(expressions, argument_multiindices, argument_multiindices_dummy)
+        mode = pick_mode(params["mode"])
+        reps = mode.Integrals(expressions, quadrature_multiindex,
+                              argument_multiindices, params)
+        mode_irs.setdefault(mode, collections.OrderedDict())
+        for var, rep in zip(return_variables, reps):
+            mode_irs[mode].setdefault(var, []).append(rep)
 
-    builder.set_coefficients(integral_data, form_data)
-    builder.set_subspaces(integral_data, form_data)
+    impero_c = compile_gem(builder, mode_irs, quadrature_indices, kernel_cfg['index_cache'])
 
+    kernel_name = "%s_%s_integral_%s" % (prefix, integral_type, subdomain_id)
+    kernel_name = kernel_name.replace("-", "_")  # Handle negative subdomain_id
+    if impero_c is None:
+        # No operations, construct empty kernel
+        kernel = builder.construct_empty_kernel(kernel_name)
+    else:
+        index_names = _get_index_names(quadrature_indices, argument_multiindices, kernel_cfg['index_cache'])
+        kernel = builder.construct_kernel(kernel_name, impero_c, index_names)
+    return kernel
+
+
+def preprocess_parameters(parameters):
+    if parameters is None:
+        parameters = default_parameters()
+    else:
+        _ = default_parameters()
+        _.update(parameters)
+        parameters = _
+    # Remove these here, they're handled below.
+    if parameters.get("quadrature_degree") in ["auto", "default", None, -1, "-1"]:
+        del parameters["quadrature_degree"]
+    if parameters.get("quadrature_rule") in ["auto", "default", None]:
+        del parameters["quadrature_rule"]
+    return parameters
+
+
+def get_kernel_cfg(builder, mesh, integral_type, argument_multiindices, argument_multiindices_dummy, scalar_type):
     # Map from UFL FiniteElement objects to multiindices.  This is
     # so we reuse Index instances when evaluating the same coefficient
     # multiple times with the same table.
@@ -147,75 +192,52 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     # which maps index objects to tuples of multiindices.  These two
     # caches shall never conflict as their keys have different types
     # (UFL finite elements vs. GEM index objects).
-    index_cache = {}
-
+    cell = mesh.ufl_cell()
+    fiat_cell = as_fiat_cell(cell)
+    integration_dim, entity_ids = lower_integral_type(fiat_cell, integral_type)
     kernel_cfg = dict(interface=builder,
                       ufl_cell=cell,
                       integral_type=integral_type,
                       integration_dim=integration_dim,
                       entity_ids=entity_ids,
                       argument_multiindices=argument_multiindices,
-                      index_cache=index_cache,
-                      scalar_type=parameters["scalar_type"])
+                      argument_multiindices_dummy=argument_multiindices_dummy,
+                      index_cache={},
+                      scalar_type=scalar_type)
+    return kernel_cfg
 
-    mode_irs = collections.OrderedDict()
-    for integral in integral_data.integrals:
-        params = parameters.copy()
-        params.update(integral.metadata())  # integral metadata overrides
-        if params.get("quadrature_rule") == "default":
-            del params["quadrature_rule"]
 
-        mode = pick_mode(params["mode"])
-        mode_irs.setdefault(mode, collections.OrderedDict())
+def get_quad_rule(cell, integral_type, params, functions):
+    # Check if the integral has a quad degree attached, otherwise use
+    # the estimated polynomial degree attached by compute_form_data
+    try:
+        quadrature_degree = params["quadrature_degree"]
+    except KeyError:
+        quadrature_degree = params["estimated_polynomial_degree"]
+        function_degrees = [f.ufl_function_space().ufl_element().degree() for f in functions]
+        if all((asarray(quadrature_degree) > 10 * asarray(degree)).all()
+               for degree in function_degrees):
+            logger.warning("Estimated quadrature degree %s more "
+                           "than tenfold greater than any "
+                           "argument/coefficient degree (max %s)",
+                           quadrature_degree, max_degree(function_degrees))
+    if params.get("quadrature_rule") == "default":
+        del params["quadrature_rule"]
+    try:
+        quad_rule = params["quadrature_rule"]
+    except KeyError:
+        fiat_cell = as_fiat_cell(cell)
+        integration_dim, _ = lower_integral_type(fiat_cell, integral_type)
+        integration_cell = fiat_cell.construct_subelement(integration_dim)
+        quad_rule = make_quadrature(integration_cell, quadrature_degree)
 
-        integrand = integral.integrand()
-        integrand = ufl.replace(integrand, form_data.function_replace_map)
-        integrand = ufl.replace(integrand, form_data.subspace_replace_map)
-        # Split coefficient along with filters here
-        integrand = ufl_utils.split_coefficients(integrand, builder.coefficient_split, builder.subspace_split)
-        # Split rest of the topological coefficients
-        integrand = ufl_utils.split_subspaces(integrand, builder.subspace_split)
+    if not isinstance(quad_rule, AbstractQuadratureRule):
+        raise ValueError("Expected to find a QuadratureRule object, not a %s" %
+                         type(quad_rule))
+    return quad_rule
 
-        # Check if the integral has a quad degree attached, otherwise use
-        # the estimated polynomial degree attached by compute_form_data
-        quadrature_degree = params.get("quadrature_degree",
-                                       params["estimated_polynomial_degree"])
-        try:
-            quadrature_degree = params["quadrature_degree"]
-        except KeyError:
-            quadrature_degree = params["estimated_polynomial_degree"]
-            functions = list(arguments) + [builder.coordinate(mesh)] + list(integral_data.integral_coefficients)
-            function_degrees = [f.ufl_function_space().ufl_element().degree() for f in functions]
-            if all((asarray(quadrature_degree) > 10 * asarray(degree)).all()
-                   for degree in function_degrees):
-                logger.warning("Estimated quadrature degree %s more "
-                               "than tenfold greater than any "
-                               "argument/coefficient degree (max %s)",
-                               quadrature_degree, max_degree(function_degrees))
 
-        try:
-            quad_rule = params["quadrature_rule"]
-        except KeyError:
-            integration_cell = fiat_cell.construct_subelement(integration_dim)
-            quad_rule = make_quadrature(integration_cell, quadrature_degree)
-
-        if not isinstance(quad_rule, AbstractQuadratureRule):
-            raise ValueError("Expected to find a QuadratureRule object, not a %s" %
-                             type(quad_rule))
-
-        quadrature_multiindex = quad_rule.point_set.indices
-        quadrature_indices.extend(quadrature_multiindex)
-
-        config = kernel_cfg.copy()
-        config.update(quadrature_rule=quad_rule)
-        expressions = fem.compile_ufl(integrand,
-                                      interior_facet=interior_facet,
-                                      **config)
-        reps = mode.Integrals(expressions, quadrature_multiindex,
-                              argument_multiindices, params)
-        for var, rep in zip(return_variables, reps):
-            mode_irs[mode].setdefault(var, []).append(rep)
-
+def compile_gem(builder, mode_irs, quadrature_indices, index_cache):
     # Finalise mode representations into a set of assignments
     assignments = []
     for mode, var_reps in mode_irs.items():
@@ -232,7 +254,6 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
                           [mode.finalise_options.items()
                            for mode in mode_irs.keys()]))
     expressions = impero_utils.preprocess_gem(expressions, **options)
-    assignments = list(zip(return_variables, expressions))
 
     # Let the kernel interface inspect the optimised IR to register
     # what kind of external data is required (e.g., cell orientations,
@@ -240,16 +261,22 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     builder.register_requirements(expressions)
 
     # Construct ImperoC
-    split_argument_indices = tuple(chain(*[var.index_ordering()
-                                           for var in return_variables]))
-    index_ordering = tuple(quadrature_indices) + split_argument_indices
+    assignments = list(zip(return_variables, expressions))
+    index_ordering = _get_index_ordering(quadrature_indices, return_variables)
     try:
         impero_c = impero_utils.compile_gem(assignments, index_ordering, remove_zeros=True)
     except impero_utils.NoopError:
-        # No operations, construct empty kernel
-        return builder.construct_empty_kernel(kernel_name)
+        impero_c = None
+    return impero_c
 
-    # Generate COFFEE
+
+def _get_index_ordering(quadrature_indices, return_variables):
+    split_argument_indices = tuple(chain(*[var.index_ordering()
+                                           for var in return_variables]))
+    return tuple(quadrature_indices) + split_argument_indices
+
+
+def _get_index_names(quadrature_indices, argument_multiindices, index_cache):
     index_names = []
 
     def name_index(index, name):
@@ -269,8 +296,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     name_multiindex(quadrature_indices, 'ip')
     for multiindex, name in zip(argument_multiindices, ['j', 'k']):
         name_multiindex(multiindex, name)
-
-    return builder.construct_kernel(kernel_name, impero_c, index_names, quad_rule)
+    return index_names
 
 
 def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
@@ -506,3 +532,23 @@ def pick_mode(mode):
     else:
         raise ValueError("Unknown mode: {}".format(mode))
     return m
+
+
+def replace_argument_multiindices_dummy(expressions, argument_multiindices, argument_multiindices_dummy):
+    r"""Replace dummy indices with true argument multiindices.
+    
+    :arg expressions: gem expressions written in terms of argument_multiindices_dummy.
+    :arg argument_multiindices: True argument multiindices.
+    :arg argument_multiindices_dummy: Dummy argument multiindices.
+
+    Applying `Delta(i, i_dummy)` and then `IndexSum(..., i_dummy)` would result in
+    too many `IndexSum`s and `gem.optimise.contraction` would complain.
+    Here, instead, we use filtered_replace_indices to directly replace dummy argument
+    multiindices with true ones.
+    """
+    if argument_multiindices_dummy == argument_multiindices:
+        return expressions
+
+    substitution = tuple(zip(chain(*argument_multiindices_dummy), chain(*argument_multiindices)))
+    mapper = MemoizerArg(filtered_replace_indices)
+    return tuple(mapper(expr, substitution) for expr in expressions)

@@ -58,6 +58,7 @@ class ContextBase(ProxyKernelInterface):
                 'integration_dim',
                 'entity_ids',
                 'argument_multiindices',
+                'argument_multiindices_dummy',
                 'facetarea',
                 'index_cache',
                 'scalar_type')
@@ -69,6 +70,8 @@ class ContextBase(ProxyKernelInterface):
         if invalid_keywords:
             raise ValueError("unexpected keyword argument '{0}'".format(invalid_keywords.pop()))
         self.__dict__.update(kwargs)
+        if 'argument_multiindices_dummy' not in kwargs:
+            self.argument_multiindices_dummy = self.argument_multiindices
 
     @cached_property
     def fiat_cell(self):
@@ -327,12 +330,12 @@ class Translator(MultiFunction, ModifiedTerminalMixin, ufl2gem.Mixin):
         integrand, = o.ufl_operands
         domain = o.ufl_domain()
         measure = ufl.Measure(self.context.integral_type, domain=domain)
-        integrand, degree, argument_multiindices = entity_avg(integrand / CellVolume(domain), measure, self.context.argument_multiindices)
+        integrand, degree, argument_multiindices_dummy = entity_avg(integrand / CellVolume(domain), measure, self.context.argument_multiindices_dummy)
 
         config = {name: getattr(self.context, name)
                   for name in ["ufl_cell", "index_cache", "scalar_type"]}
         config.update(quadrature_degree=degree, interface=self.context,
-                      argument_multiindices=argument_multiindices)
+                      argument_multiindices=argument_multiindices_dummy)
         expr, = compile_ufl(integrand, point_sum=True, **config)
         return expr
 
@@ -342,14 +345,14 @@ class Translator(MultiFunction, ModifiedTerminalMixin, ufl2gem.Mixin):
         integrand, = o.ufl_operands
         domain = o.ufl_domain()
         measure = ufl.Measure(self.context.integral_type, domain=domain)
-        integrand, degree, argument_multiindices = entity_avg(integrand / FacetArea(domain), measure, self.context.argument_multiindices)
+        integrand, degree, argument_multiindices_dummy = entity_avg(integrand / FacetArea(domain), measure, self.context.argument_multiindices_dummy)
 
         config = {name: getattr(self.context, name)
                   for name in ["ufl_cell", "index_cache", "scalar_type",
                                "integration_dim", "entity_ids",
                                "integral_type"]}
         config.update(quadrature_degree=degree, interface=self.context,
-                      argument_multiindices=argument_multiindices)
+                      argument_multiindices=argument_multiindices_dummy)
         expr, = compile_ufl(integrand, point_sum=True, **config)
         return expr
 
@@ -601,7 +604,7 @@ def fiat_to_ufl(fiat_dict, order):
 
 @translate.register(Argument)
 def translate_argument(terminal, mt, ctx):
-    argument_multiindex = ctx.argument_multiindices[terminal.number()]
+    argument_multiindex = ctx.argument_multiindices_dummy[terminal.number()]
     sigma = tuple(gem.Index(extent=d) for d in mt.expr.ufl_shape)
     element = ctx.create_element(terminal.ufl_element(), restriction=mt.restriction)
 
