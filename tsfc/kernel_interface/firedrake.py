@@ -264,36 +264,35 @@ class KernelBuilder(KernelBuilderBase):
         :arg integral_data: UFL integral data
         :arg form_data: UFL form data
         """
-        objects = []
-        object_numbers = []
         # enabled_coefficients is a boolean array that indicates which
         # of reduced_coefficients the integral requires.
-        enabled_objects = integral_data.enabled_coefficients
-        reduced_objects = form_data.reduced_coefficients
+        enabled = integral_data.enabled_coefficients
+        functions = tuple(form_data.reduced_coefficients[i]
+                             for i, ea in enumerate(enabled) if ea)
+        # This is which coefficient in the original form the
+        # current coefficient is.
+        # Consider f*v*dx + g*v*ds, the full form contains two
+        # coefficients, but each integral only requires one.
+        coefficient_numbers = tuple(form_data.original_coefficient_positions[i]
+                               for i, ea in enumerate(enabled) if ea)
         replace_map = form_data.function_replace_map
-        for i in range(len(enabled_objects)):
-            if enabled_objects[i]:
-                original = reduced_objects[i]
-                obj = replace_map[original]
-                if type(obj.ufl_element()) == ufl_MixedElement:
-                    if original in self.dont_split:
-                        objects.append(obj)
-                        self.coefficient_split[obj] = [obj]
-                    else:
-                        split = [Coefficient(FunctionSpace(obj.ufl_domain(), element))
-                                 for element in obj.ufl_element().sub_elements()]
-                        objects.extend(split)
-                        self.coefficient_split[obj] = split
+        coeffs = []
+        for f in functions:
+            c = replace_map[f]
+            if type(c.ufl_element()) == ufl_MixedElement:
+                if f in self.dont_split:
+                    coeffs.append(c)
+                    self.coefficient_split[c] = [c]
                 else:
-                    objects.append(obj)
-                # This is which coefficient in the original form the
-                # current coefficient is.
-                # Consider f*v*dx + g*v*ds, the full form contains two
-                # coefficients, but each integral only requires one.
-                object_numbers.append(form_data.original_coefficient_positions[i])
-        for i, obj in enumerate(objects):
-            self.coefficient_args.append(self._coefficient(obj, "w_%d" % i))
-        self.kernel.coefficient_numbers = tuple(object_numbers)
+                    split = [Coefficient(FunctionSpace(c.ufl_domain(), element))
+                             for element in c.ufl_element().sub_elements()]
+                    coeffs.extend(split)
+                    self.coefficient_split[c] = split
+            else:
+                coeffs.append(c)
+        for i, c in enumerate(coeffs):
+            self.coefficient_args.append(self._coefficient(c, "w_%d" % i))
+        self.kernel.coefficient_numbers = coefficient_numbers
 
     def set_subspaces(self, integral_data, form_data):
         """Prepare the subspaces of the form.

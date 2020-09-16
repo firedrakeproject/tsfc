@@ -132,8 +132,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
         # Replace dummy argument multiindices
         expressions = replace_argument_multiindices_dummy(expressions, argument_multiindices, argument_multiindices_dummy)
         mode = pick_mode(params["mode"])
-        reps = mode.Integrals(expressions, quadrature_multiindex,
-                              argument_multiindices, params)
+        reps = mode.Integrals(expressions, quadrature_multiindex, argument_multiindices, params)
         mode_irs.setdefault(mode, collections.OrderedDict())
         for var, rep in zip(return_variables, reps):
             mode_irs[mode].setdefault(var, []).append(rep)
