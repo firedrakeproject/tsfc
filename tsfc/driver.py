@@ -90,6 +90,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
             import tsfc.kernel_interface.firedrake_loopy as firedrake_interface_loopy
             interface = firedrake_interface_loopy.KernelBuilder
 
+    integral_data = IntegralData((integral_data, ), (form_data, ))
     mesh = integral_data.domain
     integral_type = integral_data.integral_type
     subdomain_id = integral_data.subdomain_id
@@ -125,10 +126,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
         config = kernel_cfg.copy()
         config.update(quadrature_rule=quad_rule)
         # Preprocess integrand
-        integrand = integral.integrand()
-        integrand = ufl.replace(integrand, form_data.function_replace_map)
-        integrand = ufl.replace(integrand, form_data.subspace_replace_map)
-        expressions = builder.compile_ufl(integrand, **config)
+        expressions = builder.compile_ufl(integral.integrand(), **config)
         # Replace dummy argument multiindices
         expressions = replace_argument_multiindices_dummy(expressions, argument_multiindices, argument_multiindices_dummy)
         mode = pick_mode(params["mode"])
@@ -143,6 +141,36 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     kernel_name = kernel_name.replace("-", "_")  # Handle negative subdomain_id
     kernel = builder.construct_kernel(kernel_name, impero_c, quadrature_indices, argument_multiindices, kernel_cfg['index_cache'])
     return kernel
+
+
+class IntegralData(object):
+    r"""Mimics `ufl.IntegralData`.
+
+    :arg form_data_tuple: A tuple of `ufl.FormData`s.
+
+    Simplify/preprocess/combine `ufl.IntegralData`s to a
+    minimal set of data required by the `KernelBuilder`.
+    Convenient when dealing with multiple `ufl.FormData`s.
+    """
+    def __init__(self, integral_data_tuple, form_data_tuple):
+        self.domain = integral_data_tuple[0].domain
+        self.integral_type = integral_data_tuple[0].integral_type
+        self.subdomain_id = integral_data_tuple[0].subdomain_id
+
+        integrals = []
+        for integral in integral_data_tuple[0].integrals:
+            integrand = integral.integrand()
+            integrand = ufl.replace(integrand, form_data_tuple[0].function_replace_map)
+            integrand = ufl.replace(integrand, form_data_tuple[0].subspace_replace_map)
+            integrals.append(integral.reconstruct(integrand=integrand))
+        self.integrals = tuple(integrals)
+
+        self.integral_coefficients = integral_data_tuple[0].integral_coefficients 
+
+        self.enabled_coefficients = integral_data_tuple[0].enabled_coefficients
+        self.enabled_subspaces = integral_data_tuple[0].enabled_subspaces
+
+
 
 
 def get_arguments_and_indices(builder, form_data, diagonal):
