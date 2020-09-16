@@ -1,7 +1,9 @@
 import numpy
 from collections import namedtuple
+import operator
+import string
 from itertools import chain, product
-from functools import partial
+from functools import reduce, partial
 
 from ufl import Coefficient, Subspace, MixedElement as ufl_MixedElement, FunctionSpace, FiniteElement
 
@@ -10,9 +12,11 @@ import coffee.base as coffee
 import gem
 from gem.node import traversal
 from gem.optimise import remove_componenttensors as prune
+import gem.impero_utils as impero_utils
 
 import finat
 
+from tsfc import fem, ufl_utils
 from tsfc.finatinterface import create_element
 from tsfc.kernel_interface.common import KernelBuilderBase as _KernelBuilderBase
 from tsfc.coffee import generate as generate_coffee
@@ -340,7 +344,49 @@ class KernelBuilder(KernelBuilderBase):
         knl = self.kernel
         knl.oriented, knl.needs_cell_sizes, knl.tabulations = check_requirements(ir)
 
-    def construct_kernel(self, name, impero_c, index_names):
+    def compile_ufl(self, integrand, **config):
+        # ---- Split coefficient along with filters here
+        integrand = ufl_utils.split_coefficients(integrand, self.coefficient_split, self.subspace_split)
+        # ---- Split rest of the topological coefficients
+        integrand = ufl_utils.split_subspaces(integrand, self.subspace_split)
+        # Compile: ufl -> gem
+        return fem.compile_ufl(integrand,
+                               interior_facet=self.interior_facet,
+                               **config)
+
+    def compile_gem(self, mode_irs, quadrature_indices, index_cache):
+        # Finalise mode representations into a set of assignments
+        assignments = []
+        for mode, var_reps in mode_irs.items():
+            assignments.extend(mode.flatten(var_reps.items(), index_cache))
+
+        if assignments:
+            return_variables, expressions = zip(*assignments)
+        else:
+            return_variables = []
+            expressions = []
+
+        # Need optimised roots
+        options = dict(reduce(operator.and_,
+                              [mode.finalise_options.items()
+                               for mode in mode_irs.keys()]))
+        expressions = impero_utils.preprocess_gem(expressions, **options)
+
+        # Let the kernel interface inspect the optimised IR to register
+        # what kind of external data is required (e.g., cell orientations,
+        # cell sizes, etc.).
+        self.register_requirements(expressions)
+
+        # Construct ImperoC
+        assignments = list(zip(return_variables, expressions))
+        index_ordering = _get_index_ordering(quadrature_indices, return_variables)
+        try:
+            impero_c = impero_utils.compile_gem(assignments, index_ordering, remove_zeros=True)
+        except impero_utils.NoopError:
+            impero_c = None
+        return impero_c
+
+    def construct_kernel(self, name, impero_c, quadrature_indices, argument_multiindices, index_cache):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument
@@ -352,6 +398,11 @@ class KernelBuilder(KernelBuilderBase):
 
         :returns: :class:`Kernel` object
         """
+        if impero_c is None:
+            return self.construct_empty_kernel(name)
+
+        index_names = _get_index_names(quadrature_indices, argument_multiindices, index_cache)
+
         body = generate_coffee(impero_c, index_names, self.scalar_type)
 
         args = [self.local_tensor, self.coordinates_arg]
@@ -508,3 +559,32 @@ cell_orientations_coffee_arg = coffee.Decl("int", coffee.Symbol("cell_orientatio
                                            pointers=[("restrict",)],
                                            qualifiers=["const"])
 """COFFEE function argument for cell orientations"""
+
+
+def _get_index_ordering(quadrature_indices, return_variables):
+    split_argument_indices = tuple(chain(*[var.index_ordering()
+                                           for var in return_variables]))
+    return tuple(quadrature_indices) + split_argument_indices
+
+
+def _get_index_names(quadrature_indices, argument_multiindices, index_cache):
+    index_names = []
+
+    def name_index(index, name):
+        index_names.append((index, name))
+        if index in index_cache:
+            for multiindex, suffix in zip(index_cache[index],
+                                          string.ascii_lowercase):
+                name_multiindex(multiindex, name + suffix)
+
+    def name_multiindex(multiindex, name):
+        if len(multiindex) == 1:
+            name_index(multiindex[0], name)
+        else:
+            for i, index in enumerate(multiindex):
+                name_index(index, name + str(i))
+
+    name_multiindex(quadrature_indices, 'ip')
+    for multiindex, name in zip(argument_multiindices, ['j', 'k']):
+        name_multiindex(multiindex, name)
+    return index_names

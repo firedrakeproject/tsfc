@@ -107,17 +107,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     builder.set_subspaces(integral_data, form_data)
 
     # Form specific setups
-    arguments = form_data.preprocessed_form.arguments()
-    argument_multiindices = tuple(builder.create_element(arg.ufl_element()).get_indices()
-                                  for arg in arguments)
-    argument_multiindices_dummy = tuple(tuple(gem.Index(extent=a.extent) for a in arg) for arg in argument_multiindices)
-    if diagonal:
-        # Error checking occurs in the builder constructor.
-        # Diagonal assembly is obtained by using the test indices for
-        # the trial space as well.
-        a, _ = argument_multiindices
-        argument_multiindices = (a, a)
-
+    arguments, argument_multiindices, argument_multiindices_dummy = get_arguments_and_indices(builder, form_data, diagonal)
     return_variables = builder.set_arguments(arguments, argument_multiindices)
     kernel_cfg = get_kernel_cfg(builder, mesh, integral_type, argument_multiindices, argument_multiindices_dummy, parameters["scalar_type"])
     functions = list(arguments) + [builder.coordinate(mesh)] + list(integral_data.integral_coefficients)
@@ -138,14 +128,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
         integrand = integral.integrand()
         integrand = ufl.replace(integrand, form_data.function_replace_map)
         integrand = ufl.replace(integrand, form_data.subspace_replace_map)
-        # ---- Split coefficient along with filters here
-        integrand = ufl_utils.split_coefficients(integrand, builder.coefficient_split, builder.subspace_split)
-        # ---- Split rest of the topological coefficients
-        integrand = ufl_utils.split_subspaces(integrand, builder.subspace_split)
-        # Compile: ufl -> gem
-        expressions = fem.compile_ufl(integrand,
-                                      interior_facet=integral_type.startswith("interior_facet"),
-                                      **config)
+        expressions = builder.compile_ufl(integrand, **config)
         # Replace dummy argument multiindices
         expressions = replace_argument_multiindices_dummy(expressions, argument_multiindices, argument_multiindices_dummy)
         mode = pick_mode(params["mode"])
@@ -155,17 +138,26 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
         for var, rep in zip(return_variables, reps):
             mode_irs[mode].setdefault(var, []).append(rep)
 
-    impero_c = compile_gem(builder, mode_irs, quadrature_indices, kernel_cfg['index_cache'])
+    impero_c = builder.compile_gem(mode_irs, quadrature_indices, kernel_cfg['index_cache'])
 
     kernel_name = "%s_%s_integral_%s" % (prefix, integral_type, subdomain_id)
     kernel_name = kernel_name.replace("-", "_")  # Handle negative subdomain_id
-    if impero_c is None:
-        # No operations, construct empty kernel
-        kernel = builder.construct_empty_kernel(kernel_name)
-    else:
-        index_names = _get_index_names(quadrature_indices, argument_multiindices, kernel_cfg['index_cache'])
-        kernel = builder.construct_kernel(kernel_name, impero_c, index_names)
+    kernel = builder.construct_kernel(kernel_name, impero_c, quadrature_indices, argument_multiindices, kernel_cfg['index_cache'])
     return kernel
+
+
+def get_arguments_and_indices(builder, form_data, diagonal):
+    arguments = form_data.preprocessed_form.arguments()
+    argument_multiindices = tuple(builder.create_element(arg.ufl_element()).get_indices()
+                                  for arg in arguments)
+    argument_multiindices_dummy = tuple(tuple(gem.Index(extent=a.extent) for a in arg) for arg in argument_multiindices)
+    if diagonal:
+        # Error checking occurs in the builder constructor.
+        # Diagonal assembly is obtained by using the test indices for
+        # the trial space as well.
+        a, _ = argument_multiindices
+        argument_multiindices = (a, a)
+    return arguments, argument_multiindices, argument_multiindices_dummy
 
 
 def preprocess_parameters(parameters):
@@ -235,68 +227,6 @@ def get_quad_rule(cell, integral_type, params, functions):
         raise ValueError("Expected to find a QuadratureRule object, not a %s" %
                          type(quad_rule))
     return quad_rule
-
-
-def compile_gem(builder, mode_irs, quadrature_indices, index_cache):
-    # Finalise mode representations into a set of assignments
-    assignments = []
-    for mode, var_reps in mode_irs.items():
-        assignments.extend(mode.flatten(var_reps.items(), index_cache))
-
-    if assignments:
-        return_variables, expressions = zip(*assignments)
-    else:
-        return_variables = []
-        expressions = []
-
-    # Need optimised roots
-    options = dict(reduce(operator.and_,
-                          [mode.finalise_options.items()
-                           for mode in mode_irs.keys()]))
-    expressions = impero_utils.preprocess_gem(expressions, **options)
-
-    # Let the kernel interface inspect the optimised IR to register
-    # what kind of external data is required (e.g., cell orientations,
-    # cell sizes, etc.).
-    builder.register_requirements(expressions)
-
-    # Construct ImperoC
-    assignments = list(zip(return_variables, expressions))
-    index_ordering = _get_index_ordering(quadrature_indices, return_variables)
-    try:
-        impero_c = impero_utils.compile_gem(assignments, index_ordering, remove_zeros=True)
-    except impero_utils.NoopError:
-        impero_c = None
-    return impero_c
-
-
-def _get_index_ordering(quadrature_indices, return_variables):
-    split_argument_indices = tuple(chain(*[var.index_ordering()
-                                           for var in return_variables]))
-    return tuple(quadrature_indices) + split_argument_indices
-
-
-def _get_index_names(quadrature_indices, argument_multiindices, index_cache):
-    index_names = []
-
-    def name_index(index, name):
-        index_names.append((index, name))
-        if index in index_cache:
-            for multiindex, suffix in zip(index_cache[index],
-                                          string.ascii_lowercase):
-                name_multiindex(multiindex, name + suffix)
-
-    def name_multiindex(multiindex, name):
-        if len(multiindex) == 1:
-            name_index(multiindex[0], name)
-        else:
-            for i, index in enumerate(multiindex):
-                name_index(index, name + str(i))
-
-    name_multiindex(quadrature_indices, 'ip')
-    for multiindex, name in zip(argument_multiindices, ['j', 'k']):
-        name_multiindex(multiindex, name)
-    return index_names
 
 
 def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
