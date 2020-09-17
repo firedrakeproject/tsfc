@@ -28,7 +28,7 @@ from finat.point_set import PointSet
 from finat.quadrature import AbstractQuadratureRule, make_quadrature, QuadratureRule
 
 from tsfc import fem, ufl_utils
-from tsfc.finatinterface import as_fiat_cell
+from tsfc.finatinterface import as_fiat_cell, create_element
 from tsfc.logging import logger
 from tsfc.parameters import default_parameters, is_complex
 from tsfc.ufl_utils import apply_mapping
@@ -38,7 +38,39 @@ sys.setrecursionlimit(3000)
 
 
 class TSFCFormData(object):
-    pass
+
+    def __init__(self, form_data_tuple, diagonal):
+
+        self.function_replace_map = form_data_tuple[0].function_replace_map
+        self.integral_data = form_data_tuple[0].integral_data
+
+
+        self.original_form = form_data_tuple[0].original_form
+
+        self.preprocessed_form = form_data_tuple[0].preprocessed_form
+
+        self.reduced_coefficients = form_data_tuple[0].reduced_coefficients
+        self.function_replace_map = form_data_tuple[0].function_replace_map
+        self.original_coefficient_positions = form_data_tuple[0].original_coefficient_positions
+
+        self.reduced_subspaces = form_data_tuple[0].reduced_subspaces
+        self.subspace_replace_map = form_data_tuple[0].subspace_replace_map
+        self.original_subspace_positions = form_data_tuple[0].original_subspace_positions
+
+
+        arguments = self.preprocessed_form.arguments()
+        argument_multiindices = tuple(create_element(arg.ufl_element()).get_indices()
+                                      for arg in arguments)
+        argument_multiindices_dummy = tuple(tuple(gem.Index(extent=a.extent) for a in arg) for arg in argument_multiindices)
+        if diagonal:
+            # Error checking occurs in the builder constructor.
+            # Diagonal assembly is obtained by using the test indices for
+            # the trial space as well.
+            a, _ = argument_multiindices
+            argument_multiindices = (a, a)
+        self.arguments = arguments
+        self.argument_multiindices = argument_multiindices
+        self.argument_multiindices_dummy = argument_multiindices_dummy
 
 
 class TSFCIntegralData(object):
@@ -54,6 +86,7 @@ class TSFCIntegralData(object):
         self.domain = integral_data_tuple[0].domain
         self.integral_type = integral_data_tuple[0].integral_type
         self.subdomain_id = integral_data_tuple[0].subdomain_id
+        self.domain_number = form_data_tuple[0].original_form.domain_numbering()[self.domain]
 
         integrals = []
         for integral in integral_data_tuple[0].integrals:
@@ -97,17 +130,24 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
 
     assert isinstance(form, Form)
 
+    parameters = preprocess_parameters(parameters)
+
     # Determine whether in complex mode:
     complex_mode = parameters and is_complex(parameters.get("scalar_type"))
+
     fd = ufl_utils.compute_form_data(form, complex_mode=complex_mode)
+
+    fd = TSFCFormData((fd, ), diagonal)
+
     if interface:
         interface = partial(interface, function_replace_map=fd.function_replace_map)
     logger.info(GREEN % "compute_form_data finished in %g seconds.", time.time() - cpu_time)
 
     kernels = []
     for integral_data in fd.integral_data:
+        tsfc_integral_data = TSFCIntegralData((integral_data, ), (fd, ))
         start = time.time()
-        kernel = compile_integral(integral_data, fd, prefix, parameters, interface=interface, coffee=coffee, diagonal=diagonal)
+        kernel = compile_integral(tsfc_integral_data, fd, prefix, parameters, interface=interface, coffee=coffee, diagonal=diagonal)
         if kernel is not None:
             kernels.append(kernel)
         logger.info(GREEN % "compile_integral finished in %g seconds.", time.time() - start)
@@ -119,16 +159,14 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
 def compile_integral(integral_data, form_data, prefix, parameters, interface, coffee, *, diagonal=False):
     """Compiles a UFL integral into an assembly kernel.
 
-    :arg integral_data: UFL integral data
-    :arg form_data: UFL form data
+    :arg integral_data: TSFCIntegralData
+    :arg form_data: TSFCFormData
     :arg prefix: kernel name will start with this string
     :arg parameters: parameters object
     :arg interface: backend module for the kernel interface
     :arg diagonal: Are we building a kernel for the diagonal of a rank-2 element tensor?
     :returns: a kernel constructed by the kernel interface
     """
-    parameters = preprocess_parameters(parameters)
-
     if interface is None:
         if coffee:
             import tsfc.kernel_interface.firedrake as firedrake_interface_coffee
@@ -138,30 +176,17 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
             import tsfc.kernel_interface.firedrake_loopy as firedrake_interface_loopy
             interface = firedrake_interface_loopy.KernelBuilder
 
-    integral_data = TSFCIntegralData((integral_data, ), (form_data, ))
-    mesh = integral_data.domain
-    integral_type = integral_data.integral_type
-    subdomain_id = integral_data.subdomain_id
-
     # Dict mapping domains to index in original_form.ufl_domains()
     # The same builder (in principle) can be used to compile different forms.
-    domain_numbering = form_data.original_form.domain_numbering()
-    builder = interface(integral_type, subdomain_id,
-                        domain_numbering[mesh],
+    builder = interface(integral_data.integral_type, integral_data.subdomain_id, integral_data.domain_number,
                         parameters["scalar_type_c"] if coffee else parameters["scalar_type"],
-                        diagonal=diagonal)
-    builder.set_coordinates(mesh)
-    builder.set_cell_sizes(mesh)
-    builder.set_coefficients(integral_data.coefficients)
-    builder.set_coefficient_numbers(integral_data.coefficient_numbers)
-    builder.set_subspaces(integral_data.subspaces, integral_data.original_subspaces)
-    builder.set_subspace_numbers(integral_data.subspace_numbers)
+                        diagonal=diagonal,
+                        integral_data=integral_data)
 
     # Form specific setups
-    arguments, argument_multiindices, argument_multiindices_dummy = get_arguments_and_indices(builder, form_data, diagonal)
-    return_variables = builder.set_arguments(arguments, argument_multiindices)
-    kernel_cfg = get_kernel_cfg(builder, mesh, integral_type, argument_multiindices, argument_multiindices_dummy, parameters["scalar_type"])
-    functions = list(arguments) + [builder.coordinate(mesh)] + list(integral_data.integral_coefficients)
+    return_variables = builder.set_arguments(form_data.arguments, form_data.argument_multiindices)
+    kernel_cfg = get_kernel_cfg(builder, integral_data.domain, integral_data.integral_type, form_data.argument_multiindices, form_data.argument_multiindices_dummy, parameters["scalar_type"])
+    functions = list(form_data.arguments) + [builder.coordinate(integral_data.domain)] + list(integral_data.integral_coefficients)
 
     mode_irs = collections.OrderedDict()
     quadrature_indices = []
@@ -169,7 +194,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
         params = parameters.copy()
         params.update(integral.metadata())  # integral metadata overrides
         # Set quad_rule
-        quad_rule = get_quad_rule(mesh.ufl_cell(), integral_type, params, functions)
+        quad_rule = get_quad_rule(integral_data.domain.ufl_cell(), integral_data.integral_type, params, functions)
         quadrature_multiindex = quad_rule.point_set.indices
         quadrature_indices.extend(quadrature_multiindex)
         # Set config
@@ -178,33 +203,19 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
         # Preprocess integrand
         expressions = builder.compile_ufl(integral.integrand(), **config)
         # Replace dummy argument multiindices
-        expressions = replace_argument_multiindices_dummy(expressions, argument_multiindices, argument_multiindices_dummy)
+        expressions = replace_argument_multiindices_dummy(expressions, form_data.argument_multiindices, form_data.argument_multiindices_dummy)
         mode = pick_mode(params["mode"])
-        reps = mode.Integrals(expressions, quadrature_multiindex, argument_multiindices, params)
+        reps = mode.Integrals(expressions, quadrature_multiindex, form_data.argument_multiindices, params)
         mode_irs.setdefault(mode, collections.OrderedDict())
         for var, rep in zip(return_variables, reps):
             mode_irs[mode].setdefault(var, []).append(rep)
 
     impero_c = builder.compile_gem(mode_irs, quadrature_indices, kernel_cfg['index_cache'])
 
-    kernel_name = "%s_%s_integral_%s" % (prefix, integral_type, subdomain_id)
+    kernel_name = "%s_%s_integral_%s" % (prefix, integral_data.integral_type, integral_data.subdomain_id)
     kernel_name = kernel_name.replace("-", "_")  # Handle negative subdomain_id
-    kernel = builder.construct_kernel(kernel_name, impero_c, quadrature_indices, argument_multiindices, kernel_cfg['index_cache'])
+    kernel = builder.construct_kernel(kernel_name, impero_c, quadrature_indices, form_data.argument_multiindices, kernel_cfg['index_cache'])
     return kernel
-
-
-def get_arguments_and_indices(builder, form_data, diagonal):
-    arguments = form_data.preprocessed_form.arguments()
-    argument_multiindices = tuple(builder.create_element(arg.ufl_element()).get_indices()
-                                  for arg in arguments)
-    argument_multiindices_dummy = tuple(tuple(gem.Index(extent=a.extent) for a in arg) for arg in argument_multiindices)
-    if diagonal:
-        # Error checking occurs in the builder constructor.
-        # Diagonal assembly is obtained by using the test indices for
-        # the trial space as well.
-        a, _ = argument_multiindices
-        argument_multiindices = (a, a)
-    return arguments, argument_multiindices, argument_multiindices_dummy
 
 
 def preprocess_parameters(parameters):

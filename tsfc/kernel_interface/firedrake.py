@@ -208,7 +208,7 @@ class KernelBuilder(KernelBuilderBase):
     """Helper class for building a :class:`Kernel` object."""
 
     def __init__(self, integral_type, subdomain_id, domain_number, scalar_type,
-                 dont_split=(), function_replace_map={}, diagonal=False):
+                 dont_split=(), function_replace_map={}, diagonal=False, integral_data=None):
         """Initialise a kernel builder."""
         super(KernelBuilder, self).__init__(scalar_type, integral_type.startswith("interior_facet"))
 
@@ -236,6 +236,14 @@ class KernelBuilder(KernelBuilderBase):
             }
         elif integral_type == 'interior_facet_horiz':
             self._entity_number = {'+': 1, '-': 0}
+
+        if integral_data:
+            self.set_coordinates(integral_data.domain)
+            self.set_cell_sizes(integral_data.domain)
+            self.set_coefficients(integral_data.coefficients)
+            self.set_coefficient_numbers(integral_data.coefficient_numbers)
+            self.set_subspaces(integral_data.subspaces, integral_data.original_subspaces)
+            self.set_subspace_numbers(integral_data.subspace_numbers)
 
     def set_arguments(self, arguments, multiindices):
         """Process arguments.
