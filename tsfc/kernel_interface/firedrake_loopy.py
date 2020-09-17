@@ -209,7 +209,7 @@ class ExpressionKernelBuilder(KernelBuilderBase):
 class KernelBuilder(KernelBuilderBase):
     """Helper class for building a :class:`Kernel` object."""
 
-    def __init__(self, integral_type, subdomain_id, domain_number, scalar_type, dont_split=(),
+    def __init__(self, integral_type, subdomain_id, domain_number, scalar_type, dont_split=(), function_replace_map={},
                  diagonal=False):
         """Initialise a kernel builder."""
         super(KernelBuilder, self).__init__(scalar_type, integral_type.startswith("interior_facet"))
@@ -223,7 +223,8 @@ class KernelBuilder(KernelBuilderBase):
         self.coefficient_split = {}
         self.subspace_args = []
         self.subspace_split = {}
-        self.dont_split = frozenset(dont_split)
+        # Map to raw ufl Coefficient.
+        self.dont_split = frozenset(function_replace_map[f] for f in dont_split if f in function_replace_map)
 
         # Facet number
         if integral_type in ['exterior_facet', 'exterior_facet_vert']:
@@ -260,29 +261,15 @@ class KernelBuilder(KernelBuilderBase):
         self.domain_coordinate[domain] = f
         self.coordinates_arg = self._coefficient(f, "coords")
 
-    def set_coefficients(self, integral_data, form_data):
+    def set_coefficients(self, coefficients):
         """Prepare the coefficients of the form.
 
-        :arg integral_data: UFL integral data
-        :arg form_data: UFL form data
+        :arg coefficients: a tuple of `ufl.Coefficient`s.
         """
-        # enabled_coefficients is a boolean array that indicates which
-        # of reduced_coefficients the integral requires.
-        enabled = integral_data.enabled_coefficients
-        functions = tuple(form_data.reduced_coefficients[i]
-                             for i, ea in enumerate(enabled) if ea)
-        # This is which coefficient in the original form the
-        # current coefficient is.
-        # Consider f*v*dx + g*v*ds, the full form contains two
-        # coefficients, but each integral only requires one.
-        coefficient_numbers = tuple(form_data.original_coefficient_positions[i]
-                               for i, ea in enumerate(enabled) if ea)
-        replace_map = form_data.function_replace_map
         coeffs = []
-        for f in functions:
-            c = replace_map[f]
+        for c in coefficients:
             if type(c.ufl_element()) == ufl_MixedElement:
-                if f in self.dont_split:
+                if c in self.dont_split:
                     coeffs.append(c)
                     self.coefficient_split[c] = [c]
                 else:
@@ -294,46 +281,38 @@ class KernelBuilder(KernelBuilderBase):
                 coeffs.append(c)
         for i, c in enumerate(coeffs):
             self.coefficient_args.append(self._coefficient(c, "w_%d" % i))
+
+    def set_coefficient_numbers(self, coefficient_numbers):
         self.kernel.coefficient_numbers = coefficient_numbers
 
-    def set_subspaces(self, integral_data, form_data):
+    def set_subspaces(self, subspaces, originals):
         """Prepare the subspaces of the form.
 
         :arg integral_data: UFL integral data
         :arg form_data: UFL form data
         """
         objects = []
-        object_numbers = []
         matrix_constructors = []
-        # enabled_subspaces is a boolean array that indicates which
-        # of reduced_subspaces the integral requires.
-        enabled_objects = integral_data.enabled_subspaces
-        reduced_objects = form_data.reduced_subspaces
-        replace_map = form_data.subspace_replace_map
-        for i in range(len(enabled_objects)):
-            if enabled_objects[i]:
-                original = reduced_objects[i]
-                obj = replace_map[original]
-                if type(obj.ufl_element()) == ufl_MixedElement:
-                    if original in self.dont_split:
-                        objects.append(obj)
-                        self.subspace_split[obj] = [obj]
-                        matrix_constructors.append(original.transform_matrix)
-                    else:
-                        split = [Subspace(FunctionSpace(obj.ufl_domain(), element))
-                                 for element in obj.ufl_element().sub_elements()]
-                        objects.extend(split)
-                        self.subspace_split[obj] = split
-                        matrix_constructors.extend([original.transform_matrix for _ in split])
-                else:
+        for obj, original in zip(subspaces, originals):
+            if type(obj.ufl_element()) == ufl_MixedElement:
+                if obj in self.dont_split:
                     objects.append(obj)
+                    self.subspace_split[obj] = [obj]
                     matrix_constructors.append(original.transform_matrix)
-                # This is which subspace in the original form the
-                # current subspace is.
-                object_numbers.append(form_data.original_subspace_positions[i])
+                else:
+                    split = [Subspace(FunctionSpace(obj.ufl_domain(), element))
+                             for element in obj.ufl_element().sub_elements()]
+                    objects.extend(split)
+                    self.subspace_split[obj] = split
+                    matrix_constructors.extend([original.transform_matrix for _ in split])
+            else:
+                objects.append(obj)
+                matrix_constructors.append(original.transform_matrix)
         for i, obj in enumerate(objects):
             self.subspace_args.append(self._subspace(obj, "r_%d" % i, matrix_constructors[i]))
-        self.kernel.subspace_numbers = tuple(object_numbers)
+
+    def set_subspace_numbers(self, object_numbers):
+        self.kernel.subspace_numbers = object_numbers
         # TODO: Remove redundant components by appropriately setting this.
         # For now, this is only necessary for 'subspace' to deal with
         # splitting of arguments.
