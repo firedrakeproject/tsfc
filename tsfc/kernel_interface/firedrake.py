@@ -100,7 +100,7 @@ class KernelBuilderBase(_KernelBuilderBase):
         :arg name: coefficient name
         :returns: COFFEE function argument for the coefficient
         """
-        funarg, expression = prepare_coefficient_subspace(coefficient, name, self.scalar_type, interior_facet=self.interior_facet)
+        funarg, expression = prepare_coefficient(coefficient.ufl_element(), name, self.scalar_type, interior_facet=self.interior_facet)
         self.coefficient_map[coefficient] = expression
         return funarg
 
@@ -112,7 +112,7 @@ class KernelBuilderBase(_KernelBuilderBase):
         :arg name: subspace name
         :returns: COFFEE function argument for the subspace
         """
-        funarg, expression = prepare_coefficient_subspace(subspace, name, self.scalar_type, interior_facet=self.interior_facet)
+        funarg, expression = prepare_coefficient(subspace.ufl_element(), name, self.scalar_type, interior_facet=self.interior_facet)
         if not self.interior_facet:
             self.subspace_map[subspace] = matrix_constructor(subspace.ufl_function_space().ufl_element(), expression, self.scalar_type)
         else:
@@ -137,7 +137,7 @@ class KernelBuilderBase(_KernelBuilderBase):
             # topological_dimension is 0 and the concept of "cell size"
             # is not useful for a vertex.
             f = Coefficient(FunctionSpace(domain, FiniteElement("P", domain.ufl_cell(), 1)))
-            funarg, expression = prepare_coefficient_subspace(f, "cell_sizes", self.scalar_type, interior_facet=self.interior_facet)
+            funarg, expression = prepare_coefficient(f.ufl_element(), "cell_sizes", self.scalar_type, interior_facet=self.interior_facet)
             self.cell_sizes_arg = funarg
             self._cell_sizes = expression
 
@@ -439,32 +439,32 @@ def check_requirements(ir):
     return cell_orientations, cell_sizes, tuple(sorted(rt_tabs.items()))
 
 
-def prepare_coefficient_subspace(obj, name, scalar_type, interior_facet=False):
+def prepare_coefficient(ufl_element, name, scalar_type, interior_facet=False):
     """Bridges the kernel interface and the GEM abstraction for
-    Coefficients/Subspace.
+    Coefficients.
 
-    :arg obj: UFL Coefficient/Subspace
-    :arg name: unique name to refer to the Coefficient/Subspace in the kernel
+    :arg ufl_element: UFL element
+    :arg name: unique name to refer to the Coefficient in the kernel
     :arg interior_facet: interior facet integral?
     :returns: (funarg, expression)
          funarg     - :class:`coffee.Decl` function argument
-         expression - GEM expression referring to the Coefficient/Subspace
+         expression - GEM expression referring to the Coefficient
                       values
     """
     assert isinstance(interior_facet, bool)
 
-    if obj.ufl_element().family() == 'Real':
+    if ufl_element.family() == 'Real':
         # Constant
         funarg = coffee.Decl(scalar_type, coffee.Symbol(name),
                              pointers=[("restrict",)],
                              qualifiers=["const"])
 
         expression = gem.reshape(gem.Variable(name, (None,)),
-                                 obj.ufl_shape)
+                                 ufl_element.value_shape())
 
         return funarg, expression
 
-    finat_element = create_element(obj.ufl_element())
+    finat_element = create_element(ufl_element)
     shape = finat_element.index_shape
     size = numpy.prod(shape, dtype=int)
 
