@@ -1,3 +1,7 @@
+import operator
+from functools import reduce
+from itertools import chain
+
 import numpy
 
 import coffee.base as coffee
@@ -5,7 +9,9 @@ import coffee.base as coffee
 import gem
 
 from gem.utils import cached_property
+import gem.impero_utils as impero_utils
 
+from tsfc import fem, ufl_utils
 from tsfc.kernel_interface import KernelInterface
 
 
@@ -121,3 +127,56 @@ class KernelBuilderBase(KernelInterface):
         """
         # Nothing is required by default
         pass
+
+
+class KernelBuilderMixin(object):
+
+    def compile_ufl(self, integrand, **config):
+        if self.coefficient_split:
+            # ---- Split coefficient along with filters here
+            integrand = ufl_utils.split_coefficients(integrand, self.coefficient_split, self.subspace_split)
+        integrand = ufl_utils.split_subspaces(integrand, self.subspace_split)
+        # Compile: ufl -> gem
+        return fem.compile_ufl(integrand,
+                               interior_facet=self.interior_facet,
+                               **config)
+
+    def compile_gem(self, mode_irs, quadrature_indices, index_cache):
+        # Finalise mode representations into a set of assignments
+        assignments = []
+        for mode, var_reps in mode_irs.items():
+            assignments.extend(mode.flatten(var_reps.items(), index_cache))
+
+        if assignments:
+            return_variables, expressions = zip(*assignments)
+        else:
+            return_variables = []
+            expressions = []
+
+        # Need optimised roots
+        options = dict(reduce(operator.and_,
+                              [mode.finalise_options.items()
+                               for mode in mode_irs.keys()]))
+        expressions = impero_utils.preprocess_gem(expressions, **options)
+
+        # Let the kernel interface inspect the optimised IR to register
+        # what kind of external data is required (e.g., cell orientations,
+        # cell sizes, etc.).
+        self.register_requirements(expressions)
+
+        # Construct ImperoC
+        assignments = list(zip(return_variables, expressions))
+        index_ordering = _get_index_ordering(quadrature_indices, return_variables)
+        try:
+            impero_c = impero_utils.compile_gem(assignments, index_ordering, remove_zeros=True)
+        except impero_utils.NoopError:
+            impero_c = None
+        return impero_c
+
+
+def _get_index_ordering(quadrature_indices, return_variables):
+    split_argument_indices = tuple(chain(*[var.index_ordering()
+                                           for var in return_variables]))
+    return tuple(quadrature_indices) + split_argument_indices
+
+

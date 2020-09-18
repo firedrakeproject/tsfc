@@ -183,38 +183,46 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
                         diagonal=diagonal,
                         integral_data=integral_data)
 
-    # Form specific setups
-    return_variables = builder.set_arguments(form_data.arguments, form_data.argument_multiindices)
-    kernel_cfg = get_kernel_cfg(builder, integral_data.domain, integral_data.integral_type, form_data.argument_multiindices, form_data.argument_multiindices_dummy, parameters["scalar_type"])
+    # The followings are specific for the concrete form representation, so
+    # not to be saved in KernelBuilders.
+    return_variables = builder.set_arguments(form_data.arguments,
+                                             form_data.argument_multiindices)
+    fem_config = get_fem_config(builder,
+                                integral_data.domain,
+                                integral_data.integral_type,
+                                form_data.argument_multiindices,
+                                form_data.argument_multiindices_dummy,
+                                parameters["scalar_type"])
+    # All form specific variables (such as arguments) are stored in kernel_config (not in KernelBuilder instance).
+    kernel_config = dict(fem_config=fem_config,
+                         quadrature_indices=[])
     functions = list(form_data.arguments) + [builder.coordinate(integral_data.domain)] + list(integral_data.integral_coefficients)
 
     mode_irs = collections.OrderedDict()
-    quadrature_indices = []
     for integral in integral_data.integrals:
         params = parameters.copy()
         params.update(integral.metadata())  # integral metadata overrides
         # Set quad_rule
-        quad_rule = get_quad_rule(integral_data.domain.ufl_cell(), integral_data.integral_type, params, functions)
-        quadrature_multiindex = quad_rule.point_set.indices
-        quadrature_indices.extend(quadrature_multiindex)
+        set_quad_rule(params, integral_data.domain.ufl_cell(), integral_data.integral_type, functions)
+        kernel_config['quadrature_indices'].extend(params["quadrature_multiindex"])
         # Set config
-        config = kernel_cfg.copy()
-        config.update(quadrature_rule=quad_rule)
-        # Preprocess integrand
+        config = kernel_config['fem_config'].copy()
+        config.update(quadrature_rule=params["quadrature_rule"])
+        # Compile integrands
         expressions = builder.compile_ufl(integral.integrand(), **config)
         # Replace dummy argument multiindices
-        expressions = replace_argument_multiindices_dummy(expressions, form_data.argument_multiindices, form_data.argument_multiindices_dummy)
+        expressions = replace_argument_multiindices_dummy(expressions, kernel_config)
         mode = pick_mode(params["mode"])
-        reps = mode.Integrals(expressions, quadrature_multiindex, form_data.argument_multiindices, params)
+        reps = mode.Integrals(expressions, params["quadrature_multiindex"], form_data.argument_multiindices, params)
         mode_irs.setdefault(mode, collections.OrderedDict())
         for var, rep in zip(return_variables, reps):
             mode_irs[mode].setdefault(var, []).append(rep)
 
-    impero_c = builder.compile_gem(mode_irs, quadrature_indices, kernel_cfg['index_cache'])
+    impero_c = builder.compile_gem(mode_irs, kernel_config['quadrature_indices'], kernel_config['fem_config']['index_cache'])
 
     kernel_name = "%s_%s_integral_%s" % (prefix, integral_data.integral_type, integral_data.subdomain_id)
     kernel_name = kernel_name.replace("-", "_")  # Handle negative subdomain_id
-    kernel = builder.construct_kernel(kernel_name, impero_c, quadrature_indices, form_data.argument_multiindices, kernel_cfg['index_cache'])
+    kernel = builder.construct_kernel(kernel_name, impero_c, kernel_config)
     return kernel
 
 
@@ -233,7 +241,7 @@ def preprocess_parameters(parameters):
     return parameters
 
 
-def get_kernel_cfg(builder, mesh, integral_type, argument_multiindices, argument_multiindices_dummy, scalar_type):
+def get_fem_config(builder, mesh, integral_type, argument_multiindices, argument_multiindices_dummy, scalar_type):
     # Map from UFL FiniteElement objects to multiindices.  This is
     # so we reuse Index instances when evaluating the same coefficient
     # multiple times with the same table.
@@ -245,7 +253,7 @@ def get_kernel_cfg(builder, mesh, integral_type, argument_multiindices, argument
     cell = mesh.ufl_cell()
     fiat_cell = as_fiat_cell(cell)
     integration_dim, entity_ids = lower_integral_type(fiat_cell, integral_type)
-    kernel_cfg = dict(interface=builder,
+    fem_config = dict(interface=builder,
                       ufl_cell=cell,
                       integral_type=integral_type,
                       integration_dim=integration_dim,
@@ -254,10 +262,10 @@ def get_kernel_cfg(builder, mesh, integral_type, argument_multiindices, argument
                       argument_multiindices_dummy=argument_multiindices_dummy,
                       index_cache={},
                       scalar_type=scalar_type)
-    return kernel_cfg
+    return fem_config
 
 
-def get_quad_rule(cell, integral_type, params, functions):
+def set_quad_rule(params, cell, integral_type, functions):
     # Check if the integral has a quad degree attached, otherwise use
     # the estimated polynomial degree attached by compute_form_data
     try:
@@ -280,12 +288,13 @@ def get_quad_rule(cell, integral_type, params, functions):
         integration_dim, _ = lower_integral_type(fiat_cell, integral_type)
         integration_cell = fiat_cell.construct_subelement(integration_dim)
         quad_rule = make_quadrature(integration_cell, quadrature_degree)
+        params["quadrature_rule"] = quad_rule
 
     if not isinstance(quad_rule, AbstractQuadratureRule):
         raise ValueError("Expected to find a QuadratureRule object, not a %s" %
                          type(quad_rule))
-    return quad_rule
 
+    params["quadrature_multiindex"] = quad_rule.point_set.indices
 
 def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
                                        domain=None, interface=None,
@@ -522,21 +531,22 @@ def pick_mode(mode):
     return m
 
 
-def replace_argument_multiindices_dummy(expressions, argument_multiindices, argument_multiindices_dummy):
+def replace_argument_multiindices_dummy(expressions, kernel_config):
     r"""Replace dummy indices with true argument multiindices.
     
     :arg expressions: gem expressions written in terms of argument_multiindices_dummy.
-    :arg argument_multiindices: True argument multiindices.
-    :arg argument_multiindices_dummy: Dummy argument multiindices.
+    :arg kernel_config:
 
     Applying `Delta(i, i_dummy)` and then `IndexSum(..., i_dummy)` would result in
     too many `IndexSum`s and `gem.optimise.contraction` would complain.
     Here, instead, we use filtered_replace_indices to directly replace dummy argument
     multiindices with true ones.
     """
+    # True/dummy argument multiindices.
+    argument_multiindices = kernel_config['fem_config']['argument_multiindices']
+    argument_multiindices_dummy = kernel_config['fem_config']['argument_multiindices_dummy']
     if argument_multiindices_dummy == argument_multiindices:
         return expressions
-
     substitution = tuple(zip(chain(*argument_multiindices_dummy), chain(*argument_multiindices)))
     mapper = MemoizerArg(filtered_replace_indices)
     return tuple(mapper(expr, substitution) for expr in expressions)

@@ -12,6 +12,7 @@ from finat import TensorFiniteElement
 import ufl
 
 from tsfc.kernel_interface.common import KernelBuilderBase
+from tsfc.kernel_interface.common import KernelBuilderMixin
 from tsfc.finatinterface import create_element as _create_element
 
 
@@ -19,14 +20,14 @@ from tsfc.finatinterface import create_element as _create_element
 create_element = functools.partial(_create_element, shape_innermost=False)
 
 
-class KernelBuilder(KernelBuilderBase):
+class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
     """Helper class for building a :class:`Kernel` object."""
 
     def __init__(self, integral_type, subdomain_id, domain_number, scalar_type=None, diagonal=False):
         """Initialise a kernel builder."""
         if diagonal:
             raise NotImplementedError("Assembly of diagonal not implemented yet, sorry")
-        super(KernelBuilder, self).__init__(scalar_type, integral_type.startswith("interior_facet"))
+        KernelBuilder.__init__(self, scalar_type, integral_type.startswith("interior_facet"))
         self.integral_type = integral_type
 
         self.local_tensor = None

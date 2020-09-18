@@ -12,13 +12,12 @@ import coffee.base as coffee
 import gem
 from gem.node import traversal
 from gem.optimise import remove_componenttensors as prune
-import gem.impero_utils as impero_utils
 
 import finat
 
-from tsfc import fem, ufl_utils
 from tsfc.finatinterface import create_element
 from tsfc.kernel_interface.common import KernelBuilderBase as _KernelBuilderBase
+from tsfc.kernel_interface.common import KernelBuilderMixin
 from tsfc.coffee import generate as generate_coffee
 
 
@@ -204,13 +203,13 @@ class ExpressionKernelBuilder(KernelBuilderBase):
         return ExpressionKernel(kernel_code, self.oriented, self.cell_sizes, self.coefficients, self.tabulations)
 
 
-class KernelBuilder(KernelBuilderBase):
+class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
     """Helper class for building a :class:`Kernel` object."""
 
     def __init__(self, integral_type, subdomain_id, domain_number, scalar_type,
                  dont_split=(), function_replace_map={}, diagonal=False, integral_data=None):
         """Initialise a kernel builder."""
-        super(KernelBuilder, self).__init__(scalar_type, integral_type.startswith("interior_facet"))
+        KernelBuilderBase.__init__(self, scalar_type, integral_type.startswith("interior_facet"))
 
         self.kernel = Kernel(integral_type=integral_type, subdomain_id=subdomain_id,
                              domain_number=domain_number)
@@ -330,49 +329,7 @@ class KernelBuilder(KernelBuilderBase):
         knl = self.kernel
         knl.oriented, knl.needs_cell_sizes, knl.tabulations = check_requirements(ir)
 
-    def compile_ufl(self, integrand, **config):
-        # ---- Split coefficient along with filters here
-        integrand = ufl_utils.split_coefficients(integrand, self.coefficient_split, self.subspace_split)
-        # ---- Split rest of the topological coefficients
-        integrand = ufl_utils.split_subspaces(integrand, self.subspace_split)
-        # Compile: ufl -> gem
-        return fem.compile_ufl(integrand,
-                               interior_facet=self.interior_facet,
-                               **config)
-
-    def compile_gem(self, mode_irs, quadrature_indices, index_cache):
-        # Finalise mode representations into a set of assignments
-        assignments = []
-        for mode, var_reps in mode_irs.items():
-            assignments.extend(mode.flatten(var_reps.items(), index_cache))
-
-        if assignments:
-            return_variables, expressions = zip(*assignments)
-        else:
-            return_variables = []
-            expressions = []
-
-        # Need optimised roots
-        options = dict(reduce(operator.and_,
-                              [mode.finalise_options.items()
-                               for mode in mode_irs.keys()]))
-        expressions = impero_utils.preprocess_gem(expressions, **options)
-
-        # Let the kernel interface inspect the optimised IR to register
-        # what kind of external data is required (e.g., cell orientations,
-        # cell sizes, etc.).
-        self.register_requirements(expressions)
-
-        # Construct ImperoC
-        assignments = list(zip(return_variables, expressions))
-        index_ordering = _get_index_ordering(quadrature_indices, return_variables)
-        try:
-            impero_c = impero_utils.compile_gem(assignments, index_ordering, remove_zeros=True)
-        except impero_utils.NoopError:
-            impero_c = None
-        return impero_c
-
-    def construct_kernel(self, name, impero_c, quadrature_indices, argument_multiindices, index_cache):
+    def construct_kernel(self, name, impero_c, kernel_config):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument
@@ -387,6 +344,9 @@ class KernelBuilder(KernelBuilderBase):
         if impero_c is None:
             return self.construct_empty_kernel(name)
 
+        quadrature_indices = kernel_config['quadrature_indices']
+        argument_multiindices = kernel_config['fem_config']['argument_multiindices']
+        index_cache = kernel_config['fem_config']['index_cache']
         index_names = _get_index_names(quadrature_indices, argument_multiindices, index_cache)
 
         body = generate_coffee(impero_c, index_names, self.scalar_type)
@@ -545,12 +505,6 @@ cell_orientations_coffee_arg = coffee.Decl("int", coffee.Symbol("cell_orientatio
                                            pointers=[("restrict",)],
                                            qualifiers=["const"])
 """COFFEE function argument for cell orientations"""
-
-
-def _get_index_ordering(quadrature_indices, return_variables):
-    split_argument_indices = tuple(chain(*[var.index_ordering()
-                                           for var in return_variables]))
-    return tuple(quadrature_indices) + split_argument_indices
 
 
 def _get_index_names(quadrature_indices, argument_multiindices, index_cache):
