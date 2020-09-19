@@ -1,3 +1,4 @@
+import collections
 import operator
 from functools import reduce
 from itertools import chain
@@ -131,18 +132,27 @@ class KernelBuilderBase(KernelInterface):
 
 class KernelBuilderMixin(object):
 
-    def compile_ufl(self, integrand, **config):
+    def compile_ufl(self, integrand, params, kernel_config):
+        # Split Coefficients
         if self.coefficient_split:
-            # ---- Split coefficient along with filters here
             integrand = ufl_utils.split_coefficients(integrand, self.coefficient_split, self.subspace_split)
         integrand = ufl_utils.split_subspaces(integrand, self.subspace_split)
         # Compile: ufl -> gem
-        return fem.compile_ufl(integrand,
-                               interior_facet=self.interior_facet,
-                               **config)
+        quad_rule = params["quadrature_rule"]
+        config = kernel_config['fem_config'].copy()
+        config.update(quadrature_rule=quad_rule)
+        expressions = fem.compile_ufl(integrand,
+                                      interior_facet=self.interior_facet,
+                                      **config)
+        kernel_config['quadrature_indices'].extend(quad_rule.point_set.indices)
+        return expressions
 
-    def compile_gem(self, mode_irs, quadrature_indices, index_cache):
+    def compile_gem(self, kernel_config):
         # Finalise mode representations into a set of assignments
+        mode_irs = kernel_config["mode_irs"]
+        quadrature_indices = kernel_config['quadrature_indices']
+        index_cache = kernel_config['fem_config']['index_cache']
+
         assignments = []
         for mode, var_reps in mode_irs.items():
             assignments.extend(mode.flatten(var_reps.items(), index_cache))
@@ -162,7 +172,10 @@ class KernelBuilderMixin(object):
         # Let the kernel interface inspect the optimised IR to register
         # what kind of external data is required (e.g., cell orientations,
         # cell sizes, etc.).
-        self.register_requirements(expressions)
+        oriented, needs_cell_sizes, tabulations = self.register_requirements(expressions)
+        kernel_config['oriented'] = oriented
+        kernel_config['needs_cell_sizes'] = needs_cell_sizes
+        kernel_config['tabulations'] =tabulations
 
         # Construct ImperoC
         assignments = list(zip(return_variables, expressions))
@@ -173,6 +186,21 @@ class KernelBuilderMixin(object):
             impero_c = None
         return impero_c
 
+    def construct_integrals(self, expressions, params, kernel_config):
+        mode = pick_mode(params["mode"])
+        return mode.Integrals(expressions,
+                              params["quadrature_rule"].point_set.indices,
+                              kernel_config['fem_config']['argument_multiindices'],
+                              params)
+
+    def stash_integrals(self, reps, params, kernel_config):
+        mode = pick_mode(params["mode"])
+        mode_irs = kernel_config["mode_irs"]
+        return_variables = kernel_config['return_variables']
+        mode_irs.setdefault(mode, collections.OrderedDict())
+        for var, rep in zip(return_variables, reps):
+            mode_irs[mode].setdefault(var, []).append(rep)
+
 
 def _get_index_ordering(quadrature_indices, return_variables):
     split_argument_indices = tuple(chain(*[var.index_ordering()
@@ -180,3 +208,26 @@ def _get_index_ordering(quadrature_indices, return_variables):
     return tuple(quadrature_indices) + split_argument_indices
 
 
+def pick_mode(mode):
+    "Return one of the specialized optimisation modules from a mode string."
+    try:
+        from firedrake_citations import Citations
+        cites = {"vanilla": ("Homolya2017", ),
+                 "coffee": ("Luporini2016", "Homolya2017", ),
+                 "spectral": ("Luporini2016", "Homolya2017", "Homolya2017a"),
+                 "tensor": ("Kirby2006", "Homolya2017", )}
+        for c in cites[mode]:
+            Citations().register(c)
+    except ImportError:
+        pass
+    if mode == "vanilla":
+        import tsfc.vanilla as m
+    elif mode == "coffee":
+        import tsfc.coffee_mode as m
+    elif mode == "spectral":
+        import tsfc.spectral as m
+    elif mode == "tensor":
+        import tsfc.tensor as m
+    else:
+        raise ValueError("Unknown mode: {}".format(mode))
+    return m

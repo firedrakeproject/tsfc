@@ -213,10 +213,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         """Initialise a kernel builder."""
         KernelBuilderBase.__init__(self, scalar_type, integral_type.startswith("interior_facet"))
 
-        self.kernel = Kernel(integral_type=integral_type, subdomain_id=subdomain_id,
-                             domain_number=domain_number)
         self.diagonal = diagonal
-        self.local_tensor = None
         self.coordinates_arg = None
         self.coefficient_args = []
         self.coefficient_split = {}
@@ -242,21 +239,21 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
             self.set_coordinates(integral_data.domain)
             self.set_cell_sizes(integral_data.domain)
             self.set_coefficients(integral_data.coefficients)
-            self.set_coefficient_numbers(integral_data.coefficient_numbers)
             self.set_subspaces(integral_data.subspaces, integral_data.original_subspaces)
-            self.set_subspace_numbers(integral_data.subspace_numbers)
 
-    def set_arguments(self, arguments, multiindices):
+    def set_arguments(self, arguments, multiindices, kernel_config):
         """Process arguments.
 
         :arg arguments: :class:`ufl.Argument`s
         :arg multiindices: GEM argument multiindices
         :returns: GEM expression representing the return variable
         """
-        self.local_tensor, expressions = prepare_arguments(
-            arguments, multiindices, self.scalar_type, interior_facet=self.interior_facet,
-            diagonal=self.diagonal)
-        return expressions
+        local_tensor, return_variables = prepare_arguments(
+                                             arguments, multiindices, self.scalar_type,
+                                             interior_facet=self.interior_facet,
+                                             diagonal=self.diagonal)
+        kernel_config['local_tensor'] = local_tensor
+        kernel_config['return_variables'] = return_variables
 
     def set_coordinates(self, domain):
         """Prepare the coordinate field.
@@ -289,9 +286,6 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         for i, c in enumerate(coeffs):
             self.coefficient_args.append(self._coefficient(c, "w_%d" % i))
 
-    def set_coefficient_numbers(self, coefficient_numbers):
-        self.kernel.coefficient_numbers = coefficient_numbers
-
     def set_subspaces(self, subspaces, originals):
         """Prepare the subspaces of the form.
 
@@ -318,20 +312,12 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         for i, obj in enumerate(objects):
             self.subspace_args.append(self._subspace(obj, "r_%d" % i, matrix_constructors[i]))
 
-    def set_subspace_numbers(self, object_numbers):
-        self.kernel.subspace_numbers = object_numbers
-        # TODO: Remove redundant components by appropriately setting this.
-        # For now, this is only necessary for 'subspace' to deal with
-        # splitting of arguments.
-        self.kernel.subspace_parts = [None for _ in self.kernel.subspace_numbers]
-
     def register_requirements(self, ir):
         """Inspect what is referenced by the IR that needs to be
         provided by the kernel interface."""
-        knl = self.kernel
-        knl.oriented, knl.needs_cell_sizes, knl.tabulations = check_requirements(ir)
+        return check_requirements(ir)
 
-    def construct_kernel(self, name, impero_c, kernel_config):
+    def construct_kernel(self, kernel_config):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument
@@ -342,30 +328,49 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         :arg index_names: pre-assigned index names
         :returns: :class:`Kernel` object
         """
+        name = kernel_config['name']
+
+        impero_c = self.compile_gem(kernel_config)
+
         if impero_c is None:
             return self.construct_empty_kernel(name)
+
+        kernel = Kernel(integral_type=kernel_config['integral_type'],
+                        subdomain_id=kernel_config['subdomain_id'],
+                        domain_number=kernel_config['domain_number'])
 
         quadrature_indices = kernel_config['quadrature_indices']
         argument_multiindices = kernel_config['fem_config']['argument_multiindices']
         index_cache = kernel_config['fem_config']['index_cache']
         index_names = _get_index_names(quadrature_indices, argument_multiindices, index_cache)
 
-        args = [self.local_tensor, self.coordinates_arg]
-        if self.kernel.oriented:
+        kernel.coefficient_numbers = kernel_config['coefficient_numbers']
+        kernel.subspace_numbers = kernel_config['subspace_numbers']
+        kernel.subspace_parts = kernel_config['subspace_parts']
+
+        # requirements
+        kernel.oriented = kernel_config['oriented']
+        kernel.needs_cell_sizes = kernel_config['needs_cell_sizes']
+        kernel.tabulations = kernel_config['tabulations']
+
+        local_tensor = kernel_config['local_tensor']
+
+        args = [local_tensor, self.coordinates_arg]
+        if kernel.oriented:
             args.append(self.cell_orientations_loopy_arg)
-        if self.kernel.needs_cell_sizes:
+        if kernel.needs_cell_sizes:
             args.append(self.cell_sizes_arg)
         args.extend(self.coefficient_args + self.subspace_args)
-        if self.kernel.integral_type in ["exterior_facet", "exterior_facet_vert"]:
+        if kernel.integral_type in ["exterior_facet", "exterior_facet_vert"]:
             args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(1,)))
-        elif self.kernel.integral_type in ["interior_facet", "interior_facet_vert"]:
+        elif kernel.integral_type in ["interior_facet", "interior_facet_vert"]:
             args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(2,)))
 
-        for name_, shape in self.kernel.tabulations:
+        for name_, shape in kernel.tabulations:
             args.append(lp.GlobalArg(name_, dtype=self.scalar_type, shape=shape))
 
-        self.kernel.ast = generate_loopy(impero_c, args, self.scalar_type, name, index_names)
-        return self.kernel
+        kernel.ast = generate_loopy(impero_c, args, self.scalar_type, name, index_names)
+        return kernel
 
     def construct_empty_kernel(self, name):
         """Return None, since Firedrake needs no empty kernels.

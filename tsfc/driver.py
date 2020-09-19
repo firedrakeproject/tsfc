@@ -183,47 +183,26 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
                         diagonal=diagonal,
                         integral_data=integral_data)
 
+    # All form specific variables (such as arguments) are stored in kernel_config (not in KernelBuilder instance).
+    kernel_name = "%s_%s_integral_%s" % (prefix, integral_data.integral_type, integral_data.subdomain_id)
+    kernel_name = kernel_name.replace("-", "_")  # Handle negative subdomain_id
+    kernel_config = create_kernel_config(form_data, integral_data, parameters, builder, kernel_name)
     # The followings are specific for the concrete form representation, so
     # not to be saved in KernelBuilders.
-    return_variables = builder.set_arguments(form_data.arguments,
-                                             form_data.argument_multiindices)
-    fem_config = get_fem_config(builder,
-                                integral_data.domain,
-                                integral_data.integral_type,
-                                form_data.argument_multiindices,
-                                form_data.argument_multiindices_dummy,
-                                parameters["scalar_type"])
-    # All form specific variables (such as arguments) are stored in kernel_config (not in KernelBuilder instance).
-    kernel_config = dict(fem_config=fem_config,
-                         quadrature_indices=[])
+    builder.set_arguments(form_data.arguments,
+                          form_data.argument_multiindices,
+                          kernel_config)
     functions = list(form_data.arguments) + [builder.coordinate(integral_data.domain)] + list(integral_data.integral_coefficients)
 
-    mode_irs = collections.OrderedDict()
     for integral in integral_data.integrals:
         params = parameters.copy()
         params.update(integral.metadata())  # integral metadata overrides
-        # Set quad_rule
         set_quad_rule(params, integral_data.domain.ufl_cell(), integral_data.integral_type, functions)
-        kernel_config['quadrature_indices'].extend(params["quadrature_multiindex"])
-        # Set config
-        config = kernel_config['fem_config'].copy()
-        config.update(quadrature_rule=params["quadrature_rule"])
-        # Compile integrands
-        expressions = builder.compile_ufl(integral.integrand(), **config)
-        # Replace dummy argument multiindices
+        expressions = builder.compile_ufl(integral.integrand(), params, kernel_config)
         expressions = replace_argument_multiindices_dummy(expressions, kernel_config)
-        mode = pick_mode(params["mode"])
-        reps = mode.Integrals(expressions, params["quadrature_multiindex"], form_data.argument_multiindices, params)
-        mode_irs.setdefault(mode, collections.OrderedDict())
-        for var, rep in zip(return_variables, reps):
-            mode_irs[mode].setdefault(var, []).append(rep)
-
-    impero_c = builder.compile_gem(mode_irs, kernel_config['quadrature_indices'], kernel_config['fem_config']['index_cache'])
-
-    kernel_name = "%s_%s_integral_%s" % (prefix, integral_data.integral_type, integral_data.subdomain_id)
-    kernel_name = kernel_name.replace("-", "_")  # Handle negative subdomain_id
-    kernel = builder.construct_kernel(kernel_name, impero_c, kernel_config)
-    return kernel
+        reps = builder.construct_integrals(expressions, params, kernel_config)
+        builder.stash_integrals(reps, params, kernel_config)
+    return builder.construct_kernel(kernel_config)
 
 
 def preprocess_parameters(parameters):
@@ -241,7 +220,27 @@ def preprocess_parameters(parameters):
     return parameters
 
 
-def get_fem_config(builder, mesh, integral_type, argument_multiindices, argument_multiindices_dummy, scalar_type):
+def create_kernel_config(form_data, integral_data, parameters, builder, name):
+    fem_config = create_fem_config(builder,
+                                integral_data.domain,
+                                integral_data.integral_type,
+                                form_data.argument_multiindices,
+                                form_data.argument_multiindices_dummy,
+                                parameters["scalar_type"])
+    kernel_config = dict(name=name,
+                         integral_type=integral_data.integral_type,
+                         subdomain_id=integral_data.subdomain_id,
+                         domain_number=integral_data.domain_number,
+                         coefficient_numbers=integral_data.coefficient_numbers,
+                         subspace_numbers=integral_data.subspace_numbers,
+                         subspace_parts=[None for _ in integral_data.subspace_numbers],
+                         fem_config=fem_config,
+                         quadrature_indices=[],
+                         mode_irs=collections.OrderedDict())
+    return kernel_config
+
+
+def create_fem_config(builder, mesh, integral_type, argument_multiindices, argument_multiindices_dummy, scalar_type):
     # Map from UFL FiniteElement objects to multiindices.  This is
     # so we reuse Index instances when evaluating the same coefficient
     # multiple times with the same table.
@@ -294,7 +293,6 @@ def set_quad_rule(params, cell, integral_type, functions):
         raise ValueError("Expected to find a QuadratureRule object, not a %s" %
                          type(quad_rule))
 
-    params["quadrature_multiindex"] = quad_rule.point_set.indices
 
 def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
                                        domain=None, interface=None,
@@ -504,31 +502,6 @@ def lower_integral_type(fiat_cell, integral_type):
         entity_ids = list(range(len(fiat_cell.get_topology()[integration_dim])))
 
     return integration_dim, entity_ids
-
-
-def pick_mode(mode):
-    "Return one of the specialized optimisation modules from a mode string."
-    try:
-        from firedrake_citations import Citations
-        cites = {"vanilla": ("Homolya2017", ),
-                 "coffee": ("Luporini2016", "Homolya2017", ),
-                 "spectral": ("Luporini2016", "Homolya2017", "Homolya2017a"),
-                 "tensor": ("Kirby2006", "Homolya2017", )}
-        for c in cites[mode]:
-            Citations().register(c)
-    except ImportError:
-        pass
-    if mode == "vanilla":
-        import tsfc.vanilla as m
-    elif mode == "coffee":
-        import tsfc.coffee_mode as m
-    elif mode == "spectral":
-        import tsfc.spectral as m
-    elif mode == "tensor":
-        import tsfc.tensor as m
-    else:
-        raise ValueError("Unknown mode: {}".format(mode))
-    return m
 
 
 def replace_argument_multiindices_dummy(expressions, kernel_config):
