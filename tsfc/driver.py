@@ -11,7 +11,7 @@ from numpy import asarray, allclose
 import ufl
 from ufl.algorithms import extract_arguments, extract_coefficients
 from ufl.algorithms.analysis import has_type
-from ufl.classes import Form, GeometricQuantity
+from ufl.classes import Form, GeometricQuantity, Coefficient
 from ufl.log import GREEN
 from ufl.utils.sequences import max_degree
 
@@ -42,24 +42,48 @@ class TSFCFormData(object):
     def __init__(self, form_data_tuple, original_form, diagonal):
 
         self.original_form = original_form
-        original_coefficients = original_form.coefficients()
         try:
             self.arguments, = set(tuple(fd.preprocessed_form.arguments()
                                         for fd in form_data_tuple))
         except ValueError:
             raise ValueError("All `FormData`s must share the same set of arguments.")
-        reduced_coefficients = tuple(set(tuple(c for fd in form_data_tuple for c in fd.reduced_coefficients)))
-        self.reduced_coefficients = form_data_tuple[0].reduced_coefficients
-        self.original_coefficient_positions = form_data_tuple[0].original_coefficient_positions
-        self.function_replace_map = form_data_tuple[0].function_replace_map
+        reduced_coefficients_set = tuple(set(c for fd in form_data_tuple for c in fd.reduced_coefficients))
+        reduced_coefficients = sorted(reduced_coefficients_set, key=lambda c: c.count())
+        function_replace_map = {}
+        for i, func in enumerate(reduced_coefficients):
+            for fd in form_data_tuple:
+                if func in fd.function_replace_map:
+                    coeff = fd.function_replace_map[func]
+                    new_coeff = Coefficient(coeff.ufl_function_space(), count=i)
+                    function_replace_map[func] = new_coeff
+                    break
+        self.reduced_coefficients = reduced_coefficients
+        self.original_coefficient_positions = [i for i, f in enumerate(self.original_form.coefficients())
+                                               if f in self.reduced_coefficients]
+        self.function_replace_map = function_replace_map
+        #self.reduced_coefficients = form_data_tuple[0].reduced_coefficients
+        #self.original_coefficient_positions = form_data_tuple[0].original_coefficient_positions
+        #self.function_replace_map = form_data_tuple[0].function_replace_map
 
         self.reduced_subspaces = form_data_tuple[0].reduced_subspaces
         self.original_subspace_positions = form_data_tuple[0].original_subspace_positions
         self.subspace_replace_map = form_data_tuple[0].subspace_replace_map
 
-        self.integral_data = tuple(TSFCIntegralData(integral_data, form_data_tuple[0])
+        self.integral_data = tuple(TSFCIntegralData(integral_data, form_data_tuple[0], self)
                                    for integral_data in form_data_tuple[0].integral_data)
 
+
+
+
+
+
+        # Use the consistent set of raw coefficients across `FormData`s.
+        #for fd in form_data_tuple:
+        #    integral_data = []
+        #    coeff_coeff_replace_map = dict(coeff=self.function_replace_map[func] for func, coeff in fd.function_replace_map.items())
+        #    for integ_data in fd.integral_data:
+        #        integral_data.append(ufl.replace(integrand, coeff_coeff_replace_map))
+                
 
 
 
@@ -72,38 +96,39 @@ class TSFCIntegralData(object):
     minimal set of data required by the `KernelBuilder`.
     Convenient when dealing with multiple `ufl.FormData`s.
     """
-    def __init__(self, integral_data, form_data):
+    def __init__(self, integral_data, form_data, tsfc_form_data):
         self.domain = integral_data.domain
         self.integral_type = integral_data.integral_type
         self.subdomain_id = integral_data.subdomain_id
-        self.domain_number = form_data.original_form.domain_numbering()[self.domain]
+        self.domain_number = tsfc_form_data.original_form.domain_numbering()[self.domain]
 
         integrals = []
         for integral in integral_data.integrals:
             integrand = integral.integrand()
-            integrand = ufl.replace(integrand, form_data.function_replace_map)
+            integrand = ufl.replace(integrand, tsfc_form_data.function_replace_map)
             integrand = ufl.replace(integrand, form_data.subspace_replace_map)
             integrals.append(integral.reconstruct(integrand=integrand))
         self.integrals = tuple(integrals)
 
         self.integral_coefficients = integral_data.integral_coefficients 
 
-        self.enabled_coefficients = integral_data.enabled_coefficients
-        self.enabled_subspaces = integral_data.enabled_subspaces
-
         # enabled_coefficients is a boolean array that indicates which
         # of reduced_coefficients the integral requires.
-        coefficients = tuple(c for c, enabled in zip(form_data.reduced_coefficients, self.enabled_coefficients) if enabled)
-        self.coefficients = tuple(form_data.function_replace_map[c] for c in coefficients)
-        subspaces = tuple(c for c, enabled in zip(form_data.reduced_subspaces, self.enabled_subspaces) if enabled)
+        functions = list(tuple(c for c, enabled in zip(form_data.reduced_coefficients, integral_data.enabled_coefficients) if enabled))
+        assert set(functions) == set(self.integral_coefficients)
+        self.coefficients = tuple(tsfc_form_data.function_replace_map[f] for f in functions)
+        #self.coefficient_numbers = tuple(pos for pos, enabled in zip(form_data.original_coefficient_positions, integral_data.enabled_coefficients) if enabled)
+        self.coefficient_numbers = tuple(tsfc_form_data.original_coefficient_positions[tsfc_form_data.reduced_coefficients.index(f)] for f in functions)
+
+
+        subspaces = tuple(c for c, enabled in zip(form_data.reduced_subspaces, integral_data.enabled_subspaces) if enabled)
         self.original_subspaces = subspaces
         self.subspaces = tuple(form_data.subspace_replace_map[c] for c in subspaces)
         # This is which coefficient in the original form the
         # current coefficient is.
         # Consider f*v*dx + g*v*ds, the full form contains two
         # coefficients, but each integral only requires one.
-        self.coefficient_numbers = tuple(pos for pos, enabled in zip(form_data.original_coefficient_positions, self.enabled_coefficients) if enabled)
-        self.subspace_numbers = tuple(pos for pos, enabled in zip(form_data.original_subspace_positions, self.enabled_subspaces) if enabled)
+        self.subspace_numbers = tuple(pos for pos, enabled in zip(form_data.original_subspace_positions, integral_data.enabled_subspaces) if enabled)
 
 
 def compile_form(form, prefix="form", parameters=None, interface=None, coffee=True, diagonal=False):
@@ -126,9 +151,9 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
     complex_mode = parameters and is_complex(parameters.get("scalar_type"))
 
     form_data = ufl_utils.compute_form_data(form, complex_mode=complex_mode)
-    form_data = TSFCFormData((form_data, ), form_data.original_form, diagonal)
     if interface:
         interface = partial(interface, function_replace_map=form_data.function_replace_map)
+    form_data = TSFCFormData((form_data, ), form_data.original_form, diagonal)
 
     logger.info(GREEN % "compute_form_data finished in %g seconds.", time.time() - cpu_time)
 
