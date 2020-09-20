@@ -38,9 +38,20 @@ sys.setrecursionlimit(3000)
 
 
 class TSFCFormData(object):
+    r"""Mimics `ufl.FormData`.
 
+    :arg form_data_tuple: A tuple of `ufl.FormData`s.
+    :arg original_form:
+    :diagonal:
+
+    This class mimics `ufl.FormData`, but:
+        * extracts information required by TSFC from given form_data(s).
+        * combines multiple form_datas associated with forms that
+          are obtained by splitting `original_form`. This is useful when
+          performing slightly different operations to split components
+          and combine to form a single kernel.
+    """
     def __init__(self, form_data_tuple, original_form, diagonal):
-
         self.original_form = original_form
         try:
             self.arguments, = set(tuple(fd.preprocessed_form.arguments()
@@ -49,52 +60,40 @@ class TSFCFormData(object):
             raise ValueError("All `FormData`s must share the same set of arguments.")
         reduced_coefficients_set = tuple(set(c for fd in form_data_tuple for c in fd.reduced_coefficients))
         reduced_coefficients = sorted(reduced_coefficients_set, key=lambda c: c.count())
-        function_replace_map = {}
-        for i, func in enumerate(reduced_coefficients):
-            for fd in form_data_tuple:
-                if func in fd.function_replace_map:
-                    coeff = fd.function_replace_map[func]
-                    new_coeff = Coefficient(coeff.ufl_function_space(), count=i)
-                    function_replace_map[func] = new_coeff
-                    break
-        self.reduced_coefficients = reduced_coefficients
-        self.original_coefficient_positions = [i for i, f in enumerate(self.original_form.coefficients())
+        if False:#len(form_data_tuple) == 1:
+            self.reduced_coefficients = form_data_tuple[0].reduced_coefficients
+            self.original_coefficient_positions = form_data_tuple[0].original_coefficient_positions
+            self.function_replace_map = form_data_tuple[0].function_replace_map
+        else:
+            function_replace_map = {}
+            for i, func in enumerate(reduced_coefficients):
+                for fd in form_data_tuple:
+                    if func in fd.function_replace_map:
+                        coeff = fd.function_replace_map[func]
+                        new_coeff = Coefficient(coeff.ufl_function_space(), count=i)
+                        function_replace_map[func] = new_coeff
+                        break
+            self.reduced_coefficients = reduced_coefficients
+            self.original_coefficient_positions = [i for i, f in enumerate(self.original_form.coefficients())
                                                if f in self.reduced_coefficients]
-        self.function_replace_map = function_replace_map
-        #self.reduced_coefficients = form_data_tuple[0].reduced_coefficients
-        #self.original_coefficient_positions = form_data_tuple[0].original_coefficient_positions
-        #self.function_replace_map = form_data_tuple[0].function_replace_map
-
+            self.function_replace_map = function_replace_map
+        # Subspace
         self.reduced_subspaces = form_data_tuple[0].reduced_subspaces
         self.original_subspace_positions = form_data_tuple[0].original_subspace_positions
         self.subspace_replace_map = form_data_tuple[0].subspace_replace_map
-
-        self.integral_data = tuple(TSFCIntegralData(integral_data, form_data_tuple[0], self)
-                                   for integral_data in form_data_tuple[0].integral_data)
-
-
-
-
-
-
-        # Use the consistent set of raw coefficients across `FormData`s.
-        #for fd in form_data_tuple:
-        #    integral_data = []
-        #    coeff_coeff_replace_map = dict(coeff=self.function_replace_map[func] for func, coeff in fd.function_replace_map.items())
-        #    for integ_data in fd.integral_data:
-        #        integral_data.append(ufl.replace(integrand, coeff_coeff_replace_map))
-                
-
 
 
 class TSFCIntegralData(object):
     r"""Mimics `ufl.IntegralData`.
 
-    :arg form_data_tuple: A tuple of `ufl.FormData`s.
+    :arg integral_data: a `ufl.IntegralData`.
+    :arg form_data: a `ufl.FormData`.
+    :arg tsfc_form_data: a `TSFCFormData`.
 
-    Simplify/preprocess/combine `ufl.IntegralData`s to a
-    minimal set of data required by the `KernelBuilder`.
-    Convenient when dealing with multiple `ufl.FormData`s.
+    This class mimics `ufl.FormData`, but:
+        * extracts information required by TSFC.
+        * preprocesses integrals so that `KernelBuilder`s only
+          need to deal with raw `ufl.Coefficient`s.
     """
     def __init__(self, integral_data, form_data, tsfc_form_data):
         self.domain = integral_data.domain
@@ -112,12 +111,8 @@ class TSFCIntegralData(object):
 
         self.integral_coefficients = integral_data.integral_coefficients 
 
-        # enabled_coefficients is a boolean array that indicates which
-        # of reduced_coefficients the integral requires.
-        functions = list(tuple(c for c, enabled in zip(form_data.reduced_coefficients, integral_data.enabled_coefficients) if enabled))
-        assert set(functions) == set(self.integral_coefficients)
+        functions = self.integral_coefficients
         self.coefficients = tuple(tsfc_form_data.function_replace_map[f] for f in functions)
-        #self.coefficient_numbers = tuple(pos for pos, enabled in zip(form_data.original_coefficient_positions, integral_data.enabled_coefficients) if enabled)
         self.coefficient_numbers = tuple(tsfc_form_data.original_coefficient_positions[tsfc_form_data.reduced_coefficients.index(f)] for f in functions)
 
 
@@ -153,14 +148,17 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
     form_data = ufl_utils.compute_form_data(form, complex_mode=complex_mode)
     if interface:
         interface = partial(interface, function_replace_map=form_data.function_replace_map)
-    form_data = TSFCFormData((form_data, ), form_data.original_form, diagonal)
+    tsfc_form_data = TSFCFormData((form_data, ), form_data.original_form, diagonal)
+
+    integral_data_tuple = tuple(TSFCIntegralData(integral_data, form_data, tsfc_form_data)
+                                                 for integral_data in form_data.integral_data)
 
     logger.info(GREEN % "compute_form_data finished in %g seconds.", time.time() - cpu_time)
 
     kernels = []
-    for integral_data in form_data.integral_data:
+    for integral_data in integral_data_tuple:
         start = time.time()
-        kernel = compile_integral(integral_data, form_data, prefix, parameters, interface=interface, coffee=coffee, diagonal=diagonal)
+        kernel = compile_integral(integral_data, tsfc_form_data, prefix, parameters, interface=interface, coffee=coffee, diagonal=diagonal)
         if kernel is not None:
             kernels.append(kernel)
         logger.info(GREEN % "compile_integral finished in %g seconds.", time.time() - start)
