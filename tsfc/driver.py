@@ -82,6 +82,9 @@ class TSFCFormData(object):
         self.original_subspace_positions = form_data_tuple[0].original_subspace_positions
         self.subspace_replace_map = form_data_tuple[0].subspace_replace_map
 
+        self.integral_data = tuple(TSFCIntegralData(integral_data, form_data_tuple[0], self)
+                                                    for integral_data in form_data_tuple[0].integral_data)
+
 
 class TSFCIntegralData(object):
     r"""Mimics `ufl.IntegralData`.
@@ -150,13 +153,10 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
         interface = partial(interface, function_replace_map=form_data.function_replace_map)
     tsfc_form_data = TSFCFormData((form_data, ), form_data.original_form, diagonal)
 
-    integral_data_tuple = tuple(TSFCIntegralData(integral_data, form_data, tsfc_form_data)
-                                                 for integral_data in form_data.integral_data)
-
     logger.info(GREEN % "compute_form_data finished in %g seconds.", time.time() - cpu_time)
 
     kernels = []
-    for integral_data in integral_data_tuple:
+    for integral_data in tsfc_form_data.integral_data:
         start = time.time()
         kernel = compile_integral(integral_data, tsfc_form_data, prefix, parameters, interface=interface, coffee=coffee, diagonal=diagonal)
         if kernel is not None:
