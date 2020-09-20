@@ -206,7 +206,7 @@ class ExpressionKernelBuilder(KernelBuilderBase):
 class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
     """Helper class for building a :class:`Kernel` object."""
 
-    def __init__(self, integral_type, subdomain_id, domain_number, scalar_type,
+    def __init__(self, integral_type, scalar_type,
                  dont_split=(), function_replace_map={}, diagonal=False, integral_data=None):
         """Initialise a kernel builder."""
         KernelBuilderBase.__init__(self, scalar_type, integral_type.startswith("interior_facet"))
@@ -239,7 +239,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
             self.set_coefficients(integral_data.coefficients)
             self.set_subspaces(integral_data.subspaces, integral_data.original_subspaces)
 
-    def set_arguments(self, arguments, multiindices, kernel_config):
+    def set_arguments(self, kernel_config):
         """Process arguments.
 
         :arg arguments: :class:`ufl.Argument`s
@@ -247,7 +247,9 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         :returns: GEM expression representing the return variable
         """
         local_tensor, return_variables = prepare_arguments(
-                                             arguments, multiindices, self.scalar_type,
+                                             kernel_config['arguments'],
+                                             kernel_config['fem_config']['argument_multiindices'],
+                                             self.scalar_type,
                                              interior_facet=self.interior_facet,
                                              diagonal=self.diagonal)
         kernel_config['local_tensor'] = local_tensor

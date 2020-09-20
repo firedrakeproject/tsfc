@@ -39,38 +39,28 @@ sys.setrecursionlimit(3000)
 
 class TSFCFormData(object):
 
-    def __init__(self, form_data_tuple, diagonal):
+    def __init__(self, form_data_tuple, original_form, diagonal):
 
-        self.function_replace_map = form_data_tuple[0].function_replace_map
-        self.integral_data = form_data_tuple[0].integral_data
-
-
-        self.original_form = form_data_tuple[0].original_form
-
-        self.preprocessed_form = form_data_tuple[0].preprocessed_form
-
+        self.original_form = original_form
+        original_coefficients = original_form.coefficients()
+        try:
+            self.arguments, = set(tuple(fd.preprocessed_form.arguments()
+                                        for fd in form_data_tuple))
+        except ValueError:
+            raise ValueError("All `FormData`s must share the same set of arguments.")
+        reduced_coefficients = tuple(set(tuple(c for fd in form_data_tuple for c in fd.reduced_coefficients)))
         self.reduced_coefficients = form_data_tuple[0].reduced_coefficients
-        self.function_replace_map = form_data_tuple[0].function_replace_map
         self.original_coefficient_positions = form_data_tuple[0].original_coefficient_positions
+        self.function_replace_map = form_data_tuple[0].function_replace_map
 
         self.reduced_subspaces = form_data_tuple[0].reduced_subspaces
-        self.subspace_replace_map = form_data_tuple[0].subspace_replace_map
         self.original_subspace_positions = form_data_tuple[0].original_subspace_positions
+        self.subspace_replace_map = form_data_tuple[0].subspace_replace_map
+
+        self.integral_data = tuple(TSFCIntegralData(integral_data, form_data_tuple[0])
+                                   for integral_data in form_data_tuple[0].integral_data)
 
 
-        arguments = self.preprocessed_form.arguments()
-        argument_multiindices = tuple(create_element(arg.ufl_element()).get_indices()
-                                      for arg in arguments)
-        argument_multiindices_dummy = tuple(tuple(gem.Index(extent=a.extent) for a in arg) for arg in argument_multiindices)
-        if diagonal:
-            # Error checking occurs in the builder constructor.
-            # Diagonal assembly is obtained by using the test indices for
-            # the trial space as well.
-            a, _ = argument_multiindices
-            argument_multiindices = (a, a)
-        self.arguments = arguments
-        self.argument_multiindices = argument_multiindices
-        self.argument_multiindices_dummy = argument_multiindices_dummy
 
 
 class TSFCIntegralData(object):
@@ -82,38 +72,38 @@ class TSFCIntegralData(object):
     minimal set of data required by the `KernelBuilder`.
     Convenient when dealing with multiple `ufl.FormData`s.
     """
-    def __init__(self, integral_data_tuple, form_data_tuple):
-        self.domain = integral_data_tuple[0].domain
-        self.integral_type = integral_data_tuple[0].integral_type
-        self.subdomain_id = integral_data_tuple[0].subdomain_id
-        self.domain_number = form_data_tuple[0].original_form.domain_numbering()[self.domain]
+    def __init__(self, integral_data, form_data):
+        self.domain = integral_data.domain
+        self.integral_type = integral_data.integral_type
+        self.subdomain_id = integral_data.subdomain_id
+        self.domain_number = form_data.original_form.domain_numbering()[self.domain]
 
         integrals = []
-        for integral in integral_data_tuple[0].integrals:
+        for integral in integral_data.integrals:
             integrand = integral.integrand()
-            integrand = ufl.replace(integrand, form_data_tuple[0].function_replace_map)
-            integrand = ufl.replace(integrand, form_data_tuple[0].subspace_replace_map)
+            integrand = ufl.replace(integrand, form_data.function_replace_map)
+            integrand = ufl.replace(integrand, form_data.subspace_replace_map)
             integrals.append(integral.reconstruct(integrand=integrand))
         self.integrals = tuple(integrals)
 
-        self.integral_coefficients = integral_data_tuple[0].integral_coefficients 
+        self.integral_coefficients = integral_data.integral_coefficients 
 
-        self.enabled_coefficients = integral_data_tuple[0].enabled_coefficients
-        self.enabled_subspaces = integral_data_tuple[0].enabled_subspaces
+        self.enabled_coefficients = integral_data.enabled_coefficients
+        self.enabled_subspaces = integral_data.enabled_subspaces
 
         # enabled_coefficients is a boolean array that indicates which
         # of reduced_coefficients the integral requires.
-        coefficients = tuple(c for c, enabled in zip(form_data_tuple[0].reduced_coefficients, self.enabled_coefficients) if enabled)
-        self.coefficients = tuple(form_data_tuple[0].function_replace_map[c] for c in coefficients)
-        subspaces = tuple(c for c, enabled in zip(form_data_tuple[0].reduced_subspaces, self.enabled_subspaces) if enabled)
+        coefficients = tuple(c for c, enabled in zip(form_data.reduced_coefficients, self.enabled_coefficients) if enabled)
+        self.coefficients = tuple(form_data.function_replace_map[c] for c in coefficients)
+        subspaces = tuple(c for c, enabled in zip(form_data.reduced_subspaces, self.enabled_subspaces) if enabled)
         self.original_subspaces = subspaces
-        self.subspaces = tuple(form_data_tuple[0].subspace_replace_map[c] for c in subspaces)
+        self.subspaces = tuple(form_data.subspace_replace_map[c] for c in subspaces)
         # This is which coefficient in the original form the
         # current coefficient is.
         # Consider f*v*dx + g*v*ds, the full form contains two
         # coefficients, but each integral only requires one.
-        self.coefficient_numbers = tuple(pos for pos, enabled in zip(form_data_tuple[0].original_coefficient_positions, self.enabled_coefficients) if enabled)
-        self.subspace_numbers = tuple(pos for pos, enabled in zip(form_data_tuple[0].original_subspace_positions, self.enabled_subspaces) if enabled)
+        self.coefficient_numbers = tuple(pos for pos, enabled in zip(form_data.original_coefficient_positions, self.enabled_coefficients) if enabled)
+        self.subspace_numbers = tuple(pos for pos, enabled in zip(form_data.original_subspace_positions, self.enabled_subspaces) if enabled)
 
 
 def compile_form(form, prefix="form", parameters=None, interface=None, coffee=True, diagonal=False):
@@ -135,19 +125,17 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
     # Determine whether in complex mode:
     complex_mode = parameters and is_complex(parameters.get("scalar_type"))
 
-    fd = ufl_utils.compute_form_data(form, complex_mode=complex_mode)
-
-    fd = TSFCFormData((fd, ), diagonal)
-
+    form_data = ufl_utils.compute_form_data(form, complex_mode=complex_mode)
+    form_data = TSFCFormData((form_data, ), form_data.original_form, diagonal)
     if interface:
-        interface = partial(interface, function_replace_map=fd.function_replace_map)
+        interface = partial(interface, function_replace_map=form_data.function_replace_map)
+
     logger.info(GREEN % "compute_form_data finished in %g seconds.", time.time() - cpu_time)
 
     kernels = []
-    for integral_data in fd.integral_data:
-        tsfc_integral_data = TSFCIntegralData((integral_data, ), (fd, ))
+    for integral_data in form_data.integral_data:
         start = time.time()
-        kernel = compile_integral(tsfc_integral_data, fd, prefix, parameters, interface=interface, coffee=coffee, diagonal=diagonal)
+        kernel = compile_integral(integral_data, form_data, prefix, parameters, interface=interface, coffee=coffee, diagonal=diagonal)
         if kernel is not None:
             kernels.append(kernel)
         logger.info(GREEN % "compile_integral finished in %g seconds.", time.time() - start)
@@ -178,7 +166,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
 
     # Dict mapping domains to index in original_form.ufl_domains()
     # The same builder (in principle) can be used to compile different forms.
-    builder = interface(integral_data.integral_type, integral_data.subdomain_id, integral_data.domain_number,
+    builder = interface(integral_data.integral_type,
                         parameters["scalar_type_c"] if coffee else parameters["scalar_type"],
                         diagonal=diagonal,
                         integral_data=integral_data)
@@ -186,13 +174,11 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     # All form specific variables (such as arguments) are stored in kernel_config (not in KernelBuilder instance).
     kernel_name = "%s_%s_integral_%s" % (prefix, integral_data.integral_type, integral_data.subdomain_id)
     kernel_name = kernel_name.replace("-", "_")  # Handle negative subdomain_id
-    kernel_config = create_kernel_config(form_data, integral_data, parameters, builder, kernel_name)
+    kernel_config = create_kernel_config(kernel_name, form_data, integral_data, parameters, builder, diagonal)
     # The followings are specific for the concrete form representation, so
     # not to be saved in KernelBuilders.
-    builder.set_arguments(form_data.arguments,
-                          form_data.argument_multiindices,
-                          kernel_config)
-    functions = list(form_data.arguments) + [builder.coordinate(integral_data.domain)] + list(integral_data.integral_coefficients)
+    builder.set_arguments(kernel_config)
+    functions = list(kernel_config['arguments']) + [builder.coordinate(integral_data.domain)] + list(integral_data.integral_coefficients)
 
     for integral in integral_data.integrals:
         params = parameters.copy()
@@ -220,14 +206,24 @@ def preprocess_parameters(parameters):
     return parameters
 
 
-def create_kernel_config(form_data, integral_data, parameters, builder, name):
+def create_kernel_config(kernel_name, form_data, integral_data, parameters, builder, diagonal):
+    arguments = form_data.arguments
+    argument_multiindices = tuple(create_element(arg.ufl_element()).get_indices()
+                                  for arg in arguments)
+    argument_multiindices_dummy = tuple(tuple(gem.Index(extent=a.extent) for a in arg) for arg in argument_multiindices)
+    if diagonal:
+        # Error checking occurs in the builder constructor.
+        # Diagonal assembly is obtained by using the test indices for
+        # the trial space as well.
+        a, _ = argument_multiindices
+        argument_multiindices = (a, a)
     fem_config = create_fem_config(builder,
                                 integral_data.domain,
                                 integral_data.integral_type,
-                                form_data.argument_multiindices,
-                                form_data.argument_multiindices_dummy,
+                                argument_multiindices,
+                                argument_multiindices_dummy,
                                 parameters["scalar_type"])
-    kernel_config = dict(name=name,
+    kernel_config = dict(name=kernel_name,
                          integral_type=integral_data.integral_type,
                          subdomain_id=integral_data.subdomain_id,
                          domain_number=integral_data.domain_number,
@@ -236,6 +232,7 @@ def create_kernel_config(form_data, integral_data, parameters, builder, name):
                          subspace_parts=[None for _ in integral_data.subspace_numbers],
                          fem_config=fem_config,
                          quadrature_indices=[],
+                         arguments = arguments,
                          mode_irs=collections.OrderedDict())
     return kernel_config
 
