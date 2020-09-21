@@ -154,7 +154,7 @@ class TSFCIntegralData(object):
 
         self.integral_coefficients = integral_data.integral_coefficients 
 
-        functions = self.integral_coefficients
+        functions = list(tuple(f for f, enabled in zip(form_data.reduced_coefficients, integral_data.enabled_coefficients) if enabled))
         self.coefficients = tuple(tsfc_form_data.function_replace_map[f] for f in functions)
         self.coefficient_numbers = tuple(tsfc_form_data.original_coefficient_positions[tsfc_form_data.reduced_coefficients.index(f)] for f in functions)
 
