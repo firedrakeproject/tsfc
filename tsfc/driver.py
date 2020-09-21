@@ -50,6 +50,29 @@ class TSFCFormData(object):
           are obtained by splitting `original_form`. This is useful when
           performing slightly different operations to split components
           and combine to form a single kernel.
+
+
+           id_0  id_1 ... id_M                     ____________________________
+           ______________     _______             | _____  _____         _____ |
+          |     ||     |       |     |            ||     ||     |       |     ||
+    fd_0  |     ||     |  ...  |     |            ||     ||     |       |     ||
+          |_____||_____|_     _|_____|            ||TSFC ||TSFC |       |TSFC ||  
+           ______________     ______              ||Integ||Integ|       |Integ||    
+          |     ||     |       |     |            ||Data ||Data |  ...  |Data ||         
+    fd_1  |     ||     |  ...  |     |            ||  0  ||  1  |       |  M  ||       
+          |_____||_____|_     _|_____|    --->    ||     ||     |       |     ||
+                                                  |                            |
+      :                :                          |                            |
+           ______________     _______             |                            |          
+          |     ||     |       |     |            ||     ||     |       |     ||
+    fd_N  |     ||     |  ...  |     |            ||     ||     |       |     ||
+          |_____||_____|_     _|_____|            ||_____||_____|       |_____||
+                                                  |____________________________|
+
+    fd = form_data                                      TSFCFormData
+    id = integral_data
+
+
     """
     def __init__(self, form_data_tuple, original_form, diagonal):
         self.original_form = original_form
