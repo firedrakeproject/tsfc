@@ -82,8 +82,24 @@ class TSFCFormData(object):
         self.original_subspace_positions = form_data_tuple[0].original_subspace_positions
         self.subspace_replace_map = form_data_tuple[0].subspace_replace_map
 
-        self.integral_data = tuple(TSFCIntegralData(integral_data, form_data_tuple[0], self)
-                                                    for integral_data in form_data_tuple[0].integral_data)
+
+        intg_data_dict = {}
+        form_data_dict = {}
+        for form_data in form_data_tuple:
+            for intg_data in form_data.integral_data:
+                domain = intg_data.domain
+                integral_type = intg_data.integral_type
+                subdomain_id = intg_data.subdomain_id
+                key = (domain, integral_type, subdomain_id)
+                intg_data_dict.setdefault(key, []).append(intg_data)
+                form_data_dict.setdefault(key, []).append(form_data)
+
+        integral_data_list = []
+        for key in intg_data_dict:
+            intg_data_list = intg_data_dict[key]
+            form_data_list = form_data_dict[key]
+            integral_data_list.append(TSFCIntegralData(intg_data_list, form_data_list[0], self))
+        self.integral_data = tuple(integral_data_list)
 
 
 class TSFCIntegralData(object):
@@ -98,7 +114,8 @@ class TSFCIntegralData(object):
         * preprocesses integrals so that `KernelBuilder`s only
           need to deal with raw `ufl.Coefficient`s.
     """
-    def __init__(self, integral_data, form_data, tsfc_form_data):
+    def __init__(self, integral_data_tuple, form_data, tsfc_form_data):
+        integral_data = integral_data_tuple[0]
         self.domain = integral_data.domain
         self.integral_type = integral_data.integral_type
         self.subdomain_id = integral_data.subdomain_id
