@@ -26,7 +26,7 @@ from finat.point_set import PointSet
 from finat.quadrature import AbstractQuadratureRule, make_quadrature, QuadratureRule
 
 from tsfc import fem, ufl_utils
-from tsfc.fiatinterface import as_fiat_cell
+from tsfc.finatinterface import as_fiat_cell
 from tsfc.logging import logger
 from tsfc.parameters import default_parameters, is_complex
 from tsfc.ufl_utils import apply_mapping
@@ -267,21 +267,28 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     return builder.construct_kernel(kernel_name, impero_c, index_names, quad_rule)
 
 
-def compile_expression_dual_evaluation(expression, to_element, coordinates, interface=None,
+def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
+                                       domain=None, interface=None,
                                        parameters=None, coffee=False):
     """Compile a UFL expression to be evaluated against a compile-time known reference element's dual basis.
 
     Useful for interpolating UFL expressions into e.g. N1curl spaces.
 
     :arg expression: UFL expression
-    :arg to_element: A FIAT FiniteElement for the target space
+    :arg to_element: A FInAT element for the target space
     :arg coordinates: the coordinate function
+    :arg domain: optional UFL domain the expression is defined on (useful when expression contains no domain).
     :arg interface: backend module for the kernel interface
     :arg parameters: parameters object
     :arg coffee: compile coffee kernel instead of loopy kernel
     """
     import coffee.base as ast
     import loopy as lp
+
+    # Just convert FInAT element to FIAT for now.
+    # Dual evaluation in FInAT will bring a thorough revision.
+    to_element = to_element.fiat_equivalent
+
     if any(len(dual.deriv_dict) != 0 for dual in to_element.dual_basis()):
         raise NotImplementedError("Can only interpolate onto dual basis functionals without derivative evaluation, sorry!")
 
@@ -300,7 +307,7 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, inte
         mapping, = set(to_element.mapping())
     except ValueError:
         raise NotImplementedError("Don't know how to interpolate onto zany spaces, sorry")
-    expression = apply_mapping(expression, mapping)
+    expression = apply_mapping(expression, mapping, domain)
 
     # Apply UFL preprocessing
     expression = ufl_utils.preprocess_expression(expression,
