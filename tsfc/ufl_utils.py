@@ -144,6 +144,9 @@ class ModifiedTerminalMixin(object):
         assert is_modified_terminal(o)
         return self.modified_terminal(o)
 
+    def external_operator(self, e):
+        return self.modified_terminal(e.coefficient)
+
     # Unlike UFL, we do not regard Indexed as a terminal modifier.
     # indexed = _modified_terminal
 
