@@ -12,8 +12,10 @@ import ufl
 from ufl.algorithms import extract_arguments, extract_coefficients
 from ufl.algorithms.analysis import has_type
 from ufl.classes import Form, GeometricQuantity
-from ufl.log import GREEN, UFLException
+from ufl.differentiation import ReferenceGrad
+from ufl.log import GREEN
 from ufl.utils.sequences import max_degree
+
 
 import gem
 import gem.impero_utils as impero_utils
@@ -374,6 +376,14 @@ def compile_expression_dual_evaluation(expression, element, *,
 
 
 class UFLtoGEMCallback(object):
+    """A callable defined given an UFL expression, returns a GEM expression
+    of the UFL expression evaluated at points. Defined as class to fix
+    for ReferenceGrad of constants having no topological dimension.
+
+    :arg expression: The UFL expression.
+    :arg kernel_cfg: Kernel config for fem.compile_ufl.
+    :arg complex_mode: Determine whether in complex mode.
+    """
     def __init__(self, expression, kernel_cfg, complex_mode):
         # UFL expression to turn into GEM
         self.expression = expression
@@ -383,8 +393,8 @@ class UFLtoGEMCallback(object):
         # Fix for Zero expressions with no dimension
         # TODO: Fix for topolgical dimension different from geometric
         try:
-            self.dimension = expression.geometric_dimension()
-        except UFLException:
+            self.dimension = expression.ufl_domain().topological_dimension()
+        except AttributeError:
             self.dimension = 0
 
         # Kernel config for fem.compile_ufl
@@ -399,8 +409,6 @@ class UFLtoGEMCallback(object):
         :param point_set: FInAT PointSet
         :param derivative: Maximum order of differentiation
         '''
-        from ufl.differentiation import ReferenceGrad
-        # from ufl.operators import grad
         config = self.kernel_cfg.copy()
         config.update(point_set=point_set)
 
