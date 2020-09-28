@@ -337,7 +337,11 @@ def statement_evaluate(leaf, ctx):
             idx_reads = ctx.pymbolic_multiindex(child.shape)
             var_reads = ctx.pymbolic_variable(child)
             reads.append(SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)))
-        rhs = p.Call(p.Variable("solve"), tuple(reads))
+        
+        if expr.is_matfree:
+            rhs = p.Call(p.Variable("solve_matfree"), tuple(reads))
+        else:
+            rhs = p.Call(p.Variable("solve"), tuple(reads))
 
         return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
     else:
