@@ -338,7 +338,7 @@ def statement_evaluate(leaf, ctx):
             var_reads = ctx.pymbolic_variable(child)
             reads.append(SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)))
         
-        if expr.is_matfree:
+        if expr.matfree:
             rhs = p.Call(p.Variable("solve_matfree"), tuple(reads))
         else:
             rhs = p.Call(p.Variable("solve"), tuple(reads))
