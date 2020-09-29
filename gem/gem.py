@@ -809,7 +809,7 @@ class Solve(Node):
     """
     __slots__ = ('children', 'shape', 'matfree')
 
-    def __init__(self, A, B, matfree):
+    def __init__(self, A, B, matfree=False):
         # Shape requirements
         assert B.shape
         assert len(A.shape) == 2
