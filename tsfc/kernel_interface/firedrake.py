@@ -206,7 +206,7 @@ class ExpressionKernelBuilder(KernelBuilderBase):
 class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
     """Helper class for building a :class:`Kernel` object."""
 
-    def __init__(self, integral_type, scalar_type,
+    def __init__(self, integral_type, scalar_type, domain=None, coefficients=None,
                  dont_split=(), function_replace_map={}, diagonal=False, integral_data=None):
         """Initialise a kernel builder."""
         KernelBuilderBase.__init__(self, scalar_type, integral_type.startswith("interior_facet"))
@@ -233,10 +233,12 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         elif integral_type == 'interior_facet_horiz':
             self._entity_number = {'+': 1, '-': 0}
 
+        if domain:
+            self.set_coordinates(domain)
+            self.set_cell_sizes(domain)
+        if coefficients:
+            self.set_coefficients(coefficients)
         if integral_data:
-            self.set_coordinates(integral_data.domain)
-            self.set_cell_sizes(integral_data.domain)
-            self.set_coefficients(integral_data.coefficients)
             self.set_subspaces(integral_data.subspaces, integral_data.original_subspaces)
 
     def set_arguments(self, kernel_config):

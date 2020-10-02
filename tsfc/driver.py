@@ -244,8 +244,10 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     # The same builder (in principle) can be used to compile different forms.
     builder = interface(integral_data.integral_type,
                         parameters["scalar_type_c"] if coffee else parameters["scalar_type"],
+                        domain=integral_data.domain,
+                        coefficients=integral_data.coefficients,
                         diagonal=diagonal,
-                        integral_data=integral_data)
+                        integral_data=integral_data)#REMOVE this when we move subspace.
 
     # All form specific variables (such as arguments) are stored in kernel_config (not in KernelBuilder instance).
     kernel_name = "%s_%s_integral_%s" % (prefix, integral_data.integral_type, integral_data.subdomain_id)
