@@ -159,15 +159,15 @@ class TSFCIntegralData(object):
 
         #self.integral_coefficients = integral_data.integral_coefficients 
 
-        # Don't need to sort functions.
         # This is which coefficient in the original form the
         # current coefficient is.
         # Ex:
         # original_form.coefficients()       : f0, f1, f2, f3, f4, f5
         # tsfc_form_data.reduced_coefficients: f1, f2, f3, f5
-        # functions                          : f5, f1
-        # self.coefficients                  : c5, c1
-        # self.coefficent_numbers            :  5,  1
+        # functions                          : f1, f5
+        # self.coefficients                  : c1, c5
+        # self.coefficent_numbers            :  1,  5
+        functions = sorted(tuple(functions), key=lambda c: c.count())
         self.coefficients = tuple(tsfc_form_data.function_replace_map[f] for f in functions)
         self.coefficient_numbers = tuple(tsfc_form_data.original_coefficient_positions[tsfc_form_data.reduced_coefficients.index(f)] for f in functions)
 
@@ -274,7 +274,7 @@ def preprocess_parameters(parameters):
         _ = default_parameters()
         _.update(parameters)
         parameters = _
-    # Remove these here, they're handled below.
+    # Remove these here, they're handled later on.
     if parameters.get("quadrature_degree") in ["auto", "default", None, -1, "-1"]:
         del parameters["quadrature_degree"]
     if parameters.get("quadrature_rule") in ["auto", "default", None]:
@@ -293,12 +293,14 @@ def create_kernel_config(kernel_name, form_data, integral_data, parameters, buil
         # the trial space as well.
         a, _ = argument_multiindices
         argument_multiindices = (a, a)
+    # Data required for the UFL -> GEM local tensor construction.
     fem_config = create_fem_config(builder,
-                                integral_data.domain,
-                                integral_data.integral_type,
-                                argument_multiindices,
-                                argument_multiindices_dummy,
-                                parameters["scalar_type"])
+                                   integral_data.domain,
+                                   integral_data.integral_type,
+                                   argument_multiindices,
+                                   argument_multiindices_dummy,
+                                   parameters["scalar_type"])
+    # Data required for kernel construction. 
     kernel_config = dict(name=kernel_name,
                          integral_type=integral_data.integral_type,
                          subdomain_id=integral_data.subdomain_id,
@@ -306,10 +308,15 @@ def create_kernel_config(kernel_name, form_data, integral_data, parameters, buil
                          coefficient_numbers=integral_data.coefficient_numbers,
                          subspace_numbers=integral_data.subspace_numbers,
                          subspace_parts=[None for _ in integral_data.subspace_numbers],
+                         arguments=arguments,
+                         local_tensor=None,
+                         return_variables=None,
                          fem_config=fem_config,
                          quadrature_indices=[],
-                         arguments = arguments,
-                         mode_irs=collections.OrderedDict())
+                         mode_irs=collections.OrderedDict(),
+                         oriented=None,
+                         needs_cell_sizes=None,
+                         tabulations=None)
     return kernel_config
 
 
@@ -322,6 +329,8 @@ def create_fem_config(builder, mesh, integral_type, argument_multiindices, argum
     # which maps index objects to tuples of multiindices.  These two
     # caches shall never conflict as their keys have different types
     # (UFL finite elements vs. GEM index objects).
+    #
+    # -> fem_config['index_cache']
     cell = mesh.ufl_cell()
     fiat_cell = as_fiat_cell(cell)
     integration_dim, entity_ids = lower_integral_type(fiat_cell, integral_type)
