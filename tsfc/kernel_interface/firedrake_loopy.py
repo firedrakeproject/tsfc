@@ -32,7 +32,7 @@ def make_builder(*args, **kwargs):
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
                  "domain_number", "needs_cell_sizes", "tabulations",
-                 "coefficient_numbers", "subspace_numbers", "subspace_parts", "__weakref__")
+                 "coefficient_numbers", "subspace_numbers", "subspace_parts", "external_data_numbers", "external_data_parts", "__weakref__")
     """A compiled Kernel object.
 
     :kwarg ast: The loopy kernel object.
@@ -68,6 +68,8 @@ class Kernel(object):
         self.coefficient_numbers = coefficient_numbers
         self.subspace_numbers = subspace_numbers
         self.subspace_parts = subspace_parts
+        self.external_data_numbers = []
+        self.external_data_parts = []
         self.needs_cell_sizes = needs_cell_sizes
         super(Kernel, self).__init__()
 
@@ -218,6 +220,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         self.coefficient_args = []
         self.coefficient_split = {}
         self.subspace_args = []
+        self.external_data_args = []
         self.subspace_split = {}
         # Map to raw ufl Coefficient.
         self.dont_split = frozenset(function_replace_map[f] for f in dont_split if f in function_replace_map)
@@ -290,6 +293,20 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         for i, c in enumerate(coeffs):
             self.coefficient_args.append(self._coefficient(c, "w_%d" % i))
 
+    def set_external_data(self, elements):
+        """Prepare external data.
+
+        :arg elements: a tuple of `ufl.FiniteElement`s.
+        """
+        if any(type(element) == ufl_MixedElement for element in elements):
+            raise ValueError("Unable to handle `MixedElement`s.")
+        expressions = []
+        for i, element in enumerate(elements):
+            funarg, expression = prepare_coefficient(element, "e_%d" % i, self.scalar_type, interior_facet=self.interior_facet)
+            self.external_data_args.append(funarg)
+            expressions.append(expression)
+        return tuple(expressions)
+
     def set_subspaces(self, subspaces, originals):
         """Prepare the subspaces of the form.
 
@@ -351,6 +368,8 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         kernel.coefficient_numbers = kernel_config['coefficient_numbers']
         kernel.subspace_numbers = kernel_config['subspace_numbers']
         kernel.subspace_parts = kernel_config['subspace_parts']
+        kernel.external_data_numbers = kernel_config['external_data_numbers']
+        kernel.external_data_parts = kernel_config['external_data_parts']
 
         # requirements
         kernel.oriented = kernel_config['oriented']
@@ -364,7 +383,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
             args.append(self.cell_orientations_loopy_arg)
         if kernel.needs_cell_sizes:
             args.append(self.cell_sizes_arg)
-        args.extend(self.coefficient_args + self.subspace_args)
+        args.extend(self.coefficient_args + self.subspace_args + self.external_data_args)
         if kernel.integral_type in ["exterior_facet", "exterior_facet_vert"]:
             args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(1,)))
         elif kernel.integral_type in ["interior_facet", "interior_facet_vert"]:

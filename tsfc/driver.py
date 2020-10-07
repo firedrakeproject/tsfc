@@ -588,7 +588,7 @@ def lower_integral_type(fiat_cell, integral_type):
     return integration_dim, entity_ids
 
 
-def replace_argument_multiindices_dummy(expressions, kernel_config):
+def replace_argument_multiindices_dummy(expressions, kernel_config, argument_multiindex, argument_multiindex_dummy):
     r"""Replace dummy indices with true argument multiindices.
     
     :arg expressions: gem expressions written in terms of argument_multiindices_dummy.
@@ -600,10 +600,10 @@ def replace_argument_multiindices_dummy(expressions, kernel_config):
     multiindices with true ones.
     """
     # True/dummy argument multiindices.
-    argument_multiindices = kernel_config['fem_config']['argument_multiindices']
-    argument_multiindices_dummy = kernel_config['fem_config']['argument_multiindices_dummy']
-    if argument_multiindices_dummy == argument_multiindices:
+    #argument_multiindices = kernel_config['fem_config']['argument_multiindices']
+    #argument_multiindices_dummy = kernel_config['fem_config']['argument_multiindices_dummy']
+    if argument_multiindex_dummy == argument_multiindex:
         return expressions
-    substitution = tuple(zip(chain(*argument_multiindices_dummy), chain(*argument_multiindices)))
+    substitution = tuple(zip(argument_multiindex_dummy, argument_multiindex))
     mapper = MemoizerArg(filtered_replace_indices)
     return tuple(mapper(expr, substitution) for expr in expressions)
