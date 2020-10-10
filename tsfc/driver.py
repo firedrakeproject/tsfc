@@ -299,7 +299,6 @@ def create_kernel_config(kernel_name, form_data, integral_data, parameters, buil
     fem_config = create_fem_config(builder,
                                    integral_data.domain,
                                    integral_data.integral_type,
-                                   argument_multiindices,
                                    argument_multiindices_dummy,
                                    parameters["scalar_type"])
     # Data required for kernel construction. 
@@ -311,6 +310,7 @@ def create_kernel_config(kernel_name, form_data, integral_data, parameters, buil
                          subspace_numbers=integral_data.subspace_numbers,
                          subspace_parts=[None for _ in integral_data.subspace_numbers],
                          arguments=arguments,
+                         argument_multiindices=argument_multiindices,
                          local_tensor=None,
                          return_variables=None,
                          fem_config=fem_config,
@@ -322,7 +322,7 @@ def create_kernel_config(kernel_name, form_data, integral_data, parameters, buil
     return kernel_config
 
 
-def create_fem_config(builder, mesh, integral_type, argument_multiindices, argument_multiindices_dummy, scalar_type):
+def create_fem_config(builder, mesh, integral_type, argument_multiindices_dummy, scalar_type):
     # Map from UFL FiniteElement objects to multiindices.  This is
     # so we reuse Index instances when evaluating the same coefficient
     # multiple times with the same table.
@@ -341,7 +341,6 @@ def create_fem_config(builder, mesh, integral_type, argument_multiindices, argum
                       integral_type=integral_type,
                       integration_dim=integration_dim,
                       entity_ids=entity_ids,
-                      argument_multiindices=argument_multiindices,
                       argument_multiindices_dummy=argument_multiindices_dummy,
                       index_cache={},
                       scalar_type=scalar_type)
@@ -458,7 +457,7 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
     # Translate to GEM
     kernel_cfg = dict(interface=builder,
                       ufl_cell=coordinates.ufl_domain().ufl_cell(),
-                      argument_multiindices=argument_multiindices,
+                      argument_multiindices_dummy=argument_multiindices,
                       index_cache={},
                       scalar_type=parameters["scalar_type"])
 

@@ -190,7 +190,7 @@ class KernelBuilderMixin(object):
         mode = pick_mode(params["mode"])
         return mode.Integrals(expressions,
                               params["quadrature_rule"].point_set.indices,
-                              kernel_config['fem_config']['argument_multiindices'],
+                              kernel_config['argument_multiindices'],
                               params)
 
     def stash_integrals(self, reps, params, kernel_config):

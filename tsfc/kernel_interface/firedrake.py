@@ -250,7 +250,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         """
         local_tensor, return_variables = prepare_arguments(
                                              kernel_config['arguments'],
-                                             kernel_config['fem_config']['argument_multiindices'],
+                                             kernel_config['argument_multiindices'],
                                              self.scalar_type,
                                              interior_facet=self.interior_facet,
                                              diagonal=self.diagonal)
@@ -343,7 +343,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
                         domain_number=kernel_config['domain_number'])
 
         quadrature_indices = kernel_config['quadrature_indices']
-        argument_multiindices = kernel_config['fem_config']['argument_multiindices']
+        argument_multiindices = kernel_config['argument_multiindices']
         index_cache = kernel_config['fem_config']['index_cache']
         index_names = _get_index_names(quadrature_indices, argument_multiindices, index_cache)
 

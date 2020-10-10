@@ -57,7 +57,6 @@ class ContextBase(ProxyKernelInterface):
                 'integral_type',
                 'integration_dim',
                 'entity_ids',
-                'argument_multiindices',
                 'argument_multiindices_dummy',
                 'facetarea',
                 'index_cache',
@@ -70,8 +69,8 @@ class ContextBase(ProxyKernelInterface):
         if invalid_keywords:
             raise ValueError("unexpected keyword argument '{0}'".format(invalid_keywords.pop()))
         self.__dict__.update(kwargs)
-        if 'argument_multiindices_dummy' not in kwargs:
-            self.argument_multiindices_dummy = self.argument_multiindices
+        #if 'argument_multiindices_dummy' not in kwargs:
+        #    self.argument_multiindices_dummy = self.argument_multiindices
 
     @cached_property
     def fiat_cell(self):
@@ -108,7 +107,7 @@ class ContextBase(ProxyKernelInterface):
             f = self.entity_number(restriction)
             return gem.select_expression(list(map(callback, self.entity_ids)), f)
 
-    argument_multiindices = ()
+    argument_multiindices_dummy = ()
 
     @cached_property
     def index_cache(self):
@@ -335,7 +334,7 @@ class Translator(MultiFunction, ModifiedTerminalMixin, ufl2gem.Mixin):
         config = {name: getattr(self.context, name)
                   for name in ["ufl_cell", "index_cache", "scalar_type"]}
         config.update(quadrature_degree=degree, interface=self.context,
-                      argument_multiindices=argument_multiindices_dummy)
+                      argument_multiindices_dummy=argument_multiindices_dummy)
         expr, = compile_ufl(integrand, point_sum=True, **config)
         return expr
 
@@ -352,7 +351,7 @@ class Translator(MultiFunction, ModifiedTerminalMixin, ufl2gem.Mixin):
                                "integration_dim", "entity_ids",
                                "integral_type"]}
         config.update(quadrature_degree=degree, interface=self.context,
-                      argument_multiindices=argument_multiindices_dummy)
+                      argument_multiindices_dummy=argument_multiindices_dummy)
         expr, = compile_ufl(integrand, point_sum=True, **config)
         return expr
 
@@ -729,7 +728,7 @@ def compile_ufl(expression, interior_facet=False, point_sum=False, **kwargs):
     expression = simplify_abs(expression, context.complex_mode)
     if interior_facet:
         expressions = []
-        for rs in itertools.product(("+", "-"), repeat=len(context.argument_multiindices)):
+        for rs in itertools.product(("+", "-"), repeat=len(context.argument_multiindices_dummy)):
             expressions.append(map_expr_dag(PickRestriction(*rs), expression))
     else:
         expressions = [expression]
