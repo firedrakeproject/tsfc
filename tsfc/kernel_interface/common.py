@@ -4,8 +4,11 @@ from functools import reduce
 from itertools import chain
 
 import numpy
+from numpy import asarray
 
 import coffee.base as coffee
+
+from ufl.utils.sequences import max_degree
 
 import gem
 
@@ -14,6 +17,12 @@ import gem.impero_utils as impero_utils
 
 from tsfc import fem, ufl_utils
 from tsfc.kernel_interface import KernelInterface
+from tsfc.finatinterface import as_fiat_cell
+from tsfc.logging import logger
+
+from FIAT.reference_element import TensorProductCell
+
+from finat.quadrature import AbstractQuadratureRule, make_quadrature
 
 
 class KernelBuilderBase(KernelInterface):
@@ -138,8 +147,10 @@ class KernelBuilderMixin(object):
             integrand = ufl_utils.split_coefficients(integrand, self.coefficient_split, self.subspace_split)
         integrand = ufl_utils.split_subspaces(integrand, self.subspace_split)
         # Compile: ufl -> gem
+        functions = list(self.arguments) + [self.coordinate(self.domain)] + list(self.coefficients)
+        _set_quad_rule(params, self.fem_config['ufl_cell'], self.fem_config['integral_type'], functions)
         quad_rule = params["quadrature_rule"]
-        config = kernel_config['fem_config'].copy()
+        config = self.fem_config.copy()
         config.update(quadrature_rule=quad_rule)
         expressions = fem.compile_ufl(integrand,
                                       interior_facet=self.interior_facet,
@@ -150,7 +161,7 @@ class KernelBuilderMixin(object):
     def compile_gem(self, kernel_config):
         # Finalise mode representations into a set of assignments
         mode_irs = kernel_config["mode_irs"]
-        index_cache = kernel_config['fem_config']['index_cache']
+        index_cache = self.fem_config['index_cache']
 
         assignments = []
         for mode, var_reps in mode_irs.items():
@@ -200,11 +211,107 @@ class KernelBuilderMixin(object):
         for var, rep in zip(return_variables, reps):
             mode_irs[mode].setdefault(var, []).append(rep)
 
+    def create_fem_config(self, mesh, integral_type, scalar_type):
+        # Map from UFL FiniteElement objects to multiindices.  This is
+        # so we reuse Index instances when evaluating the same coefficient
+        # multiple times with the same table.
+        #
+        # We also use the same dict for the unconcatenate index cache,
+        # which maps index objects to tuples of multiindices.  These two
+        # caches shall never conflict as their keys have different types
+        # (UFL finite elements vs. GEM index objects).
+        #
+        # -> fem_config['index_cache']
+        cell = mesh.ufl_cell()
+        fiat_cell = as_fiat_cell(cell)
+        integration_dim, entity_ids = lower_integral_type(fiat_cell, integral_type)
+        self.fem_config = dict(interface=self,
+                               ufl_cell=cell,
+                               integral_type=integral_type,
+                               integration_dim=integration_dim,
+                               entity_ids=entity_ids,
+                               argument_multiindices_dummy=self.argument_multiindices_dummy,
+                               index_cache={},
+                               scalar_type=scalar_type)
+
 
 def _get_index_ordering(quadrature_indices, return_variables):
     split_argument_indices = tuple(chain(*[var.index_ordering()
                                            for var in return_variables]))
     return tuple(quadrature_indices) + split_argument_indices
+
+
+def _set_quad_rule(params, cell, integral_type, functions):
+    # Check if the integral has a quad degree attached, otherwise use
+    # the estimated polynomial degree attached by compute_form_data
+    try:
+        quadrature_degree = params["quadrature_degree"]
+    except KeyError:
+        quadrature_degree = params["estimated_polynomial_degree"]
+        function_degrees = [f.ufl_function_space().ufl_element().degree() for f in functions]
+        if all((asarray(quadrature_degree) > 10 * asarray(degree)).all()
+               for degree in function_degrees):
+            logger.warning("Estimated quadrature degree %s more "
+                           "than tenfold greater than any "
+                           "argument/coefficient degree (max %s)",
+                           quadrature_degree, max_degree(function_degrees))
+    if params.get("quadrature_rule") == "default":
+        del params["quadrature_rule"]
+    try:
+        quad_rule = params["quadrature_rule"]
+    except KeyError:
+        fiat_cell = as_fiat_cell(cell)
+        integration_dim, _ = lower_integral_type(fiat_cell, integral_type)
+        integration_cell = fiat_cell.construct_subelement(integration_dim)
+        quad_rule = make_quadrature(integration_cell, quadrature_degree)
+        params["quadrature_rule"] = quad_rule
+
+    if not isinstance(quad_rule, AbstractQuadratureRule):
+        raise ValueError("Expected to find a QuadratureRule object, not a %s" %
+                         type(quad_rule))
+
+
+def lower_integral_type(fiat_cell, integral_type):
+    """Lower integral type into the dimension of the integration
+    subentity and a list of entity numbers for that dimension.
+
+    :arg fiat_cell: FIAT reference cell
+    :arg integral_type: integral type (string)
+    """
+    vert_facet_types = ['exterior_facet_vert', 'interior_facet_vert']
+    horiz_facet_types = ['exterior_facet_bottom', 'exterior_facet_top', 'interior_facet_horiz']
+
+    dim = fiat_cell.get_dimension()
+    if integral_type == 'cell':
+        integration_dim = dim
+    elif integral_type in ['exterior_facet', 'interior_facet']:
+        if isinstance(fiat_cell, TensorProductCell):
+            raise ValueError("{} integral cannot be used with a TensorProductCell; need to distinguish between vertical and horizontal contributions.".format(integral_type))
+        integration_dim = dim - 1
+    elif integral_type == 'vertex':
+        integration_dim = 0
+    elif integral_type in vert_facet_types + horiz_facet_types:
+        # Extrusion case
+        if not isinstance(fiat_cell, TensorProductCell):
+            raise ValueError("{} integral requires a TensorProductCell.".format(integral_type))
+        basedim, extrdim = dim
+        assert extrdim == 1
+
+        if integral_type in vert_facet_types:
+            integration_dim = (basedim - 1, 1)
+        elif integral_type in horiz_facet_types:
+            integration_dim = (basedim, 0)
+    else:
+        raise NotImplementedError("integral type %s not supported" % integral_type)
+
+    if integral_type == 'exterior_facet_bottom':
+        entity_ids = [0]
+    elif integral_type == 'exterior_facet_top':
+        entity_ids = [1]
+    else:
+        entity_ids = list(range(len(fiat_cell.get_topology()[integration_dim])))
+
+    return integration_dim, entity_ids
 
 
 def pick_mode(mode):

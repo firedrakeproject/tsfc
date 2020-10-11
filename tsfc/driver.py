@@ -13,7 +13,6 @@ from ufl.algorithms import extract_arguments, extract_coefficients
 from ufl.algorithms.analysis import has_type
 from ufl.classes import Form, GeometricQuantity, Coefficient, FunctionSpace
 from ufl.log import GREEN
-from ufl.utils.sequences import max_degree
 
 import gem
 import gem.impero_utils as impero_utils
@@ -21,11 +20,10 @@ from gem.node import MemoizerArg, reuse_if_untouched_arg
 from gem.optimise import filtered_replace_indices
 
 import FIAT
-from FIAT.reference_element import TensorProductCell
 from FIAT.functional import PointEvaluation
 
 from finat.point_set import PointSet
-from finat.quadrature import AbstractQuadratureRule, make_quadrature, QuadratureRule
+from finat.quadrature import QuadratureRule
 
 from tsfc import fem, ufl_utils
 from tsfc.finatinterface import as_fiat_cell, create_element
@@ -264,12 +262,10 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     kernel_name = "%s_%s_integral_%s" % (prefix, integral_data.integral_type, integral_data.subdomain_id)
     kernel_name = kernel_name.replace("-", "_")  # Handle negative subdomain_id
     kernel_config = create_kernel_config(kernel_name, integral_data, parameters, builder)
-    functions = list(builder.arguments) + [builder.coordinate(integral_data.domain)] + list(integral_data.coefficients)
 
     for integral in integral_data.integrals:
         params = parameters.copy()
         params.update(integral.metadata())  # integral metadata overrides
-        set_quad_rule(params, integral_data.domain.ufl_cell(), integral_data.integral_type, functions)
         expressions = builder.compile_ufl(integral.integrand(), params, kernel_config)
         expressions = replace_argument_multiindices_dummy(expressions, kernel_config, chain(*builder.argument_multiindex), chain(*builder.argument_multiindex_dummy))
         reps = builder.construct_integrals(expressions, params, kernel_config)
@@ -294,11 +290,9 @@ def preprocess_parameters(parameters):
 
 def create_kernel_config(kernel_name, integral_data, parameters, builder):
     # Data required for the UFL -> GEM local tensor construction.
-    fem_config = create_fem_config(builder,
-                                   integral_data.domain,
-                                   integral_data.integral_type,
-                                   builder.argument_multiindices_dummy,
-                                   parameters["scalar_type"])
+    builder.create_fem_config(integral_data.domain,
+                              integral_data.integral_type,
+                              parameters["scalar_type"])
     # Data required for kernel construction. 
     kernel_config = dict(name=kernel_name,
                          integral_type=integral_data.integral_type,
@@ -307,67 +301,11 @@ def create_kernel_config(kernel_name, integral_data, parameters, builder):
                          coefficient_numbers=integral_data.coefficient_numbers,
                          subspace_numbers=integral_data.subspace_numbers,
                          subspace_parts=[None for _ in integral_data.subspace_numbers],
-                         fem_config=fem_config,
                          mode_irs=collections.OrderedDict(),
                          oriented=None,
                          needs_cell_sizes=None,
                          tabulations=None)
     return kernel_config
-
-
-def create_fem_config(builder, mesh, integral_type, argument_multiindices_dummy, scalar_type):
-    # Map from UFL FiniteElement objects to multiindices.  This is
-    # so we reuse Index instances when evaluating the same coefficient
-    # multiple times with the same table.
-    #
-    # We also use the same dict for the unconcatenate index cache,
-    # which maps index objects to tuples of multiindices.  These two
-    # caches shall never conflict as their keys have different types
-    # (UFL finite elements vs. GEM index objects).
-    #
-    # -> fem_config['index_cache']
-    cell = mesh.ufl_cell()
-    fiat_cell = as_fiat_cell(cell)
-    integration_dim, entity_ids = lower_integral_type(fiat_cell, integral_type)
-    fem_config = dict(interface=builder,
-                      ufl_cell=cell,
-                      integral_type=integral_type,
-                      integration_dim=integration_dim,
-                      entity_ids=entity_ids,
-                      argument_multiindices_dummy=argument_multiindices_dummy,
-                      index_cache={},
-                      scalar_type=scalar_type)
-    return fem_config
-
-
-def set_quad_rule(params, cell, integral_type, functions):
-    # Check if the integral has a quad degree attached, otherwise use
-    # the estimated polynomial degree attached by compute_form_data
-    try:
-        quadrature_degree = params["quadrature_degree"]
-    except KeyError:
-        quadrature_degree = params["estimated_polynomial_degree"]
-        function_degrees = [f.ufl_function_space().ufl_element().degree() for f in functions]
-        if all((asarray(quadrature_degree) > 10 * asarray(degree)).all()
-               for degree in function_degrees):
-            logger.warning("Estimated quadrature degree %s more "
-                           "than tenfold greater than any "
-                           "argument/coefficient degree (max %s)",
-                           quadrature_degree, max_degree(function_degrees))
-    if params.get("quadrature_rule") == "default":
-        del params["quadrature_rule"]
-    try:
-        quad_rule = params["quadrature_rule"]
-    except KeyError:
-        fiat_cell = as_fiat_cell(cell)
-        integration_dim, _ = lower_integral_type(fiat_cell, integral_type)
-        integration_cell = fiat_cell.construct_subelement(integration_dim)
-        quad_rule = make_quadrature(integration_cell, quadrature_degree)
-        params["quadrature_rule"] = quad_rule
-
-    if not isinstance(quad_rule, AbstractQuadratureRule):
-        raise ValueError("Expected to find a QuadratureRule object, not a %s" %
-                         type(quad_rule))
 
 
 def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
@@ -535,49 +473,6 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
     builder.register_requirements([ir])
     # Build kernel tuple
     return builder.construct_kernel(return_arg, impero_c, index_names)
-
-
-def lower_integral_type(fiat_cell, integral_type):
-    """Lower integral type into the dimension of the integration
-    subentity and a list of entity numbers for that dimension.
-
-    :arg fiat_cell: FIAT reference cell
-    :arg integral_type: integral type (string)
-    """
-    vert_facet_types = ['exterior_facet_vert', 'interior_facet_vert']
-    horiz_facet_types = ['exterior_facet_bottom', 'exterior_facet_top', 'interior_facet_horiz']
-
-    dim = fiat_cell.get_dimension()
-    if integral_type == 'cell':
-        integration_dim = dim
-    elif integral_type in ['exterior_facet', 'interior_facet']:
-        if isinstance(fiat_cell, TensorProductCell):
-            raise ValueError("{} integral cannot be used with a TensorProductCell; need to distinguish between vertical and horizontal contributions.".format(integral_type))
-        integration_dim = dim - 1
-    elif integral_type == 'vertex':
-        integration_dim = 0
-    elif integral_type in vert_facet_types + horiz_facet_types:
-        # Extrusion case
-        if not isinstance(fiat_cell, TensorProductCell):
-            raise ValueError("{} integral requires a TensorProductCell.".format(integral_type))
-        basedim, extrdim = dim
-        assert extrdim == 1
-
-        if integral_type in vert_facet_types:
-            integration_dim = (basedim - 1, 1)
-        elif integral_type in horiz_facet_types:
-            integration_dim = (basedim, 0)
-    else:
-        raise NotImplementedError("integral type %s not supported" % integral_type)
-
-    if integral_type == 'exterior_facet_bottom':
-        entity_ids = [0]
-    elif integral_type == 'exterior_facet_top':
-        entity_ids = [1]
-    else:
-        entity_ids = list(range(len(fiat_cell.get_topology()[integration_dim])))
-
-    return integration_dim, entity_ids
 
 
 def replace_argument_multiindices_dummy(expressions, kernel_config, argument_multiindex, argument_multiindex_dummy):

@@ -232,6 +232,12 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         self.return_variables = None
         self.quadrature_indices = []
 
+        self.fem_config = None
+
+        #Make these positional args
+        self.domain = domain
+        self.coefficients = None
+
         # Facet number
         if integral_type in ['exterior_facet', 'exterior_facet_vert']:
             facet = gem.Variable('facet', (1,))
@@ -248,7 +254,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         if domain:
             self.set_coordinates(domain)
             self.set_cell_sizes(domain)
-        if coefficients:
+        if coefficients is not None:
             self.set_coefficients(coefficients)
         if integral_data:
             self.set_subspaces(integral_data.subspaces, integral_data.original_subspaces)
@@ -294,6 +300,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
 
         :arg coefficients: a tuple of `ufl.Coefficient`s.
         """
+        self.coefficients = coefficients
         coeffs = []
         for c in coefficients:
             if type(c.ufl_element()) == ufl_MixedElement:
@@ -377,7 +384,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
                         subdomain_id=kernel_config['subdomain_id'],
                         domain_number=kernel_config['domain_number'])
 
-        index_cache = kernel_config['fem_config']['index_cache']
+        index_cache = self.fem_config['index_cache']
         index_names = _get_index_names(self.quadrature_indices, self.argument_multiindices, index_cache)
 
         kernel.coefficient_numbers = kernel_config['coefficient_numbers']
