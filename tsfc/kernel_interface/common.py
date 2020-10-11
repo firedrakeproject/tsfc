@@ -196,7 +196,7 @@ class KernelBuilderMixin(object):
     def stash_integrals(self, reps, params, kernel_config):
         mode = pick_mode(params["mode"])
         mode_irs = kernel_config["mode_irs"]
-        return_variables = kernel_config['return_variables']
+        return_variables = self.return_variables
         mode_irs.setdefault(mode, collections.OrderedDict())
         for var, rep in zip(return_variables, reps):
             mode_irs[mode].setdefault(var, []).append(rep)

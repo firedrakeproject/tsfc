@@ -220,6 +220,9 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         # Map to raw ufl Coefficient.
         self.dont_split = frozenset(function_replace_map[f] for f in dont_split if f in function_replace_map)
 
+        self.local_tensor = None
+        self.return_variables = None
+
         # Facet number
         if integral_type in ['exterior_facet', 'exterior_facet_vert']:
             facet = gem.Variable('facet', (1,))
@@ -248,14 +251,12 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         :arg multiindices: GEM argument multiindices
         :returns: GEM expression representing the return variable
         """
-        local_tensor, return_variables = prepare_arguments(
-                                             kernel_config['arguments'],
-                                             kernel_config['argument_multiindices'],
-                                             self.scalar_type,
-                                             interior_facet=self.interior_facet,
+        self.local_tensor, self.return_variables = prepare_arguments(
+                                                       kernel_config['arguments'],
+                                                       kernel_config['argument_multiindices'],
+                                                       self.scalar_type,
+                                                       interior_facet=self.interior_facet,
                                              diagonal=self.diagonal)
-        kernel_config['local_tensor'] = local_tensor
-        kernel_config['return_variables'] = return_variables
 
     def set_coordinates(self, domain):
         """Prepare the coordinate field.
@@ -358,9 +359,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         kernel.needs_cell_sizes = kernel_config['needs_cell_sizes']
         kernel.tabulations = kernel_config['tabulations']
 
-        local_tensor = kernel_config['local_tensor']
-
-        args = [local_tensor, self.coordinates_arg]
+        args = [self.local_tensor, self.coordinates_arg]
         if kernel.oriented:
             args.append(cell_orientations_coffee_arg)
         if kernel.needs_cell_sizes:
