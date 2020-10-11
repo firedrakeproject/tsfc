@@ -225,6 +225,9 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         # Map to raw ufl Coefficient.
         self.dont_split = frozenset(function_replace_map[f] for f in dont_split if f in function_replace_map)
 
+        self.arguments = None
+        self.argument_multiindices = None
+        self.argument_multiindices_dummy = None
         self.local_tensor = None
         self.return_variables = None
         self.quadrature_indices = []
@@ -250,19 +253,31 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         if integral_data:
             self.set_subspaces(integral_data.subspaces, integral_data.original_subspaces)
 
-    def set_arguments(self, kernel_config):
+    def set_arguments(self, arguments):
         """Process arguments.
 
         :arg arguments: :class:`ufl.Argument`s
         :arg multiindices: GEM argument multiindices
         :returns: GEM expression representing the return variable
         """
+        argument_multiindices = tuple(create_element(arg.ufl_element()).get_indices()
+                                      for arg in arguments)
+        argument_multiindices_dummy = tuple(tuple(gem.Index(extent=a.extent) for a in arg) for arg in argument_multiindices)
+        if self.diagonal:
+            # Error checking occurs in the builder constructor.
+            # Diagonal assembly is obtained by using the test indices for
+            # the trial space as well.
+            a, _ = argument_multiindices
+            argument_multiindices = (a, a)
         self.local_tensor, self.return_variables = prepare_arguments(
-                                                       kernel_config['arguments'],
-                                                       kernel_config['argument_multiindices'],
+                                                       arguments,
+                                                       argument_multiindices,
                                                        self.scalar_type,
                                                        interior_facet=self.interior_facet,
                                                        diagonal=self.diagonal)
+        self.arguments = arguments
+        self.argument_multiindices = argument_multiindices
+        self.argument_multiindices_dummy = argument_multiindices_dummy
 
     def set_coordinates(self, domain):
         """Prepare the coordinate field.
@@ -362,9 +377,8 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
                         subdomain_id=kernel_config['subdomain_id'],
                         domain_number=kernel_config['domain_number'])
 
-        argument_multiindices = kernel_config['argument_multiindices']
         index_cache = kernel_config['fem_config']['index_cache']
-        index_names = _get_index_names(self.quadrature_indices, argument_multiindices, index_cache)
+        index_names = _get_index_names(self.quadrature_indices, self.argument_multiindices, index_cache)
 
         kernel.coefficient_numbers = kernel_config['coefficient_numbers']
         kernel.subspace_numbers = kernel_config['subspace_numbers']

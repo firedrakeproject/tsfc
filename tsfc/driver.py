@@ -258,20 +258,20 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
                         integral_data=integral_data)#REMOVE this when we move subspace.
 
     # All form specific variables (such as arguments) are stored in kernel_config (not in KernelBuilder instance).
-    kernel_name = "%s_%s_integral_%s" % (prefix, integral_data.integral_type, integral_data.subdomain_id)
-    kernel_name = kernel_name.replace("-", "_")  # Handle negative subdomain_id
-    kernel_config = create_kernel_config(kernel_name, form_data, integral_data, parameters, builder, diagonal)
     # The followings are specific for the concrete form representation, so
     # not to be saved in KernelBuilders.
-    builder.set_arguments(kernel_config)
-    functions = list(kernel_config['arguments']) + [builder.coordinate(integral_data.domain)] + list(integral_data.coefficients)
+    builder.set_arguments(form_data.arguments)
+    kernel_name = "%s_%s_integral_%s" % (prefix, integral_data.integral_type, integral_data.subdomain_id)
+    kernel_name = kernel_name.replace("-", "_")  # Handle negative subdomain_id
+    kernel_config = create_kernel_config(kernel_name, integral_data, parameters, builder)
+    functions = list(builder.arguments) + [builder.coordinate(integral_data.domain)] + list(integral_data.coefficients)
 
     for integral in integral_data.integrals:
         params = parameters.copy()
         params.update(integral.metadata())  # integral metadata overrides
         set_quad_rule(params, integral_data.domain.ufl_cell(), integral_data.integral_type, functions)
         expressions = builder.compile_ufl(integral.integrand(), params, kernel_config)
-        expressions = replace_argument_multiindices_dummy(expressions, kernel_config)
+        expressions = replace_argument_multiindices_dummy(expressions, kernel_config, chain(*builder.argument_multiindex), chain(*builder.argument_multiindex_dummy))
         reps = builder.construct_integrals(expressions, params, kernel_config)
         builder.stash_integrals(reps, params, kernel_config)
     return builder.construct_kernel(kernel_config)
@@ -292,22 +292,12 @@ def preprocess_parameters(parameters):
     return parameters
 
 
-def create_kernel_config(kernel_name, form_data, integral_data, parameters, builder, diagonal):
-    arguments = form_data.arguments
-    argument_multiindices = tuple(create_element(arg.ufl_element()).get_indices()
-                                  for arg in arguments)
-    argument_multiindices_dummy = tuple(tuple(gem.Index(extent=a.extent) for a in arg) for arg in argument_multiindices)
-    if diagonal:
-        # Error checking occurs in the builder constructor.
-        # Diagonal assembly is obtained by using the test indices for
-        # the trial space as well.
-        a, _ = argument_multiindices
-        argument_multiindices = (a, a)
+def create_kernel_config(kernel_name, integral_data, parameters, builder):
     # Data required for the UFL -> GEM local tensor construction.
     fem_config = create_fem_config(builder,
                                    integral_data.domain,
                                    integral_data.integral_type,
-                                   argument_multiindices_dummy,
+                                   builder.argument_multiindices_dummy,
                                    parameters["scalar_type"])
     # Data required for kernel construction. 
     kernel_config = dict(name=kernel_name,
@@ -317,8 +307,6 @@ def create_kernel_config(kernel_name, form_data, integral_data, parameters, buil
                          coefficient_numbers=integral_data.coefficient_numbers,
                          subspace_numbers=integral_data.subspace_numbers,
                          subspace_parts=[None for _ in integral_data.subspace_numbers],
-                         arguments=arguments,
-                         argument_multiindices=argument_multiindices,
                          fem_config=fem_config,
                          mode_irs=collections.OrderedDict(),
                          oriented=None,
