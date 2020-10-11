@@ -320,7 +320,6 @@ def create_kernel_config(kernel_name, form_data, integral_data, parameters, buil
                          arguments=arguments,
                          argument_multiindices=argument_multiindices,
                          fem_config=fem_config,
-                         quadrature_indices=[],
                          mode_irs=collections.OrderedDict(),
                          oriented=None,
                          needs_cell_sizes=None,

@@ -144,13 +144,12 @@ class KernelBuilderMixin(object):
         expressions = fem.compile_ufl(integrand,
                                       interior_facet=self.interior_facet,
                                       **config)
-        kernel_config['quadrature_indices'].extend(quad_rule.point_set.indices)
+        self.quadrature_indices.extend(quad_rule.point_set.indices)
         return expressions
 
     def compile_gem(self, kernel_config):
         # Finalise mode representations into a set of assignments
         mode_irs = kernel_config["mode_irs"]
-        quadrature_indices = kernel_config['quadrature_indices']
         index_cache = kernel_config['fem_config']['index_cache']
 
         assignments = []
@@ -179,7 +178,7 @@ class KernelBuilderMixin(object):
 
         # Construct ImperoC
         assignments = list(zip(return_variables, expressions))
-        index_ordering = _get_index_ordering(quadrature_indices, return_variables)
+        index_ordering = _get_index_ordering(self.quadrature_indices, return_variables)
         try:
             impero_c = impero_utils.compile_gem(assignments, index_ordering, remove_zeros=True)
         except impero_utils.NoopError:

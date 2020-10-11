@@ -227,6 +227,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
 
         self.local_tensor = None
         self.return_variables = None
+        self.quadrature_indices = []
 
         # Facet number
         if integral_type in ['exterior_facet', 'exterior_facet_vert']:
@@ -361,10 +362,9 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
                         subdomain_id=kernel_config['subdomain_id'],
                         domain_number=kernel_config['domain_number'])
 
-        quadrature_indices = kernel_config['quadrature_indices']
         argument_multiindices = kernel_config['argument_multiindices']
         index_cache = kernel_config['fem_config']['index_cache']
-        index_names = _get_index_names(quadrature_indices, argument_multiindices, index_cache)
+        index_names = _get_index_names(self.quadrature_indices, argument_multiindices, index_cache)
 
         kernel.coefficient_numbers = kernel_config['coefficient_numbers']
         kernel.subspace_numbers = kernel_config['subspace_numbers']
