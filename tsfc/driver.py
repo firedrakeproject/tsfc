@@ -68,14 +68,19 @@ class TSFCFormData(object):
                 |____0___||____1___|_     _|____M___|       ||________||________|       |________||
                                                             |_____________________________________|
     """
-    def __init__(self, form_data_tuple, original_form, diagonal, form_data_hidden_function_map={}):
-        try:
-            self.arguments, = set(tuple(fd.preprocessed_form.arguments()
-                                        for fd in form_data_tuple))
-        except ValueError:
+    def __init__(self, form_data_tuple, original_form, diagonal, form_data_extraarg_map={}, form_data_function_map={}):
+        arguments = set()
+        for fd in form_data_tuple:
+            args = []
+            for arg in fd.preprocessed_form.arguments():
+                if arg not in form_data_extraarg_map[fd]:
+                    args.append(arg)
+            arguments.update((tuple(args), ))
+        if len(arguments) != 1:
             raise ValueError("All `FormData`s must share the same set of arguments.")
+        self.arguments, = tuple(arguments)
         reduced_coefficients_set = set(c for fd in form_data_tuple for c in fd.reduced_coefficients)
-        for _, val in form_data_hidden_function_map.items():
+        for _, val in form_data_function_map.items():
             reduced_coefficients_set.update(val)
         reduced_coefficients = sorted(reduced_coefficients_set, key=lambda c: c.count())
         if False:#len(form_data_tuple) == 1:
@@ -127,7 +132,7 @@ class TSFCFormData(object):
             domain_number = original_form.domain_numbering()[domain]
             integral_data_list.append(TSFCIntegralData(key, intg_data_list, form_data_list,
                                                        self, domain_number,
-                                                       form_data_hidden_function_map=form_data_hidden_function_map))
+                                                       form_data_function_map=form_data_function_map))
         self.integral_data = tuple(integral_data_list)
 
 
@@ -143,7 +148,7 @@ class TSFCIntegralData(object):
         * preprocesses integrals so that `KernelBuilder`s only
           need to deal with raw `ufl.Coefficient`s.
     """
-    def __init__(self, integral_data_key, integral_data_list, form_data_list, tsfc_form_data, domain_number, form_data_hidden_function_map={}):
+    def __init__(self, integral_data_key, integral_data_list, form_data_list, tsfc_form_data, domain_number, form_data_function_map={}):
         self.domain, self.integral_type, self.subdomain_id = integral_data_key
         self.domain_number = domain_number
 
@@ -160,8 +165,7 @@ class TSFCIntegralData(object):
                 _integral_to_form_data_map[new_integral] = form_data
             # Gather functions that are enabled in this `TSFCIntegralData`.
             functions.update(f for f, enabled in zip(form_data.reduced_coefficients, intg_data.enabled_coefficients) if enabled)
-            if form_data in form_data_hidden_function_map:
-                functions.update(form_data_hidden_function_map[form_data])
+            functions.update(form_data_function_map[form_data])
         self.integrals = tuple(integrals)
         self._integral_to_form_data_map = _integral_to_form_data_map
 
@@ -218,7 +222,7 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
     kernels = []
     for integral_data in tsfc_form_data.integral_data:
         start = time.time()
-        kernel = compile_integral(integral_data, tsfc_form_data, prefix, parameters, interface=interface, coffee=coffee, diagonal=diagonal)
+        kernel = compile_integral(integral_data, tsfc_form_data.arguments, prefix, parameters, interface=interface, coffee=coffee, diagonal=diagonal)
         if kernel is not None:
             kernels.append(kernel)
         logger.info(GREEN % "compile_integral finished in %g seconds.", time.time() - start)
@@ -227,11 +231,10 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
     return kernels
 
 
-def compile_integral(integral_data, form_data, prefix, parameters, interface, coffee, *, diagonal=False):
+def compile_integral(integral_data, arguments, prefix, parameters, interface, coffee, *, diagonal=False):
     """Compiles a UFL integral into an assembly kernel.
 
     :arg integral_data: TSFCIntegralData
-    :arg form_data: TSFCFormData
     :arg prefix: kernel name will start with this string
     :arg parameters: parameters object
     :arg interface: backend module for the kernel interface
@@ -252,7 +255,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
                         parameters["scalar_type_c"] if coffee else parameters["scalar_type"],
                         domain=integral_data.domain,
                         coefficients=integral_data.coefficients,
-                        arguments=form_data.arguments,
+                        arguments=arguments,
                         diagonal=diagonal,
                         fem_scalar_type = parameters["scalar_type"],
                         integral_data=integral_data)#REMOVE this when we move subspace.
