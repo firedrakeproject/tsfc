@@ -252,13 +252,14 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
                         parameters["scalar_type_c"] if coffee else parameters["scalar_type"],
                         domain=integral_data.domain,
                         coefficients=integral_data.coefficients,
+                        arguments=form_data.arguments,
                         diagonal=diagonal,
+                        fem_scalar_type = parameters["scalar_type"],
                         integral_data=integral_data)#REMOVE this when we move subspace.
 
     # All form specific variables (such as arguments) are stored in kernel_config (not in KernelBuilder instance).
     # The followings are specific for the concrete form representation, so
     # not to be saved in KernelBuilders.
-    builder.set_arguments(form_data.arguments)
     kernel_name = "%s_%s_integral_%s" % (prefix, integral_data.integral_type, integral_data.subdomain_id)
     kernel_name = kernel_name.replace("-", "_")  # Handle negative subdomain_id
     kernel_config = create_kernel_config(kernel_name, integral_data, parameters, builder)
@@ -289,10 +290,6 @@ def preprocess_parameters(parameters):
 
 
 def create_kernel_config(kernel_name, integral_data, parameters, builder):
-    # Data required for the UFL -> GEM local tensor construction.
-    builder.create_fem_config(integral_data.domain,
-                              integral_data.integral_type,
-                              parameters["scalar_type"])
     # Data required for kernel construction. 
     kernel_config = dict(name=kernel_name,
                          integral_type=integral_data.integral_type,
@@ -388,7 +385,7 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
     # Translate to GEM
     kernel_cfg = dict(interface=builder,
                       ufl_cell=coordinates.ufl_domain().ufl_cell(),
-                      argument_multiindices_dummy=argument_multiindices,
+                      argument_multiindices=argument_multiindices,
                       index_cache={},
                       scalar_type=parameters["scalar_type"])
 
@@ -487,8 +484,6 @@ def replace_argument_multiindices_dummy(expressions, kernel_config, argument_mul
     multiindices with true ones.
     """
     # True/dummy argument multiindices.
-    #argument_multiindices = kernel_config['fem_config']['argument_multiindices']
-    #argument_multiindices_dummy = kernel_config['fem_config']['argument_multiindices_dummy']
     if argument_multiindex_dummy == argument_multiindex:
         return expressions
     substitution = tuple(zip(argument_multiindex_dummy, argument_multiindex))

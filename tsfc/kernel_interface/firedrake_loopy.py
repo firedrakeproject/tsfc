@@ -210,8 +210,8 @@ class ExpressionKernelBuilder(KernelBuilderBase):
 class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
     """Helper class for building a :class:`Kernel` object."""
 
-    def __init__(self, integral_type, scalar_type, domain=None, coefficients=None,
-                 dont_split=(), function_replace_map={}, diagonal=False, integral_data=None):
+    def __init__(self, integral_type, scalar_type, domain=None, coefficients=None, arguments = None,
+                 dont_split=(), function_replace_map={}, diagonal=False, integral_data=None, fem_scalar_type=None):
         """Initialise a kernel builder."""
         KernelBuilderBase.__init__(self, scalar_type, integral_type.startswith("interior_facet"))
 
@@ -225,13 +225,10 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         # Map to raw ufl Coefficient.
         self.dont_split = frozenset(function_replace_map[f] for f in dont_split if f in function_replace_map)
 
-        self.arguments = None
-        self.argument_multiindices = None
-        self.argument_multiindices_dummy = None
-        self.local_tensor = None
-        self.return_variables = None
-        self.quadrature_indices = []
+        if arguments is not None:
+            self.set_arguments(arguments)
 
+        self.quadrature_indices = []
         self.fem_config = None
 
         #Make these positional args
@@ -258,6 +255,10 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
             self.set_coefficients(coefficients)
         if integral_data:
             self.set_subspaces(integral_data.subspaces, integral_data.original_subspaces)
+
+        # Data required for the UFL -> GEM local tensor construction.
+        if domain:
+            self.create_fem_config(domain, integral_type, fem_scalar_type)
 
     def set_arguments(self, arguments):
         """Process arguments.

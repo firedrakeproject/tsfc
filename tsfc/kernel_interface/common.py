@@ -141,7 +141,7 @@ class KernelBuilderBase(KernelInterface):
 
 class KernelBuilderMixin(object):
 
-    def compile_ufl(self, integrand, params, kernel_config):
+    def compile_ufl(self, integrand, params, kernel_config, argument_multiindices=None):
         # Split Coefficients
         if self.coefficient_split:
             integrand = ufl_utils.split_coefficients(integrand, self.coefficient_split, self.subspace_split)
@@ -152,6 +152,7 @@ class KernelBuilderMixin(object):
         quad_rule = params["quadrature_rule"]
         config = self.fem_config.copy()
         config.update(quadrature_rule=quad_rule)
+        config['argument_multiindices'] = argument_multiindices or self.argument_multiindices_dummy
         expressions = fem.compile_ufl(integrand,
                                       interior_facet=self.interior_facet,
                                       **config)
@@ -230,7 +231,6 @@ class KernelBuilderMixin(object):
                                integral_type=integral_type,
                                integration_dim=integration_dim,
                                entity_ids=entity_ids,
-                               argument_multiindices_dummy=self.argument_multiindices_dummy,
                                index_cache={},
                                scalar_type=scalar_type)
 
