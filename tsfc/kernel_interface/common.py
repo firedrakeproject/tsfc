@@ -161,7 +161,7 @@ class KernelBuilderMixin(object):
 
     def compile_gem(self, kernel_config):
         # Finalise mode representations into a set of assignments
-        mode_irs = kernel_config["mode_irs"]
+        mode_irs = self.mode_irs
         index_cache = self.fem_config['index_cache']
 
         assignments = []
@@ -203,7 +203,7 @@ class KernelBuilderMixin(object):
 
     def stash_integrals(self, reps, params, kernel_config):
         mode = pick_mode(params["mode"])
-        mode_irs = kernel_config["mode_irs"]
+        mode_irs = self.mode_irs
         return_variables = self.return_variables
         mode_irs.setdefault(mode, collections.OrderedDict())
         for var, rep in zip(return_variables, reps):

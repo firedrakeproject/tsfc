@@ -271,10 +271,10 @@ def compile_integral(integral_data, arguments, prefix, parameters, interface, co
         params = parameters.copy()
         params.update(integral.metadata())  # integral metadata overrides
         expressions = builder.compile_ufl(integral.integrand(), params, kernel_config)
-        expressions = replace_argument_multiindices_dummy(expressions, kernel_config, chain(*builder.argument_multiindex), chain(*builder.argument_multiindex_dummy))
+        expressions = replace_argument_multiindices_dummy(expressions, chain(*builder.argument_multiindex), chain(*builder.argument_multiindex_dummy))
         reps = builder.construct_integrals(expressions, params, kernel_config)
         builder.stash_integrals(reps, params, kernel_config)
-    return builder.construct_kernel(kernel_config)
+    return builder.construct_kernel(kernel_name, kernel_config)
 
 
 def preprocess_parameters(parameters):
@@ -300,8 +300,7 @@ def create_kernel_config(kernel_name, integral_data, parameters, builder):
                          domain_number=integral_data.domain_number,
                          coefficient_numbers=integral_data.coefficient_numbers,
                          subspace_numbers=integral_data.subspace_numbers,
-                         subspace_parts=[None for _ in integral_data.subspace_numbers],
-                         mode_irs=collections.OrderedDict())
+                         subspace_parts=[None for _ in integral_data.subspace_numbers])
     return kernel_config
 
 
@@ -472,11 +471,10 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
     return builder.construct_kernel(return_arg, impero_c, index_names)
 
 
-def replace_argument_multiindices_dummy(expressions, kernel_config, argument_multiindex, argument_multiindex_dummy):
+def replace_argument_multiindices_dummy(expressions, argument_multiindex, argument_multiindex_dummy):
     r"""Replace dummy indices with true argument multiindices.
     
     :arg expressions: gem expressions written in terms of argument_multiindices_dummy.
-    :arg kernel_config:
 
     Applying `Delta(i, i_dummy)` and then `IndexSum(..., i_dummy)` would result in
     too many `IndexSum`s and `gem.optimise.contraction` would complain.

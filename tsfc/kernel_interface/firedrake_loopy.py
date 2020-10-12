@@ -1,4 +1,5 @@
 import numpy
+import collections
 from collections import namedtuple
 import operator
 import string
@@ -227,6 +228,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
 
         if arguments is not None:
             self.set_arguments(arguments)
+        self.mode_irs=collections.OrderedDict()
 
         self.quadrature_indices = []
 
@@ -361,7 +363,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         provided by the kernel interface."""
         return check_requirements(ir)
 
-    def construct_kernel(self, kernel_config):
+    def construct_kernel(self, kernel_name, kernel_config):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument
@@ -372,12 +374,10 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         :arg index_names: pre-assigned index names
         :returns: :class:`Kernel` object
         """
-        name = kernel_config['name']
-
         impero_c, oriented, needs_cell_sizes, tabulations = self.compile_gem(kernel_config)
 
         if impero_c is None:
-            return self.construct_empty_kernel(name)
+            return self.construct_empty_kernel(kernel_name)
 
         kernel = Kernel(integral_type=kernel_config['integral_type'],
                         subdomain_id=kernel_config['subdomain_id'],
@@ -408,13 +408,13 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         elif kernel.integral_type in ["interior_facet", "interior_facet_vert"]:
             args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(2,)))
 
-        for name_, shape in kernel.tabulations:
-            args.append(lp.GlobalArg(name_, dtype=self.scalar_type, shape=shape))
+        for name, shape in kernel.tabulations:
+            args.append(lp.GlobalArg(name, dtype=self.scalar_type, shape=shape))
 
-        kernel.ast = generate_loopy(impero_c, args, self.scalar_type, name, index_names)
+        kernel.ast = generate_loopy(impero_c, args, self.scalar_type, kernel_name, index_names)
         return kernel
 
-    def construct_empty_kernel(self, name):
+    def construct_empty_kernel(self, kernel_name):
         """Return None, since Firedrake needs no empty kernels.
 
         :arg name: function name

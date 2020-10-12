@@ -1,4 +1,5 @@
 import numpy
+import collections
 from collections import namedtuple
 import operator
 import string
@@ -222,6 +223,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
 
         if arguments is not None:
             self.set_arguments(arguments)
+        self.mode_irs=collections.OrderedDict()
 
         self.quadrature_indices = []
 
@@ -342,7 +344,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         provided by the kernel interface."""
         return check_requirements(ir)
 
-    def construct_kernel(self, kernel_config):
+    def construct_kernel(self, kernel_name, kernel_config):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument
@@ -354,12 +356,10 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
 
         :returns: :class:`Kernel` object
         """
-        name = kernel_config['name']
-
         impero_c, oriented, needs_cell_sizes, tabulations = self.compile_gem(kernel_config)
 
         if impero_c is None:
-            return self.construct_empty_kernel(name)
+            return self.construct_empty_kernel(kernel_name)
 
         kernel = Kernel(integral_type=kernel_config['integral_type'],
                         subdomain_id=kernel_config['subdomain_id'],
@@ -394,14 +394,14 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
                                     coffee.Symbol("facet", rank=(2,)),
                                     qualifiers=["const"]))
 
-        for name_, shape in kernel.tabulations:
+        for name, shape in kernel.tabulations:
             args.append(coffee.Decl(self.scalar_type, coffee.Symbol(
-                name_, rank=shape), qualifiers=["const"]))
+                name, rank=shape), qualifiers=["const"]))
 
-        kernel.ast = KernelBuilderBase.construct_kernel(self, name, args, body)
+        kernel.ast = KernelBuilderBase.construct_kernel(self, kernel_name, args, body)
         return kernel
 
-    def construct_empty_kernel(self, name):
+    def construct_empty_kernel(self, kernel_name):
         """Return None, since Firedrake needs no empty kernels.
 
         :arg name: function name
