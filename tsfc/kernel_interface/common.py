@@ -212,7 +212,8 @@ class KernelBuilderMixin(object):
         for var, rep in zip(return_variables, reps):
             mode_irs[mode].setdefault(var, []).append(rep)
 
-    def create_fem_config(self, mesh, integral_type, scalar_type):
+    @cached_property
+    def fem_config(self):
         # Map from UFL FiniteElement objects to multiindices.  This is
         # so we reuse Index instances when evaluating the same coefficient
         # multiple times with the same table.
@@ -223,16 +224,16 @@ class KernelBuilderMixin(object):
         # (UFL finite elements vs. GEM index objects).
         #
         # -> fem_config['index_cache']
-        cell = mesh.ufl_cell()
+        cell = self.domain.ufl_cell()
         fiat_cell = as_fiat_cell(cell)
-        integration_dim, entity_ids = lower_integral_type(fiat_cell, integral_type)
-        self.fem_config = dict(interface=self,
-                               ufl_cell=cell,
-                               integral_type=integral_type,
-                               integration_dim=integration_dim,
-                               entity_ids=entity_ids,
-                               index_cache={},
-                               scalar_type=scalar_type)
+        integration_dim, entity_ids = lower_integral_type(fiat_cell, self.integral_type)
+        return  dict(interface=self,
+                     ufl_cell=cell,
+                     integral_type=self.integral_type,
+                     integration_dim=integration_dim,
+                     entity_ids=entity_ids,
+                     index_cache={},
+                     scalar_type=self.fem_scalar_type)
 
 
 def _get_index_ordering(quadrature_indices, return_variables):

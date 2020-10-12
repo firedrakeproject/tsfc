@@ -224,7 +224,6 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
             self.set_arguments(arguments)
 
         self.quadrature_indices = []
-        self.fem_config = None
 
         #Make these positional args
         self.domain = domain
@@ -251,9 +250,8 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         if integral_data:
             self.set_subspaces(integral_data.subspaces, integral_data.original_subspaces)
 
-        # Data required for the UFL -> GEM local tensor construction.
-        if domain:
-            self.create_fem_config(domain, integral_type, fem_scalar_type)
+        self.integral_type = integral_type
+        self.fem_scalar_type = fem_scalar_type
 
     def set_arguments(self, arguments):
         """Process arguments.
