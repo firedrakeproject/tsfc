@@ -184,9 +184,6 @@ class KernelBuilderMixin(object):
         # what kind of external data is required (e.g., cell orientations,
         # cell sizes, etc.).
         oriented, needs_cell_sizes, tabulations = self.register_requirements(expressions)
-        kernel_config['oriented'] = oriented
-        kernel_config['needs_cell_sizes'] = needs_cell_sizes
-        kernel_config['tabulations'] =tabulations
 
         # Construct ImperoC
         assignments = list(zip(return_variables, expressions))
@@ -195,7 +192,7 @@ class KernelBuilderMixin(object):
             impero_c = impero_utils.compile_gem(assignments, index_ordering, remove_zeros=True)
         except impero_utils.NoopError:
             impero_c = None
-        return impero_c
+        return impero_c, oriented, needs_cell_sizes, tabulations
 
     def construct_integrals(self, expressions, params, kernel_config):
         mode = pick_mode(params["mode"])

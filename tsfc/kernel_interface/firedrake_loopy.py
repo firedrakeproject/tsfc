@@ -374,7 +374,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         """
         name = kernel_config['name']
 
-        impero_c = self.compile_gem(kernel_config)
+        impero_c, oriented, needs_cell_sizes, tabulations = self.compile_gem(kernel_config)
 
         if impero_c is None:
             return self.construct_empty_kernel(name)
@@ -393,9 +393,9 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         kernel.external_data_parts = kernel_config['external_data_parts']
 
         # requirements
-        kernel.oriented = kernel_config['oriented']
-        kernel.needs_cell_sizes = kernel_config['needs_cell_sizes']
-        kernel.tabulations = kernel_config['tabulations']
+        kernel.oriented = oriented
+        kernel.needs_cell_sizes = needs_cell_sizes
+        kernel.tabulations = tabulations
 
         args = [self.local_tensor, self.coordinates_arg]
         if kernel.oriented:

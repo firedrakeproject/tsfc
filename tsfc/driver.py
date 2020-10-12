@@ -301,10 +301,7 @@ def create_kernel_config(kernel_name, integral_data, parameters, builder):
                          coefficient_numbers=integral_data.coefficient_numbers,
                          subspace_numbers=integral_data.subspace_numbers,
                          subspace_parts=[None for _ in integral_data.subspace_numbers],
-                         mode_irs=collections.OrderedDict(),
-                         oriented=None,
-                         needs_cell_sizes=None,
-                         tabulations=None)
+                         mode_irs=collections.OrderedDict())
     return kernel_config
 
 
