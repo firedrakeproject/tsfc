@@ -46,9 +46,6 @@ class KernelBuilderBase(KernelInterface):
         # Coefficients
         self.coefficient_map = {}
 
-        # Subspaces
-        self.subspace_map = {}
-
     @cached_property
     def unsummed_coefficient_indices(self):
         return frozenset()
@@ -61,17 +58,6 @@ class KernelBuilderBase(KernelInterface):
         expressions."""
         kernel_arg = self.coefficient_map[ufl_coefficient]
         if ufl_coefficient.ufl_element().family() == 'Real':
-            return kernel_arg
-        elif not self.interior_facet:
-            return kernel_arg
-        else:
-            return kernel_arg[{'+': 0, '-': 1}[restriction]]
-
-    def subspace(self, ufl_subspace, restriction):
-        """A function that maps :class:`ufl.Subspace`s to GEM
-        expressions."""
-        kernel_arg = self.subspace_map[ufl_subspace]
-        if ufl_subspace.ufl_element().family() == 'Real':
             return kernel_arg
         elif not self.interior_facet:
             return kernel_arg
@@ -144,8 +130,7 @@ class KernelBuilderMixin(object):
     def compile_ufl(self, integrand, params, argument_multiindices=None):
         # Split Coefficients
         if self.coefficient_split:
-            integrand = ufl_utils.split_coefficients(integrand, self.coefficient_split, self.subspace_split)
-        integrand = ufl_utils.split_subspaces(integrand, self.subspace_split)
+            integrand = ufl_utils.split_coefficients(integrand, self.coefficient_split)
         # Compile: ufl -> gem
         functions = list(self.arguments) + [self.coordinate(self.integral_data.domain)] + list(self.integral_data.coefficients)
         _set_quad_rule(params, self.integral_data.domain.ufl_cell(), self.integral_data.integral_type, functions)

@@ -106,10 +106,6 @@ class TSFCFormData(object):
             self.original_coefficient_positions = [i for i, f in enumerate(original_form.coefficients())
                                                    if f in self.reduced_coefficients]
             self.function_replace_map = function_replace_map
-        # Subspace
-        self.reduced_subspaces = form_data_tuple[0].reduced_subspaces
-        self.original_subspace_positions = form_data_tuple[0].original_subspace_positions
-        self.subspace_replace_map = form_data_tuple[0].subspace_replace_map
 
         # Translate `ufl.IntegralData`s -> `TSFCIntegralData`.
         intg_data_dict = {}
@@ -159,7 +155,6 @@ class TSFCIntegralData(object):
             for integral in intg_data.integrals:
                 integrand = integral.integrand()
                 integrand = ufl.replace(integrand, tsfc_form_data.function_replace_map)
-                integrand = ufl.replace(integrand, form_data.subspace_replace_map)
                 new_integral = integral.reconstruct(integrand=integrand)
                 integrals.append(new_integral)
                 _integral_to_form_data_map[new_integral] = form_data
@@ -181,13 +176,6 @@ class TSFCIntegralData(object):
         functions = sorted(functions, key=lambda c: c.count())
         self.coefficients = tuple(tsfc_form_data.function_replace_map[f] for f in functions)
         self.coefficient_numbers = tuple(tsfc_form_data.original_coefficient_positions[tsfc_form_data.reduced_coefficients.index(f)] for f in functions)
-
-        form_data = form_data_list[0]
-        intg_data = integral_data_list[0]
-        subspaces = tuple(c for c, enabled in zip(form_data.reduced_subspaces, intg_data.enabled_subspaces) if enabled)
-        self.original_subspaces = subspaces
-        self.subspaces = tuple(form_data.subspace_replace_map[c] for c in subspaces)
-        self.subspace_numbers = tuple(pos for pos, enabled in zip(form_data.original_subspace_positions, intg_data.enabled_subspaces) if enabled)
 
     def integral_to_form_data(self, integral):
         r"""Return `ufl.FormData` in which the given integral was found."""

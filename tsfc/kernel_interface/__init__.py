@@ -18,11 +18,6 @@ class KernelInterface(metaclass=ABCMeta):
         expressions."""
 
     @abstractmethod
-    def subspace(self, ufl_subspace, restriction):
-        """A function that maps :class:`ufl.Subspace`s to GEM
-        expressions."""
-
-    @abstractmethod
     def cell_orientation(self, restriction):
         """Cell orientation as a GEM expression."""
 

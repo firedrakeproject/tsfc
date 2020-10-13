@@ -13,7 +13,7 @@ from ufl.corealg.multifunction import MultiFunction
 from ufl.classes import (Argument, CellCoordinate, CellEdgeVectors,
                          CellFacetJacobian, CellOrientation,
                          CellOrigin, CellVertices, CellVolume,
-                         Coefficient, Subspace,
+                         Coefficient,
                          FacetArea, FacetCoordinate,
                          GeometricQuantity, Jacobian, JacobianDeterminant,
                          NegativeRestricted, QuadratureWeight,
@@ -620,25 +620,7 @@ def translate_argument(terminal, mt, ctx):
         return ffc_rounding(square, ctx.epsilon)
     table = ctx.entity_selector(callback, mt.restriction)
 
-    if mt.filter:
-        # split(topo_coeff) generates list tensors.
-        # TODO: add more regorous checks here.
-        fltr = mt.filter
-        # Remove internal list tensors.
-        def _remove_list_tensors(a):
-            if isinstance(a, ListTensor):
-                for i in range(a.ufl_shape[0]):
-                    yield from _remove_list_tensors(a[i])
-            else:
-                yield purge_list_tensors(a)
-        fltr = ListTensor(*tuple(_remove_list_tensors(fltr)))
-        fltr = tuple(extract_type(fltr, Subspace))
-        fltr = fltr[0]
-        mat = ctx.subspace(fltr, mt.restriction)
-        jj = tuple(gem.Index(extent=ix.extent) for ix in argument_multiindex)
-        a = gem.IndexSum(gem.Product(gem.Indexed(mat, argument_multiindex + jj), gem.Indexed(table, jj + sigma)), jj)
-    else:
-        a = gem.Indexed(table, argument_multiindex + sigma)
+    a = gem.Indexed(table, argument_multiindex + sigma)
     return gem.ComponentTensor(a, sigma)
 
 
@@ -646,15 +628,9 @@ def translate_argument(terminal, mt, ctx):
 def translate_coefficient(terminal, mt, ctx):
     vec = ctx.coefficient(terminal, mt.restriction)
 
-    if mt.filter:
-        filter_mat = ctx.subspace(mt.filter, mt.restriction)
-
     if terminal.ufl_element().family() == 'Real':
         assert mt.local_derivatives == 0
-        if mt.filter:
-            return gem.Product(filter_mat, vec)
-        else:
-            return vec
+        return vec
 
     element = ctx.create_element(terminal.ufl_element(), restriction=mt.restriction)
 
@@ -688,20 +664,13 @@ def translate_coefficient(terminal, mt, ctx):
     beta = ctx.index_cache[terminal.ufl_element()]
     zeta = element.get_value_indices()
     vec_beta, = gem.optimise.remove_componenttensors([gem.Indexed(vec, beta)])
-    if mt.filter:
-        gamma = tuple(gem.Index(extent=ix.extent) for ix in beta)
-        transform_mat_beta_gamma, = gem.optimise.remove_componenttensors([gem.Indexed(filter_mat, beta + gamma)])
     value_dict = {}
     for alpha, table in per_derivative.items():
         table_qi = gem.Indexed(table, beta + zeta)
         summands = []
         for var, expr in unconcatenate([(vec_beta, table_qi)], ctx.index_cache):
             indices = tuple(i for i in var.index_ordering() if i not in ctx.unsummed_coefficient_indices)
-            if mt.filter:
-                transformed_expr = gem.IndexSum(gem.Product(transform_mat_beta_gamma, gem.Indexed(gem.ComponentTensor(expr, beta), gamma)), gamma)
-                value = gem.IndexSum(gem.Product(transformed_expr, var), indices)
-            else:
-                value = gem.IndexSum(gem.Product(expr, var), indices)
+            value = gem.IndexSum(gem.Product(expr, var), indices)
             summands.append(gem.optimise.contraction(value))
         optimised_value = gem.optimise.make_sum(summands)
         value_dict[alpha] = gem.ComponentTensor(optimised_value, zeta)

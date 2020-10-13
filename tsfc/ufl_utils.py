@@ -26,8 +26,7 @@ from ufl.classes import (Abs, Argument, CellOrientation, Coefficient,
 
 from gem.node import MemoizerArg
 
-from tsfc.modified_terminals import (ModifiedTerminal,
-                                     is_modified_terminal,
+from tsfc.modified_terminals import (is_modified_terminal,
                                      analyse_modified_terminal,
                                      construct_modified_terminal)
 
@@ -149,8 +148,6 @@ class ModifiedTerminalMixin(object):
     # Unlike UFL, we do not regard Indexed as a terminal modifier.
     # indexed = _modified_terminal
 
-    masked = _modified_terminal
-
     positive_restricted = _modified_terminal
     negative_restricted = _modified_terminal
 
@@ -161,10 +158,9 @@ class ModifiedTerminalMixin(object):
 
 
 class CoefficientSplitter(MultiFunction, ModifiedTerminalMixin):
-    def __init__(self, split, filter_split):
+    def __init__(self, split):
         MultiFunction.__init__(self)
         self._split = split
-        self._filter_split = filter_split
 
     expr = MultiFunction.reuse_if_untouched
 
@@ -186,22 +182,10 @@ class CoefficientSplitter(MultiFunction, ModifiedTerminalMixin):
         # Derivative indices
         beta = indices(mt.local_derivatives)
 
-        # Coefficient split
-        _split = self._split[terminal]
-
-        # Subspace(filter) split
-        if mt.filter:
-            _filter_split = self._filter_split[mt.filter]
-            assert len(_filter_split) == len(_split), "Number of split components does not match"
-        else:
-            _filter_split = tuple(None for _ in _split)
-
         components = []
-        for subcoeff, subfltr in zip(_split, _filter_split):
-            # Construct ModifiedTerminal using sub filter
-            submt = ModifiedTerminal(None, None, mt.local_derivatives, mt.restriction, mt.reference_value, subfltr)
+        for subcoeff in self._split[terminal]:
             # Apply terminal modifiers onto the subcoefficient
-            component = construct_modified_terminal(submt, subcoeff)
+            component = construct_modified_terminal(mt, subcoeff)
             # Collect components of the subcoefficient
             for alpha in numpy.ndindex(subcoeff.ufl_element().reference_value_shape()):
                 # New modified terminal: component[alpha + beta]
@@ -211,60 +195,18 @@ class CoefficientSplitter(MultiFunction, ModifiedTerminalMixin):
         return ComponentTensor(as_tensor(components)[c], MultiIndex((c,) + beta))
 
 
-def split_coefficients(expression, split, filter_split=None):
+def split_coefficients(expression, split):
     """Split mixed coefficients, so mixed elements need not be
     implemented.
 
     :arg split: A :py:class:`dict` mapping each mixed coefficient to a
                 sequence of subcoefficients.  If None, calling this
                 function is a no-op.
-    :arg filter_split: A :py:class:`dict` mapping each mixed filter to a
-                sequence of subfilters.
     """
     if split is None:
         return expression
 
-    splitter = CoefficientSplitter(split, filter_split)
-    return map_expr_dag(splitter, expression)
-
-
-class SubspaceSplitter(MultiFunction):
-    def __init__(self, split):
-        MultiFunction.__init__(self)
-        self._split = split
-
-    expr = MultiFunction.reuse_if_untouched
-
-    def subspace(self, o):
-
-        if type(o.ufl_element()) != MixedElement:
-            # Only split mixed topological coefficients
-            return o
-
-        # Coefficient split
-        _split = self._split[o]
-
-        components = []
-        for subcoeff in _split:
-            # Collect components of the subcoefficient
-            for alpha in numpy.ndindex(subcoeff.ufl_element().reference_value_shape()):
-                # New modified terminal: component[alpha + beta]
-                components.append(subcoeff[alpha])
-        return as_tensor(components)
-
-
-def split_subspaces(expression, split):
-    """Split mixed subspaces, so mixed elements need not be
-    implemented.
-
-    :arg split: A :py:class:`dict` mapping each mixed subspace to a
-                sequence of sub-subspaces.  If None, calling this
-                function is a no-op.
-    """
-    if split is None:
-        return expression
-
-    splitter = SubspaceSplitter(split)
+    splitter = CoefficientSplitter(split)
     return map_expr_dag(splitter, expression)
 
 

@@ -6,7 +6,7 @@ import string
 from itertools import chain, product
 from functools import reduce, partial
 
-from ufl import Coefficient, Subspace, MixedElement as ufl_MixedElement, FunctionSpace, FiniteElement
+from ufl import Coefficient, MixedElement as ufl_MixedElement, FunctionSpace, FiniteElement
 
 import coffee.base as coffee
 
@@ -33,7 +33,7 @@ def make_builder(*args, **kwargs):
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
                  "domain_number", "needs_cell_sizes", "tabulations",
-                 "coefficient_numbers", "subspace_numbers", "subspace_parts", "__weakref__")
+                 "coefficient_numbers", "__weakref__")
     """A compiled Kernel object.
 
     :kwarg ast: The COFFEE ast for the kernel.
@@ -45,20 +45,12 @@ class Kernel(object):
         original_form.ufl_domains() to get the correct domain).
     :kwarg coefficient_numbers: A list of which coefficients from the
         form the kernel needs.
-    :kwarg subspace_numbers: A list of which subspaces from the
-        form the kernel needs.
-    :kwarg subspace_parts: A list of lists of subspace components
-        that are actually used in the given integral_data. If `None` is given
-        instead of a list of components, it is assumed that all components of
-        that subspace are to be used.
     :kwarg tabulations: The runtime tabulations this kernel requires
     :kwarg needs_cell_sizes: Does the kernel require cell sizes.
     """
     def __init__(self, ast=None, integral_type=None, oriented=False,
                  subdomain_id=None, domain_number=None,
                  coefficient_numbers=(),
-                 subspace_numbers=(),
-                 subspace_parts=None,
                  needs_cell_sizes=False):
         # Defaults
         self.ast = ast
@@ -67,8 +59,6 @@ class Kernel(object):
         self.domain_number = domain_number
         self.subdomain_id = subdomain_id
         self.coefficient_numbers = coefficient_numbers
-        self.subspace_numbers = subspace_numbers
-        self.subspace_parts = subspace_parts
         self.needs_cell_sizes = needs_cell_sizes
         super(Kernel, self).__init__()
 
@@ -102,21 +92,6 @@ class KernelBuilderBase(_KernelBuilderBase):
         """
         funarg, expression = prepare_coefficient(coefficient.ufl_element(), name, self.scalar_type, interior_facet=self.interior_facet)
         self.coefficient_map[coefficient] = expression
-        return funarg
-
-    def _subspace(self, subspace, name, matrix_constructor):
-        """Prepare a subspace. Adds glue code for the subspace
-        and adds the subspace to the subspace map.
-
-        :arg subspace: :class:`ufl.Subspace`
-        :arg name: subspace name
-        :returns: COFFEE function argument for the subspace
-        """
-        funarg, expression = prepare_coefficient(subspace.ufl_element(), name, self.scalar_type, interior_facet=self.interior_facet)
-        if not self.interior_facet:
-            self.subspace_map[subspace] = matrix_constructor(subspace.ufl_function_space().ufl_element(), expression, self.scalar_type)
-        else:
-            self.subspace_map[subspace] = tuple(matrix_constructor(subspace.ufl_function_space().ufl_element(), e, self.scalar_type) for e in expression)
         return funarg
 
     def set_cell_sizes(self, domain):
@@ -218,8 +193,6 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         self.coordinates_arg = None
         self.coefficient_args = []
         self.coefficient_split = {}
-        self.subspace_args = []
-        self.subspace_split = {}
         # Map to raw ufl Coefficient.
         self.dont_split = frozenset(function_replace_map[f] for f in dont_split if f in function_replace_map)
 
@@ -245,8 +218,6 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         self.set_coordinates(integral_data.domain)
         self.set_cell_sizes(integral_data.domain)
         self.set_coefficients(integral_data.coefficients)
-        if integral_data:
-            self.set_subspaces(integral_data.subspaces, integral_data.original_subspaces)
 
         self.fem_scalar_type = fem_scalar_type
 
@@ -305,32 +276,6 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         for i, c in enumerate(coeffs):
             self.coefficient_args.append(self._coefficient(c, "w_%d" % i))
 
-    def set_subspaces(self, subspaces, originals):
-        """Prepare the subspaces of the form.
-
-        :arg integral_data: UFL integral data
-        :arg form_data: UFL form data
-        """
-        objects = []
-        matrix_constructors = []
-        for obj, original in zip(subspaces, originals):
-            if type(obj.ufl_element()) == ufl_MixedElement:
-                if obj in self.dont_split:
-                    objects.append(obj)
-                    self.subspace_split[obj] = [obj]
-                    matrix_constructors.append(original.transform_matrix)
-                else:
-                    split = [Subspace(FunctionSpace(obj.ufl_domain(), element))
-                             for element in obj.ufl_element().sub_elements()]
-                    objects.extend(split)
-                    self.subspace_split[obj] = split
-                    matrix_constructors.extend([original.transform_matrix for _ in split])
-            else:
-                objects.append(obj)
-                matrix_constructors.append(original.transform_matrix)
-        for i, obj in enumerate(objects):
-            self.subspace_args.append(self._subspace(obj, "r_%d" % i, matrix_constructors[i]))
-
     def register_requirements(self, ir):
         """Inspect what is referenced by the IR that needs to be
         provided by the kernel interface."""
@@ -363,8 +308,6 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         body = generate_coffee(impero_c, index_names, self.scalar_type)
 
         kernel.coefficient_numbers = integral_data.coefficient_numbers
-        kernel.subspace_numbers = integral_data.subspace_numbers
-        kernel.subspace_parts = [None for _ in integral_data.subspace_numbers]
 
         # requirements
         kernel.oriented = oriented
@@ -376,7 +319,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
             args.append(cell_orientations_coffee_arg)
         if kernel.needs_cell_sizes:
             args.append(self.cell_sizes_arg)
-        args.extend(self.coefficient_args + self.subspace_args)
+        args.extend(self.coefficient_args)
         if kernel.integral_type in ["exterior_facet", "exterior_facet_vert"]:
             args.append(coffee.Decl("unsigned int",
                                     coffee.Symbol("facet", rank=(1,)),
