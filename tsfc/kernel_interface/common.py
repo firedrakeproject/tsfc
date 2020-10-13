@@ -147,8 +147,8 @@ class KernelBuilderMixin(object):
             integrand = ufl_utils.split_coefficients(integrand, self.coefficient_split, self.subspace_split)
         integrand = ufl_utils.split_subspaces(integrand, self.subspace_split)
         # Compile: ufl -> gem
-        functions = list(self.arguments) + [self.coordinate(self.domain)] + list(self.coefficients)
-        _set_quad_rule(params, self.fem_config['ufl_cell'], self.fem_config['integral_type'], functions)
+        functions = list(self.arguments) + [self.coordinate(self.integral_data.domain)] + list(self.integral_data.coefficients)
+        _set_quad_rule(params, self.integral_data.domain.ufl_cell(), self.integral_data.integral_type, functions)
         quad_rule = params["quadrature_rule"]
         config = self.fem_config.copy()
         config.update(quadrature_rule=quad_rule)
@@ -221,12 +221,13 @@ class KernelBuilderMixin(object):
         # (UFL finite elements vs. GEM index objects).
         #
         # -> fem_config['index_cache']
-        cell = self.domain.ufl_cell()
+        integral_type = self.integral_data.integral_type
+        cell = self.integral_data.domain.ufl_cell()
         fiat_cell = as_fiat_cell(cell)
-        integration_dim, entity_ids = lower_integral_type(fiat_cell, self.integral_type)
+        integration_dim, entity_ids = lower_integral_type(fiat_cell, integral_type)
         return  dict(interface=self,
                      ufl_cell=cell,
-                     integral_type=self.integral_type,
+                     integral_type=integral_type,
                      integration_dim=integration_dim,
                      entity_ids=entity_ids,
                      index_cache={},

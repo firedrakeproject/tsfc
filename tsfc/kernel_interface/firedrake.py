@@ -207,9 +207,10 @@ class ExpressionKernelBuilder(KernelBuilderBase):
 class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
     """Helper class for building a :class:`Kernel` object."""
 
-    def __init__(self, integral_data, integral_type, scalar_type, domain=None, coefficients=None, arguments=None,
-                 dont_split=(), function_replace_map={}, diagonal=False, fem_scalar_type=None):
+    def __init__(self, integral_data, scalar_type, fem_scalar_type,
+                 dont_split=(), function_replace_map={}, diagonal=False):
         """Initialise a kernel builder."""
+        integral_type = integral_data.integral_type
         KernelBuilderBase.__init__(self, scalar_type, integral_type.startswith("interior_facet"))
         self.integral_data = integral_data
 
@@ -222,15 +223,11 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         # Map to raw ufl Coefficient.
         self.dont_split = frozenset(function_replace_map[f] for f in dont_split if f in function_replace_map)
 
-        if arguments is not None:
-            self.set_arguments(arguments)
+        self.arguments = integral_data.arguments
+        self.local_tensor, self.return_variables, self.argument_multiindices, self.argument_multiindices_dummy = self.set_arguments(self.arguments)
         self.mode_irs=collections.OrderedDict()
 
         self.quadrature_indices = []
-
-        #Make these positional args
-        self.domain = domain
-        self.coefficients = None
 
         # Facet number
         if integral_type in ['exterior_facet', 'exterior_facet_vert']:
@@ -245,15 +242,12 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         elif integral_type == 'interior_facet_horiz':
             self._entity_number = {'+': 1, '-': 0}
 
-        if domain:
-            self.set_coordinates(domain)
-            self.set_cell_sizes(domain)
-        if coefficients is not None:
-            self.set_coefficients(coefficients)
+        self.set_coordinates(integral_data.domain)
+        self.set_cell_sizes(integral_data.domain)
+        self.set_coefficients(integral_data.coefficients)
         if integral_data:
             self.set_subspaces(integral_data.subspaces, integral_data.original_subspaces)
 
-        self.integral_type = integral_type
         self.fem_scalar_type = fem_scalar_type
 
     def set_arguments(self, arguments):
@@ -272,15 +266,13 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
             # the trial space as well.
             a, _ = argument_multiindices
             argument_multiindices = (a, a)
-        self.local_tensor, self.return_variables = prepare_arguments(
-                                                       arguments,
-                                                       argument_multiindices,
-                                                       self.scalar_type,
-                                                       interior_facet=self.interior_facet,
-                                                       diagonal=self.diagonal)
-        self.arguments = arguments
-        self.argument_multiindices = argument_multiindices
-        self.argument_multiindices_dummy = argument_multiindices_dummy
+        local_tensor, return_variables = prepare_arguments(
+                                             arguments,
+                                             argument_multiindices,
+                                             self.scalar_type,
+                                             interior_facet=self.interior_facet,
+                                             diagonal=self.diagonal)
+        return local_tensor, return_variables, argument_multiindices, argument_multiindices_dummy
 
     def set_coordinates(self, domain):
         """Prepare the coordinate field.
@@ -297,7 +289,6 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
 
         :arg coefficients: a tuple of `ufl.Coefficient`s.
         """
-        self.coefficients = coefficients
         coeffs = []
         for c in coefficients:
             if type(c.ufl_element()) == ufl_MixedElement:

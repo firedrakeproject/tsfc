@@ -168,6 +168,7 @@ class TSFCIntegralData(object):
             functions.update(form_data_function_map[form_data])
         self.integrals = tuple(integrals)
         self._integral_to_form_data_map = _integral_to_form_data_map
+        self.arguments = tsfc_form_data.arguments
 
         # This is which coefficient in the original form the
         # current coefficient is.
@@ -222,7 +223,7 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
     kernels = []
     for integral_data in tsfc_form_data.integral_data:
         start = time.time()
-        kernel = compile_integral(integral_data, tsfc_form_data.arguments, prefix, parameters, interface=interface, coffee=coffee, diagonal=diagonal)
+        kernel = compile_integral(integral_data, prefix, parameters, interface=interface, coffee=coffee, diagonal=diagonal)
         if kernel is not None:
             kernels.append(kernel)
         logger.info(GREEN % "compile_integral finished in %g seconds.", time.time() - start)
@@ -231,7 +232,7 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
     return kernels
 
 
-def compile_integral(integral_data, arguments, prefix, parameters, interface, coffee, *, diagonal=False):
+def compile_integral(integral_data, prefix, parameters, interface, coffee, *, diagonal=False):
     """Compiles a UFL integral into an assembly kernel.
 
     :arg integral_data: TSFCIntegralData
@@ -252,19 +253,13 @@ def compile_integral(integral_data, arguments, prefix, parameters, interface, co
 
     # The same builder (in principle) can be used to compile different forms.
     builder = interface(integral_data,
-                        integral_data.integral_type,
                         parameters["scalar_type_c"] if coffee else parameters["scalar_type"],
-                        domain=integral_data.domain,
-                        coefficients=integral_data.coefficients,
-                        arguments=arguments,
-                        diagonal=diagonal,
-                        fem_scalar_type = parameters["scalar_type"])
+                        parameters["scalar_type"],
+                        diagonal=diagonal)
 
     # All form specific variables (such as arguments) are stored in kernel_config (not in KernelBuilder instance).
     # The followings are specific for the concrete form representation, so
     # not to be saved in KernelBuilders.
-    kernel_name = "%s_%s_integral_%s" % (prefix, integral_data.integral_type, integral_data.subdomain_id)
-    kernel_name = kernel_name.replace("-", "_")  # Handle negative subdomain_id
 
     for integral in integral_data.integrals:
         params = parameters.copy()
@@ -273,6 +268,9 @@ def compile_integral(integral_data, arguments, prefix, parameters, interface, co
         expressions = replace_argument_multiindices_dummy(expressions, chain(*builder.argument_multiindex), chain(*builder.argument_multiindex_dummy))
         reps = builder.construct_integrals(expressions, params)
         builder.stash_integrals(reps, params)
+    # Construct kernel
+    kernel_name = "%s_%s_integral_%s" % (prefix, integral_data.integral_type, integral_data.subdomain_id)
+    kernel_name = kernel_name.replace("-", "_")  # Handle negative subdomain_id
     return builder.construct_kernel(kernel_name)
 
 
