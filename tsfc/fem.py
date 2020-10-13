@@ -20,8 +20,6 @@ from ufl.classes import (Argument, CellCoordinate, CellEdgeVectors,
                          ReferenceCellEdgeVectors,
                          ReferenceFacetVolume, ReferenceNormal,
                          SpatialCoordinate)
-from ufl.algorithms.analysis import extract_type
-from ufl.algorithms.expand_indices import purge_list_tensors
 
 from FIAT.reference_element import make_affine_mapping
 from FIAT.reference_element import UFCSimplex
