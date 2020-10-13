@@ -13,15 +13,13 @@ from ufl.corealg.multifunction import MultiFunction
 from ufl.classes import (Argument, CellCoordinate, CellEdgeVectors,
                          CellFacetJacobian, CellOrientation,
                          CellOrigin, CellVertices, CellVolume,
-                         Coefficient,
-                         FacetArea, FacetCoordinate,
+                         Coefficient, FacetArea, FacetCoordinate,
                          GeometricQuantity, Jacobian, JacobianDeterminant,
                          NegativeRestricted, QuadratureWeight,
                          PositiveRestricted, ReferenceCellVolume,
                          ReferenceCellEdgeVectors,
                          ReferenceFacetVolume, ReferenceNormal,
-                         SpatialCoordinate,
-                         ListTensor)
+                         SpatialCoordinate)
 from ufl.algorithms.analysis import extract_type
 from ufl.algorithms.expand_indices import purge_list_tensors
 
@@ -619,9 +617,7 @@ def translate_argument(terminal, mt, ctx):
         # lives on after ditching FFC and switching to FInAT.
         return ffc_rounding(square, ctx.epsilon)
     table = ctx.entity_selector(callback, mt.restriction)
-
-    a = gem.Indexed(table, argument_multiindex + sigma)
-    return gem.ComponentTensor(a, sigma)
+    return gem.ComponentTensor(gem.Indexed(table, argument_multiindex + sigma), sigma)
 
 
 @translate.register(Coefficient)

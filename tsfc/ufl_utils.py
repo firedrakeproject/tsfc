@@ -40,7 +40,6 @@ def compute_form_data(form,
                       do_apply_geometry_lowering=True,
                       preserve_geometry_types=preserve_geometry_types,
                       do_apply_restrictions=True,
-                      do_apply_filters=True,
                       do_estimate_degrees=True,
                       complex_mode=False):
     """Preprocess UFL form in a format suitable for TSFC. Return

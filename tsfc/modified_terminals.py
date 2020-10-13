@@ -158,7 +158,6 @@ def construct_modified_terminal(mt, terminal):
         expr = ReferenceValue(expr)
 
     dim = expr.ufl_domain().topological_dimension()
-
     for n in range(mt.local_derivatives):
         # Return zero if expression is trivially constant. This has to
         # happen here because ReferenceGrad has no access to the
