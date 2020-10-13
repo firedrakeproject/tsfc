@@ -68,7 +68,7 @@ class TSFCFormData(object):
                 |____0___||____1___|_     _|____M___|       ||________||________|       |________||
                                                             |_____________________________________|
     """
-    def __init__(self, form_data_tuple, original_form, diagonal, form_data_extraarg_map={}, form_data_function_map={}):
+    def __init__(self, form_data_tuple, original_form, form_data_extraarg_map, form_data_function_map, diagonal):
         arguments = set()
         for fd in form_data_tuple:
             args = []
@@ -204,7 +204,7 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
     form_data = ufl_utils.compute_form_data(form, complex_mode=complex_mode)
     if interface:
         interface = partial(interface, function_replace_map=form_data.function_replace_map)
-    tsfc_form_data = TSFCFormData((form_data, ), form_data.original_form, diagonal)
+    tsfc_form_data = TSFCFormData((form_data, ), form_data.original_form, {form_data: ()}, {form_data: ()}, diagonal)
 
     logger.info(GREEN % "compute_form_data finished in %g seconds.", time.time() - cpu_time)
 
