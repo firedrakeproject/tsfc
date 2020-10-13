@@ -141,7 +141,7 @@ class KernelBuilderBase(KernelInterface):
 
 class KernelBuilderMixin(object):
 
-    def compile_ufl(self, integrand, params, kernel_config, argument_multiindices=None):
+    def compile_ufl(self, integrand, params, argument_multiindices=None):
         # Split Coefficients
         if self.coefficient_split:
             integrand = ufl_utils.split_coefficients(integrand, self.coefficient_split, self.subspace_split)
@@ -159,7 +159,7 @@ class KernelBuilderMixin(object):
         self.quadrature_indices.extend(quad_rule.point_set.indices)
         return expressions
 
-    def compile_gem(self, kernel_config):
+    def compile_gem(self):
         # Finalise mode representations into a set of assignments
         mode_irs = self.mode_irs
         index_cache = self.fem_config['index_cache']
@@ -194,14 +194,14 @@ class KernelBuilderMixin(object):
             impero_c = None
         return impero_c, oriented, needs_cell_sizes, tabulations
 
-    def construct_integrals(self, expressions, params, kernel_config):
+    def construct_integrals(self, expressions, params):
         mode = pick_mode(params["mode"])
         return mode.Integrals(expressions,
                               params["quadrature_rule"].point_set.indices,
                               self.argument_multiindices,
                               params)
 
-    def stash_integrals(self, reps, params, kernel_config):
+    def stash_integrals(self, reps, params):
         mode = pick_mode(params["mode"])
         mode_irs = self.mode_irs
         return_variables = self.return_variables

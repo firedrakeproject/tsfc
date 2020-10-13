@@ -251,29 +251,29 @@ def compile_integral(integral_data, arguments, prefix, parameters, interface, co
             interface = firedrake_interface_loopy.KernelBuilder
 
     # The same builder (in principle) can be used to compile different forms.
-    builder = interface(integral_data.integral_type,
+    builder = interface(integral_data,
+                        integral_data.integral_type,
                         parameters["scalar_type_c"] if coffee else parameters["scalar_type"],
                         domain=integral_data.domain,
                         coefficients=integral_data.coefficients,
                         arguments=arguments,
                         diagonal=diagonal,
-                        fem_scalar_type = parameters["scalar_type"],
-                        integral_data=integral_data)#REMOVE this when we move subspace.
+                        fem_scalar_type = parameters["scalar_type"])
 
     # All form specific variables (such as arguments) are stored in kernel_config (not in KernelBuilder instance).
     # The followings are specific for the concrete form representation, so
     # not to be saved in KernelBuilders.
     kernel_name = "%s_%s_integral_%s" % (prefix, integral_data.integral_type, integral_data.subdomain_id)
     kernel_name = kernel_name.replace("-", "_")  # Handle negative subdomain_id
-    kernel_config = create_kernel_config(kernel_name, integral_data, parameters, builder)
+    kernel_config = {}
 
     for integral in integral_data.integrals:
         params = parameters.copy()
         params.update(integral.metadata())  # integral metadata overrides
-        expressions = builder.compile_ufl(integral.integrand(), params, kernel_config)
+        expressions = builder.compile_ufl(integral.integrand(), params)
         expressions = replace_argument_multiindices_dummy(expressions, chain(*builder.argument_multiindex), chain(*builder.argument_multiindex_dummy))
-        reps = builder.construct_integrals(expressions, params, kernel_config)
-        builder.stash_integrals(reps, params, kernel_config)
+        reps = builder.construct_integrals(expressions, params)
+        builder.stash_integrals(reps, params)
     return builder.construct_kernel(kernel_name, kernel_config)
 
 
@@ -290,18 +290,6 @@ def preprocess_parameters(parameters):
     if parameters.get("quadrature_rule") in ["auto", "default", None]:
         del parameters["quadrature_rule"]
     return parameters
-
-
-def create_kernel_config(kernel_name, integral_data, parameters, builder):
-    # Data required for kernel construction. 
-    kernel_config = dict(name=kernel_name,
-                         integral_type=integral_data.integral_type,
-                         subdomain_id=integral_data.subdomain_id,
-                         domain_number=integral_data.domain_number,
-                         coefficient_numbers=integral_data.coefficient_numbers,
-                         subspace_numbers=integral_data.subspace_numbers,
-                         subspace_parts=[None for _ in integral_data.subspace_numbers])
-    return kernel_config
 
 
 def compile_expression_dual_evaluation(expression, to_element, coordinates, *,

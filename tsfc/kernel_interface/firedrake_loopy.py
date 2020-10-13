@@ -211,10 +211,11 @@ class ExpressionKernelBuilder(KernelBuilderBase):
 class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
     """Helper class for building a :class:`Kernel` object."""
 
-    def __init__(self, integral_type, scalar_type, domain=None, coefficients=None, arguments = None,
-                 dont_split=(), function_replace_map={}, diagonal=False, integral_data=None, fem_scalar_type=None):
+    def __init__(self, integral_data, integral_type, scalar_type, domain=None, coefficients=None, arguments = None,
+                 dont_split=(), function_replace_map={}, diagonal=False, fem_scalar_type=None):
         """Initialise a kernel builder."""
         KernelBuilderBase.__init__(self, scalar_type, integral_type.startswith("interior_facet"))
+        self.integral_data = integral_data
 
         self.diagonal = diagonal
         self.coordinates_arg = None
@@ -374,21 +375,23 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         :arg index_names: pre-assigned index names
         :returns: :class:`Kernel` object
         """
-        impero_c, oriented, needs_cell_sizes, tabulations = self.compile_gem(kernel_config)
+        integral_data = self.integral_data
+
+        impero_c, oriented, needs_cell_sizes, tabulations = self.compile_gem()
 
         if impero_c is None:
             return self.construct_empty_kernel(kernel_name)
 
-        kernel = Kernel(integral_type=kernel_config['integral_type'],
-                        subdomain_id=kernel_config['subdomain_id'],
-                        domain_number=kernel_config['domain_number'])
+        kernel = Kernel(integral_type=integral_data.integral_type,
+                        subdomain_id=integral_data.subdomain_id,
+                        domain_number=integral_data.domain_number)
 
         index_cache = self.fem_config['index_cache']
         index_names = _get_index_names(self.quadrature_indices, self.argument_multiindices, index_cache)
 
-        kernel.coefficient_numbers = kernel_config['coefficient_numbers']
-        kernel.subspace_numbers = kernel_config['subspace_numbers']
-        kernel.subspace_parts = kernel_config['subspace_parts']
+        kernel.coefficient_numbers = integral_data.coefficient_numbers
+        kernel.subspace_numbers = integral_data.subspace_numbers
+        kernel.subspace_parts = [None for _ in integral_data.subspace_numbers]
         kernel.external_data_numbers = kernel_config['external_data_numbers']
         kernel.external_data_parts = kernel_config['external_data_parts']
 
