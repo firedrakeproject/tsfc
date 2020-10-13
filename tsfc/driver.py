@@ -253,7 +253,6 @@ def compile_integral(integral_data, prefix, parameters, interface, coffee, *, di
         params = parameters.copy()
         params.update(integral.metadata())  # integral metadata overrides
         expressions = builder.compile_ufl(integral.integrand(), params)
-        expressions = replace_argument_multiindices_dummy(expressions, chain(*builder.argument_multiindex), chain(*builder.argument_multiindex_dummy))
         reps = builder.construct_integrals(expressions, params)
         builder.stash_integrals(reps, params)
     # Construct kernel
@@ -442,21 +441,3 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
     builder.register_requirements([ir])
     # Build kernel tuple
     return builder.construct_kernel(return_arg, impero_c, index_names)
-
-
-def replace_argument_multiindices_dummy(expressions, argument_multiindex, argument_multiindex_dummy):
-    r"""Replace dummy indices with true argument multiindices.
-    
-    :arg expressions: gem expressions written in terms of argument_multiindices_dummy.
-
-    Applying `Delta(i, i_dummy)` and then `IndexSum(..., i_dummy)` would result in
-    too many `IndexSum`s and `gem.optimise.contraction` would complain.
-    Here, instead, we use filtered_replace_indices to directly replace dummy argument
-    multiindices with true ones.
-    """
-    # True/dummy argument multiindices.
-    if argument_multiindex_dummy == argument_multiindex:
-        return expressions
-    substitution = tuple(zip(argument_multiindex_dummy, argument_multiindex))
-    mapper = MemoizerArg(filtered_replace_indices)
-    return tuple(mapper(expr, substitution) for expr in expressions)

@@ -137,7 +137,7 @@ class KernelBuilderMixin(object):
         quad_rule = params["quadrature_rule"]
         config = self.fem_config.copy()
         config.update(quadrature_rule=quad_rule)
-        config['argument_multiindices'] = argument_multiindices or self.argument_multiindices_dummy
+        config['argument_multiindices'] = argument_multiindices or self.argument_multiindices
         expressions = fem.compile_ufl(integrand,
                                       interior_facet=self.interior_facet,
                                       **config)

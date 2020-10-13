@@ -33,7 +33,7 @@ def make_builder(*args, **kwargs):
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
                  "domain_number", "needs_cell_sizes", "tabulations",
-                 "coefficient_numbers", "__weakref__")
+                 "coefficient_numbers", "external_data_numbers", "external_data_parts", "__weakref__")
     """A compiled Kernel object.
 
     :kwarg ast: The COFFEE ast for the kernel.
@@ -59,6 +59,8 @@ class Kernel(object):
         self.domain_number = domain_number
         self.subdomain_id = subdomain_id
         self.coefficient_numbers = coefficient_numbers
+        self.external_data_numbers = []
+        self.external_data_parts = []
         self.needs_cell_sizes = needs_cell_sizes
         super(Kernel, self).__init__()
 
@@ -193,6 +195,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         self.coordinates_arg = None
         self.coefficient_args = []
         self.coefficient_split = {}
+        self.external_data_args = []
         # Map to raw ufl Coefficient.
         self.dont_split = frozenset(function_replace_map[f] for f in dont_split if f in function_replace_map)
 
@@ -276,6 +279,20 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         for i, c in enumerate(coeffs):
             self.coefficient_args.append(self._coefficient(c, "w_%d" % i))
 
+    def set_external_data(self, elements):
+        """Prepare external data.
+
+        :arg elements: a tuple of `ufl.FiniteElement`s.
+        """
+        if any(type(element) == ufl_MixedElement for element in elements):
+            raise ValueError("Unable to handle `MixedElement`s.")
+        expressions = []
+        for i, element in enumerate(elements):
+            funarg, expression = prepare_coefficient(element, "e_%d" % i, self.scalar_type, interior_facet=self.interior_facet)
+            self.external_data_args.append(funarg)
+            expressions.append(expression)
+        return tuple(expressions)
+
     def register_requirements(self, ir):
         """Inspect what is referenced by the IR that needs to be
         provided by the kernel interface."""
@@ -293,6 +310,8 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
 
         :returns: :class:`Kernel` object
         """
+        integral_data = self.integral_data
+
         impero_c, oriented, needs_cell_sizes, tabulations = self.compile_gem()
 
         if impero_c is None:
@@ -319,7 +338,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
             args.append(cell_orientations_coffee_arg)
         if kernel.needs_cell_sizes:
             args.append(self.cell_sizes_arg)
-        args.extend(self.coefficient_args)
+        args.extend(self.coefficient_args + self.external_data_args)
         if kernel.integral_type in ["exterior_facet", "exterior_facet_vert"]:
             args.append(coffee.Decl("unsigned int",
                                     coffee.Symbol("facet", rank=(1,)),
