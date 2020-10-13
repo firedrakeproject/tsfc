@@ -345,7 +345,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         provided by the kernel interface."""
         return check_requirements(ir)
 
-    def construct_kernel(self, kernel_name, kernel_config):
+    def construct_kernel(self, kernel_name):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument

@@ -364,7 +364,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         provided by the kernel interface."""
         return check_requirements(ir)
 
-    def construct_kernel(self, kernel_name, kernel_config):
+    def construct_kernel(self, kernel_name):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument
@@ -392,8 +392,6 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         kernel.coefficient_numbers = integral_data.coefficient_numbers
         kernel.subspace_numbers = integral_data.subspace_numbers
         kernel.subspace_parts = [None for _ in integral_data.subspace_numbers]
-        kernel.external_data_numbers = kernel_config['external_data_numbers']
-        kernel.external_data_parts = kernel_config['external_data_parts']
 
         # requirements
         kernel.oriented = oriented

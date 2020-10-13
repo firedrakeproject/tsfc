@@ -265,7 +265,6 @@ def compile_integral(integral_data, arguments, prefix, parameters, interface, co
     # not to be saved in KernelBuilders.
     kernel_name = "%s_%s_integral_%s" % (prefix, integral_data.integral_type, integral_data.subdomain_id)
     kernel_name = kernel_name.replace("-", "_")  # Handle negative subdomain_id
-    kernel_config = {}
 
     for integral in integral_data.integrals:
         params = parameters.copy()
@@ -274,7 +273,7 @@ def compile_integral(integral_data, arguments, prefix, parameters, interface, co
         expressions = replace_argument_multiindices_dummy(expressions, chain(*builder.argument_multiindex), chain(*builder.argument_multiindex_dummy))
         reps = builder.construct_integrals(expressions, params)
         builder.stash_integrals(reps, params)
-    return builder.construct_kernel(kernel_name, kernel_config)
+    return builder.construct_kernel(kernel_name)
 
 
 def preprocess_parameters(parameters):
