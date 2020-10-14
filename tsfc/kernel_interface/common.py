@@ -1,4 +1,5 @@
 import collections
+import string
 import operator
 from functools import reduce
 from itertools import chain
@@ -126,8 +127,26 @@ class KernelBuilderBase(KernelInterface):
 
 
 class KernelBuilderMixin(object):
+    """Mixin for KernelBuilder classes."""
 
     def compile_ufl(self, integrand, params, argument_multiindices=None):
+        """Compile UFL integrand.
+
+        :arg integrand: UFL integrand.
+        :arg params: a dict of parameters containing quadrature info.
+        :kwarg argument_multiindices: multiindices to use to index
+            arguments contained in the given integrand. If None, the
+            "true" argument multiindices (`self.argument_multiindices`)
+            used in the `self.return_variables` are used.
+
+        .. note::
+            Problem solving environments can pass any multiindices to be
+            used in the returned gem expression, e.g.,
+            `self.argument_multiindices_dummy`. They are then responsible
+            for applying appropriate operations to the returned gem
+            expression so that the indices in the resulting gem expression
+            match those in `self.return_variables`.
+        """
         # Split Coefficients
         if self.coefficient_split:
             integrand = ufl_utils.split_coefficients(integrand, self.coefficient_split)
@@ -143,6 +162,20 @@ class KernelBuilderMixin(object):
                                       **config)
         self.quadrature_indices.extend(quad_rule.point_set.indices)
         return expressions
+
+    def construct_integrals(self, expressions, params):
+        mode = pick_mode(params["mode"])
+        return mode.Integrals(expressions,
+                              params["quadrature_rule"].point_set.indices,
+                              self.argument_multiindices,
+                              params)
+
+    def stash_integrals(self, reps, params):
+        mode = pick_mode(params["mode"])
+        mode_irs = self.mode_irs
+        mode_irs.setdefault(mode, collections.OrderedDict())
+        for var, rep in zip(self.return_variables, reps):
+            mode_irs[mode].setdefault(var, []).append(rep)
 
     def compile_gem(self):
         # Finalise mode representations into a set of assignments
@@ -172,27 +205,17 @@ class KernelBuilderMixin(object):
 
         # Construct ImperoC
         assignments = list(zip(return_variables, expressions))
-        index_ordering = _get_index_ordering(self.quadrature_indices, return_variables)
+        index_ordering = get_index_ordering(self.quadrature_indices, return_variables)
         try:
             impero_c = impero_utils.compile_gem(assignments, index_ordering, remove_zeros=True)
         except impero_utils.NoopError:
             impero_c = None
         return impero_c, oriented, needs_cell_sizes, tabulations
 
-    def construct_integrals(self, expressions, params):
-        mode = pick_mode(params["mode"])
-        return mode.Integrals(expressions,
-                              params["quadrature_rule"].point_set.indices,
-                              self.argument_multiindices,
-                              params)
-
-    def stash_integrals(self, reps, params):
-        mode = pick_mode(params["mode"])
-        mode_irs = self.mode_irs
-        return_variables = self.return_variables
-        mode_irs.setdefault(mode, collections.OrderedDict())
-        for var, rep in zip(return_variables, reps):
-            mode_irs[mode].setdefault(var, []).append(rep)
+    @cached_property
+    def argument_multiindices_dummy(self):
+        return tuple(tuple(gem.Index(extent=a.extent) for a in arg)
+                     for arg in self.argument_multiindices)
 
     @cached_property
     def fem_config(self):
@@ -219,10 +242,33 @@ class KernelBuilderMixin(object):
                     scalar_type=self.fem_scalar_type)
 
 
-def _get_index_ordering(quadrature_indices, return_variables):
+def get_index_ordering(quadrature_indices, return_variables):
     split_argument_indices = tuple(chain(*[var.index_ordering()
                                            for var in return_variables]))
     return tuple(quadrature_indices) + split_argument_indices
+
+
+def get_index_names(quadrature_indices, argument_multiindices, index_cache):
+    index_names = []
+
+    def name_index(index, name):
+        index_names.append((index, name))
+        if index in index_cache:
+            for multiindex, suffix in zip(index_cache[index],
+                                          string.ascii_lowercase):
+                name_multiindex(multiindex, name + suffix)
+
+    def name_multiindex(multiindex, name):
+        if len(multiindex) == 1:
+            name_index(multiindex[0], name)
+        else:
+            for i, index in enumerate(multiindex):
+                name_index(index, name + str(i))
+
+    name_multiindex(quadrature_indices, 'ip')
+    for multiindex, name in zip(argument_multiindices, ['j', 'k']):
+        name_multiindex(multiindex, name)
+    return index_names
 
 
 def _set_quad_rule(params, cell, integral_type, functions):

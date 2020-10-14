@@ -1,7 +1,6 @@
 import numpy
 import collections
 from collections import namedtuple
-import string
 from itertools import chain, product
 from functools import partial
 
@@ -13,8 +12,7 @@ from gem.optimise import remove_componenttensors as prune
 import loopy as lp
 
 from tsfc.finatinterface import create_element
-from tsfc.kernel_interface.common import KernelBuilderBase as _KernelBuilderBase
-from tsfc.kernel_interface.common import KernelBuilderMixin
+from tsfc.kernel_interface.common import KernelBuilderBase as _KernelBuilderBase, KernelBuilderMixin, get_index_names
 from tsfc.kernel_interface.firedrake import check_requirements
 from tsfc.loopy import generate as generate_loopy
 
@@ -42,13 +40,22 @@ class Kernel(object):
         original_form.ufl_domains() to get the correct domain).
     :kwarg coefficient_numbers: A list of which coefficients from the
         form the kernel needs.
+    :kwarg external_data_numbers: A list of external data structures
+        the kernel needs. These data structures do not originate in
+        UFL forms, but in the operations potentially applied to gem
+        expressions after compiling UFL and before compiling gem.
+    :kwarg external_data_parts: A list of tuples of indices. Each
+        tuple contains indices of the associated external data
+        structure that the kernel needs.
     :kwarg tabulations: The runtime tabulations this kernel requires
     :kwarg needs_cell_sizes: Does the kernel require cell sizes.
     """
     def __init__(self, ast=None, integral_type=None, oriented=False,
                  subdomain_id=None, domain_number=None,
                  coefficient_numbers=(),
-                 needs_cell_sizes=False):
+                 external_data_numbers=(), external_data_parts=(),
+                 needs_cell_sizes=False,
+                 tabulations=None):
         # Defaults
         self.ast = ast
         self.integral_type = integral_type
@@ -56,9 +63,10 @@ class Kernel(object):
         self.domain_number = domain_number
         self.subdomain_id = subdomain_id
         self.coefficient_numbers = coefficient_numbers
-        self.external_data_numbers = []
-        self.external_data_parts = []
+        self.external_data_numbers = external_data_numbers
+        self.external_data_parts = external_data_parts
         self.needs_cell_sizes = needs_cell_sizes
+        self.tabulations = tabulations
         super(Kernel, self).__init__()
 
 
@@ -128,7 +136,7 @@ class ExpressionKernelBuilder(KernelBuilderBase):
     """Builds expression kernels for UFL interpolation in Firedrake."""
 
     def __init__(self, scalar_type):
-        super(ExpressionKernelBuilder, self).__init__(scalar_type=scalar_type)
+        super(ExpressionKernelBuilder, self).__init__(scalar_type)
         self.oriented = False
         self.cell_sizes = False
 
@@ -186,25 +194,19 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
     def __init__(self, integral_data, scalar_type, fem_scalar_type,
                  dont_split=(), function_replace_map={}, diagonal=False):
         """Initialise a kernel builder."""
-        integral_type = integral_data.integral_type
-        KernelBuilderBase.__init__(self, scalar_type, integral_type.startswith("interior_facet"))
-        self.integral_data = integral_data
+        KernelBuilderBase.__init__(self, scalar_type, integral_data.integral_type.startswith("interior_facet"))
+        self.fem_scalar_type = fem_scalar_type
 
         self.diagonal = diagonal
         self.coordinates_arg = None
         self.coefficient_args = []
         self.coefficient_split = {}
         self.external_data_args = []
-        # Map to raw ufl Coefficient.
+        # Map functions to raw coefficients here.
         self.dont_split = frozenset(function_replace_map[f] for f in dont_split if f in function_replace_map)
 
-        self.arguments = integral_data.arguments
-        self.local_tensor, self.return_variables, self.argument_multiindices, self.argument_multiindices_dummy = self.set_arguments(self.arguments)
-        self.mode_irs = collections.OrderedDict()
-
-        self.quadrature_indices = []
-
         # Facet number
+        integral_type = integral_data.integral_type
         if integral_type in ['exterior_facet', 'exterior_facet_vert']:
             facet = gem.Variable('facet', (1,))
             self._entity_number = {None: gem.VariableIndex(gem.Indexed(facet, (0,)))}
@@ -221,18 +223,22 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         self.set_cell_sizes(integral_data.domain)
         self.set_coefficients(integral_data.coefficients)
 
-        self.fem_scalar_type = fem_scalar_type
+        self.integral_data = integral_data
+        self.arguments = integral_data.arguments
+        self.local_tensor, self.return_variables, self.argument_multiindices = self.set_arguments(self.arguments)
+        self.mode_irs = collections.OrderedDict()
+        self.quadrature_indices = []
 
     def set_arguments(self, arguments):
         """Process arguments.
 
         :arg arguments: :class:`ufl.Argument`s
-        :arg multiindices: GEM argument multiindices
-        :returns: GEM expression representing the return variable
+        :returns: :class:`loopy.GlobalArg` for the return variable,
+            GEM expression representing the return variable,
+            GEM argument multiindices.
         """
         argument_multiindices = tuple(create_element(arg.ufl_element()).get_indices()
                                       for arg in arguments)
-        argument_multiindices_dummy = tuple(tuple(gem.Index(extent=a.extent) for a in arg) for arg in argument_multiindices)
         if self.diagonal:
             # Error checking occurs in the builder constructor.
             # Diagonal assembly is obtained by using the test indices for
@@ -244,7 +250,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
                                                            self.scalar_type,
                                                            interior_facet=self.interior_facet,
                                                            diagonal=self.diagonal)
-        return local_tensor, return_variables, argument_multiindices, argument_multiindices_dummy
+        return local_tensor, return_variables, argument_multiindices
 
     def set_coordinates(self, domain):
         """Prepare the coordinate field.
@@ -278,9 +284,16 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
             self.coefficient_args.append(self._coefficient(c, "w_%d" % i))
 
     def set_external_data(self, elements):
-        """Prepare external data.
+        """Prepare external data structures.
 
         :arg elements: a tuple of `ufl.FiniteElement`s.
+        :returns: gem expressions for the data represented by elements.
+
+        The retuned gem expressions are to be used in the operations
+        applied to the gem expressions obtained by compiling UFL before
+        compiling gem. The users are responsible for bridging these
+        gem expressions and actual data by setting correct values in
+        `external_data_numbers` and `external_data_parts` in the kernel.
         """
         if any(type(element) == ufl_MixedElement for element in elements):
             raise ValueError("Unable to handle `MixedElement`s.")
@@ -296,15 +309,15 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         provided by the kernel interface."""
         return check_requirements(ir)
 
-    def construct_kernel(self, kernel_name):
+    def construct_kernel(self, kernel_name, external_data_numbers=(), external_data_parts=()):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument
         list for assembly kernels.
 
-        :arg name: function name
-        :arg impero_c: ImperoC tuple with Impero AST and other data
-        :arg index_names: pre-assigned index names
+        :arg kernel_name: function name
+        :kwarg external_data_numbers: see :class:`Kernel`.
+        :kwarg external_data_parts: see :class:`Kernel.`
         :returns: :class:`Kernel` object
         """
         integral_data = self.integral_data
@@ -314,36 +327,32 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         if impero_c is None:
             return self.construct_empty_kernel(kernel_name)
 
-        kernel = Kernel(integral_type=integral_data.integral_type,
-                        subdomain_id=integral_data.subdomain_id,
-                        domain_number=integral_data.domain_number)
-
-        index_cache = self.fem_config['index_cache']
-        index_names = _get_index_names(self.quadrature_indices, self.argument_multiindices, index_cache)
-
-        kernel.coefficient_numbers = integral_data.coefficient_numbers
-
-        # requirements
-        kernel.oriented = oriented
-        kernel.needs_cell_sizes = needs_cell_sizes
-        kernel.tabulations = tabulations
-
         args = [self.local_tensor, self.coordinates_arg]
-        if kernel.oriented:
+        if oriented:
             args.append(self.cell_orientations_loopy_arg)
-        if kernel.needs_cell_sizes:
+        if needs_cell_sizes:
             args.append(self.cell_sizes_arg)
         args.extend(self.coefficient_args + self.external_data_args)
-        if kernel.integral_type in ["exterior_facet", "exterior_facet_vert"]:
+        if integral_data.integral_type in ["exterior_facet", "exterior_facet_vert"]:
             args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(1,)))
-        elif kernel.integral_type in ["interior_facet", "interior_facet_vert"]:
+        elif integral_data.integral_type in ["interior_facet", "interior_facet_vert"]:
             args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(2,)))
-
-        for name, shape in kernel.tabulations:
+        for name, shape in tabulations:
             args.append(lp.GlobalArg(name, dtype=self.scalar_type, shape=shape))
+        index_cache = self.fem_config['index_cache']
+        index_names = get_index_names(self.quadrature_indices, self.argument_multiindices, index_cache)
+        ast = generate_loopy(impero_c, args, self.scalar_type, kernel_name, index_names)
 
-        kernel.ast = generate_loopy(impero_c, args, self.scalar_type, kernel_name, index_names)
-        return kernel
+        return Kernel(ast=ast,
+                      integral_type=integral_data.integral_type,
+                      subdomain_id=integral_data.subdomain_id,
+                      domain_number=integral_data.domain_number,
+                      coefficient_numbers=integral_data.coefficient_numbers,
+                      external_data_numbers=external_data_numbers,
+                      external_data_parts=external_data_parts,
+                      oriented=oriented,
+                      needs_cell_sizes=needs_cell_sizes,
+                      tabulations=tabulations)
 
     def construct_empty_kernel(self, kernel_name):
         """Return None, since Firedrake needs no empty kernels.
@@ -448,26 +457,3 @@ def prepare_arguments(arguments, multiindices, scalar_type, interior_facet=False
     varexp = gem.Variable("A", c_shape)
     expressions = [expression(gem.view(varexp, *slices)) for slices in slicez]
     return funarg, prune(expressions)
-
-
-def _get_index_names(quadrature_indices, argument_multiindices, index_cache):
-    index_names = []
-
-    def name_index(index, name):
-        index_names.append((index, name))
-        if index in index_cache:
-            for multiindex, suffix in zip(index_cache[index],
-                                          string.ascii_lowercase):
-                name_multiindex(multiindex, name + suffix)
-
-    def name_multiindex(multiindex, name):
-        if len(multiindex) == 1:
-            name_index(multiindex[0], name)
-        else:
-            for i, index in enumerate(multiindex):
-                name_index(index, name + str(i))
-
-    name_multiindex(quadrature_indices, 'ip')
-    for multiindex, name in zip(argument_multiindices, ['j', 'k']):
-        name_multiindex(multiindex, name)
-    return index_names
