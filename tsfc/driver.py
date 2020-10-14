@@ -1,9 +1,7 @@
 import collections
-import operator
-import string
 import time
 import sys
-from functools import reduce, singledispatch, partial
+from functools import partial
 from itertools import chain
 
 from numpy import asarray, allclose
@@ -16,8 +14,6 @@ from ufl.log import GREEN
 
 import gem
 import gem.impero_utils as impero_utils
-from gem.node import MemoizerArg, reuse_if_untouched_arg
-from gem.optimise import filtered_replace_indices
 
 import FIAT
 from FIAT.functional import PointEvaluation
@@ -26,7 +22,6 @@ from finat.point_set import PointSet
 from finat.quadrature import QuadratureRule
 
 from tsfc import fem, ufl_utils
-from tsfc.finatinterface import as_fiat_cell, create_element
 from tsfc.logging import logger
 from tsfc.parameters import default_parameters, is_complex
 from tsfc.ufl_utils import apply_mapping
@@ -51,22 +46,22 @@ class TSFCFormData(object):
         * forget `form_data.original_form`,
         * forget `integral_data.enabled_coefficients`,
         * let `KernelBuilder` only deal with raw `ufl.Coefficient`s.
-                                                             _____________TSFCFormData____________
-                 ____________________     __________        | ________  ________         ________ |
-                |Integral||Integral|       |Integral|       ||        ||        |       |        ||
-    FormData 0  |  Data  ||  Data  |  ...  |  Data  |       ||        ||        |       |        ||
-                |____0___||____1___|_     _|____M___|       ||  TSFC  ||  TSFC  |       |  TSFC  ||  
-                 ____________________     __________        ||Integral||Integral|       |Integral||    
-                |Integral||Integral|       |Integral|       ||  Data  ||  Data  |       |  Data  ||         
-    FormData 1  |  Data  ||  Data  |  ...  |  Data  |       ||    0   ||    1   |       |    M   ||       
-                |____0___||____1___|_     _|____M___|  ---> ||        ||        |  ...  |        ||
-                                                            |                                     |
-            :                :                              |     :         :                :    |
-                 ____________________     __________        |                                     |          
-                |Integral||Integral|       |Integral|       ||        ||        |       |        ||
-    FormData N  |  Data  ||  Data  |  ...  |  Data  |       ||        ||        |       |        ||
-                |____0___||____1___|_     _|____M___|       ||________||________|       |________||
-                                                            |_____________________________________|
+                                                            _____________TSFCFormData____________
+                 ____________________     __________       | ________  ________         ________ |
+                |Integral||Integral|       |Integral|      ||        ||        |       |        ||
+    FormData 0  |  Data  ||  Data  |  ...  |  Data  |      ||        ||        |       |        ||
+                |____0___||____1___|_     _|____M___|      ||  TSFC  ||  TSFC  |       |  TSFC  ||
+                 ____________________     __________       ||Integral||Integral|       |Integral||
+                |Integral||Integral|       |Integral|      ||  Data  ||  Data  |       |  Data  ||
+    FormData 1  |  Data  ||  Data  |  ...  |  Data  |      ||    0   ||    1   |       |    M   ||
+                |____0___||____1___|_     _|____M___| ---> ||        ||        |  ...  |        ||
+                                                           |                                     |
+            :                :                             |     :         :                :    |
+                 ____________________     __________       |                                     |
+                |Integral||Integral|       |Integral|      ||        ||        |       |        ||
+    FormData N  |  Data  ||  Data  |  ...  |  Data  |      ||        ||        |       |        ||
+                |____0___||____1___|_     _|____M___|      ||________||________|       |________||
+                                                           |_____________________________________|
     """
     def __init__(self, form_data_tuple, original_form, form_data_extraarg_map, form_data_function_map, diagonal):
         arguments = set()
@@ -83,7 +78,7 @@ class TSFCFormData(object):
         for _, val in form_data_function_map.items():
             reduced_coefficients_set.update(val)
         reduced_coefficients = sorted(reduced_coefficients_set, key=lambda c: c.count())
-        if False:#len(form_data_tuple) == 1:
+        if False:  # len(form_data_tuple) == 1:
             self.reduced_coefficients = form_data_tuple[0].reduced_coefficients
             self.original_coefficient_positions = form_data_tuple[0].original_coefficient_positions
             self.function_replace_map = form_data_tuple[0].function_replace_map

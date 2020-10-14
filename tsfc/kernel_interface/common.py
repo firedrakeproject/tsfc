@@ -210,13 +210,13 @@ class KernelBuilderMixin(object):
         cell = self.integral_data.domain.ufl_cell()
         fiat_cell = as_fiat_cell(cell)
         integration_dim, entity_ids = lower_integral_type(fiat_cell, integral_type)
-        return  dict(interface=self,
-                     ufl_cell=cell,
-                     integral_type=integral_type,
-                     integration_dim=integration_dim,
-                     entity_ids=entity_ids,
-                     index_cache={},
-                     scalar_type=self.fem_scalar_type)
+        return dict(interface=self,
+                    ufl_cell=cell,
+                    integral_type=integral_type,
+                    integration_dim=integration_dim,
+                    entity_ids=entity_ids,
+                    index_cache={},
+                    scalar_type=self.fem_scalar_type)
 
 
 def _get_index_ordering(quadrature_indices, return_variables):

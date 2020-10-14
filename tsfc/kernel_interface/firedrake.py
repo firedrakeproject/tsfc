@@ -1,10 +1,9 @@
 import numpy
 import collections
 from collections import namedtuple
-import operator
 import string
 from itertools import chain, product
-from functools import reduce, partial
+from functools import partial
 
 from ufl import Coefficient, MixedElement as ufl_MixedElement, FunctionSpace, FiniteElement
 
@@ -13,8 +12,6 @@ import coffee.base as coffee
 import gem
 from gem.node import traversal
 from gem.optimise import remove_componenttensors as prune
-
-import finat
 
 from tsfc.finatinterface import create_element
 from tsfc.kernel_interface.common import KernelBuilderBase as _KernelBuilderBase
@@ -201,7 +198,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
 
         self.arguments = integral_data.arguments
         self.local_tensor, self.return_variables, self.argument_multiindices, self.argument_multiindices_dummy = self.set_arguments(self.arguments)
-        self.mode_irs=collections.OrderedDict()
+        self.mode_irs = collections.OrderedDict()
 
         self.quadrature_indices = []
 
@@ -240,12 +237,11 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
             # the trial space as well.
             a, _ = argument_multiindices
             argument_multiindices = (a, a)
-        local_tensor, return_variables = prepare_arguments(
-                                             arguments,
-                                             argument_multiindices,
-                                             self.scalar_type,
-                                             interior_facet=self.interior_facet,
-                                             diagonal=self.diagonal)
+        local_tensor, return_variables = prepare_arguments(arguments,
+                                                           argument_multiindices,
+                                                           self.scalar_type,
+                                                           interior_facet=self.interior_facet,
+                                                           diagonal=self.diagonal)
         return local_tensor, return_variables, argument_multiindices, argument_multiindices_dummy
 
     def set_coordinates(self, domain):
