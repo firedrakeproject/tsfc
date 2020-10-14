@@ -34,18 +34,46 @@ class TSFCFormData(object):
     r"""Mimic `ufl.FormData`.
 
     :arg form_data_tuple: A tuple of `ufl.FormData`s.
-    :arg original_form: The original form from which forms
-        associated with `ufl.Formdata`s were extracted.
+    :arg original_form: The form from which forms for
+        `ufl.Formdata`s were extracted.
+    :arg form_data_extraarg_map: A map from `ufl.FormData`s to
+        extra `ufl.Argument`s: the user can apply arbitrary
+        linear transformations to these `ufl.Argument`s and
+        replace them with corresponding functions stored in
+        `form_data_function_map`. This must happen after
+        compiling UFL but before compiling gem. These
+        `ufl.Arguments` thus do not contribute to the rank
+        of the form.
+    :arg form_data_function_map: A map from `ufl.FormData`s to
+        functions corresponding to the face `ufl.Argument`s in
+        `form_data_extraarg_map`.
     :diagonal: A flag for diagonal matrix assembly.
 
-    This class preprocesses data contained in potentially
-    multiple `ufl.FormData`s and stores minimal data set,
-    narrowing down the scope of `KernelBuilder`s.
-    Specifically, after preprocessing data here,
-    we can:
-        * forget `form_data.original_form`,
-        * forget `integral_data.enabled_coefficients`,
-        * let `KernelBuilder` only deal with raw `ufl.Coefficient`s.
+    This class mimics `ufl.FormData`, but is to contain minimum
+    information required by TSFC. This class can also combine
+    multiple `ufl.FormData`s associated with forms that are
+    extracted form a single form (`original_form`) in one way or
+    another. This is useful when the user wants to insert some
+    form specific operations after compiling ufl and before
+    compiling gem:
+
+                  split        compile     operations      compile
+                                 UFL                         gem
+                                             op_0
+                     +--- form_0 ---- gem_0' ---- gem_0 ---+
+                     |                       op_1          |
+                     +--- form_1 ---- gem_1' ---- gem_1 ---+
+    original_form ---|                                     |---> Kernel
+                     |      :           :          :       |
+                     |                       op_N          |
+                     +--- form_N ---- gem_N' ---- gem_N ---+
+
+    After preprocessing `ufl.FormData`s here:
+        * TSFC can forget `ufl.FormData.original_form`,
+        * TSFC can forget `ufl.IntegralData.enabled_coefficients`,
+        * `KernelBuilder`s only need to deal with raw `ufl.Coefficient`s.
+
+    Illustration of the structures.
                                                             _____________TSFCFormData____________
                  ____________________     __________       | ________  ________         ________ |
                 |Integral||Integral|       |Integral|      ||        ||        |       |        ||
@@ -72,19 +100,21 @@ class TSFCFormData(object):
                     args.append(arg)
             arguments.update((tuple(args), ))
         if len(arguments) != 1:
-            raise ValueError("All `FormData`s must share the same set of arguments.")
+            raise ValueError("Found inconsistent sets of arguments in `FormData`s.")
         self.arguments, = tuple(arguments)
+        # Gathere all coefficients.
+        # If a form contains extra arguments, those will be replaced by corresponding functions
+        # after compiling UFL, so these functions must be included here, too.
         reduced_coefficients_set = set(c for fd in form_data_tuple for c in fd.reduced_coefficients)
         for _, val in form_data_function_map.items():
             reduced_coefficients_set.update(val)
         reduced_coefficients = sorted(reduced_coefficients_set, key=lambda c: c.count())
-        if False:  # len(form_data_tuple) == 1:
+        if len(form_data_tuple) == 1:
             self.reduced_coefficients = form_data_tuple[0].reduced_coefficients
             self.original_coefficient_positions = form_data_tuple[0].original_coefficient_positions
             self.function_replace_map = form_data_tuple[0].function_replace_map
         else:
-            # Having gathered coefficients from multiple forms,
-            # reconstruct `ufl.Coefficinet`s with count starting at 0.
+            # Reconstruct `ufl.Coefficinet`s with count starting at 0.
             function_replace_map = {}
             for i, func in enumerate(reduced_coefficients):
                 for fd in form_data_tuple:
@@ -122,36 +152,41 @@ class TSFCFormData(object):
             domain, _, _ = key
             domain_number = original_form.domain_numbering()[domain]
             integral_data_list.append(TSFCIntegralData(key, intg_data_list, form_data_list,
-                                                       self, domain_number,
-                                                       form_data_function_map=form_data_function_map))
+                                                       self, domain_number, form_data_function_map))
         self.integral_data = tuple(integral_data_list)
 
 
 class TSFCIntegralData(object):
     r"""Mimics `ufl.IntegralData`.
 
-    :arg integral_data: a `ufl.IntegralData`.
-    :arg form_data: a `ufl.FormData`.
-    :arg tsfc_form_data: a `TSFCFormData`.
+    :arg integral_data_key: (domain, integral_type, subdomain_id) tuple.
+    :arg integral_data_list: A list of `ufl.IntegralData`.
+    :arg form_data_list: A list of `ufl.FormData`.
+    :arg tsfc_form_data: The `TSFCFormData` that will contain this
+        `TSFCIntegralData` object.
+    :arg domain_number: The domain number associated with `domain`.
+    :arg form_data_function_map: A map from `ufl.FormData`s to functions.
 
     This class mimics `ufl.FormData`, but:
         * extracts information required by TSFC.
         * preprocesses integrals so that `KernelBuilder`s only
           need to deal with raw `ufl.Coefficient`s.
     """
-    def __init__(self, integral_data_key, integral_data_list, form_data_list, tsfc_form_data, domain_number, form_data_function_map={}):
+    def __init__(self, integral_data_key, integral_data_list, form_data_list, tsfc_form_data, domain_number, form_data_function_map):
         self.domain, self.integral_type, self.subdomain_id = integral_data_key
         self.domain_number = domain_number
-
+        # Gather/preprocess integrals.
         integrals = []
         _integral_to_form_data_map = {}
         functions = set()
         for intg_data, form_data in zip(integral_data_list, form_data_list):
             for integral in intg_data.integrals:
                 integrand = integral.integrand()
+                # Replace functions with Coefficients here.
                 integrand = ufl.replace(integrand, tsfc_form_data.function_replace_map)
                 new_integral = integral.reconstruct(integrand=integrand)
                 integrals.append(new_integral)
+                # Remember which form_data this integral is associated with.
                 _integral_to_form_data_map[new_integral] = form_data
             # Gather functions that are enabled in this `TSFCIntegralData`.
             functions.update(f for f, enabled in zip(form_data.reduced_coefficients, intg_data.enabled_coefficients) if enabled)
@@ -159,7 +194,6 @@ class TSFCIntegralData(object):
         self.integrals = tuple(integrals)
         self._integral_to_form_data_map = _integral_to_form_data_map
         self.arguments = tsfc_form_data.arguments
-
         # This is which coefficient in the original form the
         # current coefficient is.
         # Ex:
@@ -173,7 +207,7 @@ class TSFCIntegralData(object):
         self.coefficient_numbers = tuple(tsfc_form_data.original_coefficient_positions[tsfc_form_data.reduced_coefficients.index(f)] for f in functions)
 
     def integral_to_form_data(self, integral):
-        r"""Return `ufl.FormData` in which the given integral was found."""
+        r"""Return `ufl.FormData` which `integral` is associated with."""
         return self._integral_to_form_data_map[integral]
 
 
@@ -204,9 +238,9 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
     logger.info(GREEN % "compute_form_data finished in %g seconds.", time.time() - cpu_time)
 
     kernels = []
-    for integral_data in tsfc_form_data.integral_data:
+    for tsfc_integral_data in tsfc_form_data.integral_data:
         start = time.time()
-        kernel = compile_integral(integral_data, prefix, parameters, interface=interface, coffee=coffee, diagonal=diagonal)
+        kernel = compile_integral(tsfc_integral_data, prefix, parameters, interface=interface, coffee=coffee, diagonal=diagonal)
         if kernel is not None:
             kernels.append(kernel)
         logger.info(GREEN % "compile_integral finished in %g seconds.", time.time() - start)
@@ -215,10 +249,10 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
     return kernels
 
 
-def compile_integral(integral_data, prefix, parameters, interface, coffee, *, diagonal=False):
+def compile_integral(tsfc_integral_data, prefix, parameters, interface, coffee, *, diagonal=False):
     """Compiles a UFL integral into an assembly kernel.
 
-    :arg integral_data: TSFCIntegralData
+    :arg tsfc_integral_data: TSFCIntegralData
     :arg prefix: kernel name will start with this string
     :arg parameters: parameters object
     :arg interface: backend module for the kernel interface
@@ -234,24 +268,19 @@ def compile_integral(integral_data, prefix, parameters, interface, coffee, *, di
             import tsfc.kernel_interface.firedrake_loopy as firedrake_interface_loopy
             interface = firedrake_interface_loopy.KernelBuilder
 
-    # The same builder (in principle) can be used to compile different forms.
-    builder = interface(integral_data,
+    builder = interface(tsfc_integral_data,
                         parameters["scalar_type_c"] if coffee else parameters["scalar_type"],
                         parameters["scalar_type"],
                         diagonal=diagonal)
-
-    # All form specific variables (such as arguments) are stored in kernel_config (not in KernelBuilder instance).
-    # The followings are specific for the concrete form representation, so
-    # not to be saved in KernelBuilders.
-
-    for integral in integral_data.integrals:
+    # Compile UFL -> gem
+    for integral in tsfc_integral_data.integrals:
         params = parameters.copy()
         params.update(integral.metadata())  # integral metadata overrides
-        expressions = builder.compile_ufl(integral.integrand(), params)
-        reps = builder.construct_integrals(expressions, params)
-        builder.stash_integrals(reps, params)
-    # Construct kernel
-    kernel_name = "%s_%s_integral_%s" % (prefix, integral_data.integral_type, integral_data.subdomain_id)
+        integrand_exprs = builder.compile_ufl(integral.integrand(), params)
+        integral_exprs = builder.construct_integrals(integrand_exprs, params)
+        builder.stash_integrals(integral_exprs, params)
+    # Compile gem -> kernel
+    kernel_name = "%s_%s_integral_%s" % (prefix, tsfc_integral_data.integral_type, tsfc_integral_data.subdomain_id)
     kernel_name = kernel_name.replace("-", "_")  # Handle negative subdomain_id
     return builder.construct_kernel(kernel_name)
 
