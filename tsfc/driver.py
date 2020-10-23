@@ -109,7 +109,7 @@ class TSFCFormData(object):
         for _, val in form_data_function_map.items():
             reduced_coefficients_set.update(val)
         reduced_coefficients = sorted(reduced_coefficients_set, key=lambda c: c.count())
-        if len(form_data_tuple) == 1:
+        if False: #len(form_data_tuple) == 1:
             self.reduced_coefficients = form_data_tuple[0].reduced_coefficients
             self.original_coefficient_positions = form_data_tuple[0].original_coefficient_positions
             self.function_replace_map = form_data_tuple[0].function_replace_map
