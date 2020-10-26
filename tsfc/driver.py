@@ -91,12 +91,12 @@ class TSFCFormData(object):
                 |____0___||____1___|_     _|____M___|      ||________||________|       |________||
                                                            |_____________________________________|
     """
-    def __init__(self, form_data_tuple, original_form, form_data_extraarg_map, form_data_function_map, diagonal):
+    def __init__(self, form_data_tuple, original_form, form_data_extraarg_tuple, form_data_function_tuple, diagonal):
         arguments = set()
-        for fd in form_data_tuple:
+        for fd, extraarg in zip(form_data_tuple, form_data_extraarg_tuple):
             args = []
             for arg in fd.preprocessed_form.arguments():
-                if arg not in form_data_extraarg_map[fd]:
+                if arg not in extraarg:
                     args.append(arg)
             arguments.update((tuple(args), ))
         if len(arguments) != 1:
@@ -106,7 +106,7 @@ class TSFCFormData(object):
         # If a form contains extra arguments, those will be replaced by corresponding functions
         # after compiling UFL, so these functions must be included here, too.
         reduced_coefficients_set = set(c for fd in form_data_tuple for c in fd.reduced_coefficients)
-        for _, val in form_data_function_map.items():
+        for val in form_data_function_tuple:
             reduced_coefficients_set.update(val)
         reduced_coefficients = sorted(reduced_coefficients_set, key=lambda c: c.count())
         if False: #len(form_data_tuple) == 1:
@@ -135,7 +135,8 @@ class TSFCFormData(object):
         # Translate `ufl.IntegralData`s -> `TSFCIntegralData`.
         intg_data_dict = {}
         form_data_dict = {}
-        for form_data in form_data_tuple:
+        form_data_index_dict = {}
+        for form_data_index, form_data in enumerate(form_data_tuple):
             for intg_data in form_data.integral_data:
                 domain = intg_data.domain
                 integral_type = intg_data.integral_type
@@ -145,14 +146,16 @@ class TSFCFormData(object):
                 intg_data_dict.setdefault(key, []).append(intg_data)
                 # Remember which form_data this intg_data came from.
                 form_data_dict.setdefault(key, []).append(form_data)
+                form_data_index_dict.setdefault(key, []).append(form_data_index)
         integral_data_list = []
         for key in intg_data_dict:
             intg_data_list = intg_data_dict[key]
             form_data_list = form_data_dict[key]
+            form_data_index_list = form_data_index_dict[key]
             domain, _, _ = key
             domain_number = original_form.domain_numbering()[domain]
-            integral_data_list.append(TSFCIntegralData(key, intg_data_list, form_data_list,
-                                                       self, domain_number, form_data_function_map))
+            integral_data_list.append(TSFCIntegralData(key, intg_data_list, form_data_list, form_data_index_list,
+                                                       self, domain_number, form_data_function_tuple))
         self.integral_data = tuple(integral_data_list)
 
 
@@ -172,14 +175,14 @@ class TSFCIntegralData(object):
         * preprocesses integrals so that `KernelBuilder`s only
           need to deal with raw `ufl.Coefficient`s.
     """
-    def __init__(self, integral_data_key, integral_data_list, form_data_list, tsfc_form_data, domain_number, form_data_function_map):
+    def __init__(self, integral_data_key, integral_data_list, form_data_list, form_data_index_list, tsfc_form_data, domain_number, form_data_function_tuple):
         self.domain, self.integral_type, self.subdomain_id = integral_data_key
         self.domain_number = domain_number
         # Gather/preprocess integrals.
         integrals = []
-        _integral_to_form_data_map = {}
+        _integral_to_form_data_map = []
         functions = set()
-        for intg_data, form_data in zip(integral_data_list, form_data_list):
+        for intg_data, form_data, form_data_index in zip(integral_data_list, form_data_list, form_data_index_list):
             for integral in intg_data.integrals:
                 integrand = integral.integrand()
                 # Replace functions with Coefficients here.
@@ -187,10 +190,10 @@ class TSFCIntegralData(object):
                 new_integral = integral.reconstruct(integrand=integrand)
                 integrals.append(new_integral)
                 # Remember which form_data this integral is associated with.
-                _integral_to_form_data_map[new_integral] = form_data
+                _integral_to_form_data_map.append(form_data_index)
             # Gather functions that are enabled in this `TSFCIntegralData`.
             functions.update(f for f, enabled in zip(form_data.reduced_coefficients, intg_data.enabled_coefficients) if enabled)
-            functions.update(form_data_function_map[form_data])
+            functions.update(form_data_function_tuple[form_data_index])
         self.integrals = tuple(integrals)
         self._integral_to_form_data_map = _integral_to_form_data_map
         self.arguments = tsfc_form_data.arguments
@@ -206,9 +209,9 @@ class TSFCIntegralData(object):
         self.coefficients = tuple(tsfc_form_data.function_replace_map[f] for f in functions)
         self.coefficient_numbers = tuple(tsfc_form_data.original_coefficient_positions[tsfc_form_data.reduced_coefficients.index(f)] for f in functions)
 
-    def integral_to_form_data(self, integral):
+    def integral_to_form_data(self, idx):
         r"""Return `ufl.FormData` which `integral` is associated with."""
-        return self._integral_to_form_data_map[integral]
+        return self._integral_to_form_data_map[idx]
 
 
 def compile_form(form, prefix="form", parameters=None, interface=None, coffee=True, diagonal=False):
