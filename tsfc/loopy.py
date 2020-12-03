@@ -102,6 +102,7 @@ class LoopyContext(object):
         self.index_extent = OrderedDict()  # pymbolic variable for indices -> extent
         self.gem_to_pymbolic = {}  # gem node -> pymbolic variable
         self.name_gen = UniqueNameGenerator()
+        self.new_variables = OrderedDict() # pymbolic variale -> shape
 
     def fetch_multiindex(self, multiindex):
         indices = []
@@ -212,6 +213,10 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
 
     # Create instructions
     instructions = statement(impero_c.tree, ctx)
+
+    for var, shape in ctx.new_variables.items():
+        # TODO how do we specify the dtype
+        data.append(lp.TemporaryVariable(var, shape=shape, initializer=None, address_space=lp.AddressSpace.LOCAL, read_only=False))
 
     # Create domains
     domains = create_domains(ctx.index_extent.items())
