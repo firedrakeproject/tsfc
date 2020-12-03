@@ -333,22 +333,29 @@ def statement_evaluate(leaf, ctx):
 
         return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
     elif isinstance(expr, gem.Solve):
-        idx = ctx.pymbolic_multiindex(expr.shape)
-        var = ctx.pymbolic_variable(expr)
-        lhs = (SubArrayRef(idx, p.Subscript(var, idx)),)
 
-        reads = []
-        for child in expr.children:
-            idx_reads = ctx.pymbolic_multiindex(child.shape)
-            var_reads = ctx.pymbolic_variable(child)
-            reads.append(SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)))
-        
         if expr.matfree:
-            rhs = p.Call(p.Variable("solve_matfree"), tuple(reads))
-        else:
-            rhs = p.Call(p.Variable("solve"), tuple(reads))
+            idx = ctx.pymbolic_multiindex(expr.shape)
+            var = ctx.pymbolic_variable(expr)
+            lhs = p.Subscript(var, idx)
+            reads = []
+            for child in expr.children:
+                idx_reads = ctx.pymbolic_multiindex(expr.shape)
+                var_reads = ctx.pymbolic_variable(child)
+                reads.append(p.Subscript(var_reads, idx_reads))
+            return loopy_matfree_solve(lhs, reads, ctx, expr.shape)
 
-        return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
+        else:
+            idx = ctx.pymbolic_multiindex(expr.shape)
+            var = ctx.pymbolic_variable(expr)
+            lhs = (SubArrayRef(idx, p.Subscript(var, idx)),)
+            reads = []
+            for child in expr.children:
+                idx_reads = ctx.pymbolic_multiindex(child.shape)
+                var_reads = ctx.pymbolic_variable(child)
+                reads.append(SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)))
+            rhs = p.Call(p.Variable("solve"), tuple(reads))
+            return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
     else:
         return [lp.Assignment(ctx.pymbolic_variable(expr), expression(expr, ctx, top=True), within_inames=ctx.active_inames())]
 
