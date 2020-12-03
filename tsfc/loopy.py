@@ -359,6 +359,23 @@ def statement_evaluate(leaf, ctx):
     else:
         return [lp.Assignment(ctx.pymbolic_variable(expr), expression(expr, ctx, top=True), within_inames=ctx.active_inames())]
 
+def loopy_matfree_solve(lhs, reads, ctx, shape):
+    # TODO check that we got the right active inames here
+    # TODO implement our matfree solve of choice here
+    kernel = []
+    idxnew = reads[1].index
+    namenew = "new"
+    lhsnew = p.Subscript(p.Variable(namenew), idxnew)
+    ctx.new_variables[namenew] = shape # we keep track of this to add the additional TemporaryVariables to the kernel data
+    
+    idxnewnew = lhs.index
+    lhsnewnew = p.Subscript(p.Variable(namenew), idxnewnew)
+
+    kernel.append(lp.Assignment(lhsnew, 100000.*reads[1], within_inames=ctx.active_inames()))
+    kernel.append(lp.Assignment(lhs, 100000.*lhsnewnew, within_inames=ctx.active_inames()))
+    # ...
+    # filling!
+    return kernel
 
 def expression(expr, ctx, top=False):
     """Translates GEM expression into a pymbolic expression
