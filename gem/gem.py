@@ -33,7 +33,7 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'IndexSum', 'ListTensor', 'Concatenate', 'Delta',
            'index_sum', 'partial_indexed', 'reshape', 'view',
            'indices', 'as_gem', 'FlexiblyIndexed',
-           'Inverse', 'Solve']
+           'Inverse', 'Solve', 'Action']
 
 
 class NodeMeta(type):
@@ -846,6 +846,22 @@ class Solve(Node):
         self.children = (A, B)
         self.shape = A.shape[1:] + B.shape[1:]
         self.matfree = matfree
+
+
+class Action(Node):
+    __slots__ = ('children', 'shape')
+
+    def __new__(cls, A, B):
+        # Shape requirements
+        assert B.shape
+        assert len(A.shape) == 2
+        assert A.shape[0] == A.shape[1]
+        assert A.shape[0] == B.shape[0]
+
+        self = super(Action, cls).__new__(cls)
+        self.children = A, B
+        self.shape = A.shape[1:] + B.shape[1:]
+        return self
 
 
 def unique(indices):
