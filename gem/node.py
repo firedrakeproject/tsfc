@@ -120,7 +120,7 @@ def pre_traversal(expression_dags):
                 lifo.append(child)
 
 
-def post_traversal(expression_dags):
+def post_traversal(expression_dags, reverse=False):
     """Post-order traversal of the nodes of expression DAGs."""
     seen = set()
     lifo = []
@@ -130,7 +130,10 @@ def post_traversal(expression_dags):
     for root in expression_dags:
         if root not in seen:
             seen.add(root)
-            lifo.append((root, list(root.children)))
+            if reverse:
+                lifo.append((root, list(reversed(root.children))))
+            else:
+                lifo.append((root, list(root.children)))
 
     while lifo:
         node, deps = lifo[-1]
