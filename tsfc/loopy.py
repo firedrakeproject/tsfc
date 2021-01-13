@@ -352,7 +352,7 @@ def statement_evaluate(leaf, ctx):
             lhs = p.Subscript(var, idx)
             reads = []
             for child in expr.children:
-                idx_reads = ctx.pymbolic_multiindex(expr.shape)
+                idx_reads = ctx.pymbolic_multiindex(child.shape)
                 var_reads = ctx.pymbolic_variable(child)
                 reads.append(p.Subscript(var_reads, idx_reads))
             return loopy_matfree_solve(lhs, reads, ctx, expr.shape)
