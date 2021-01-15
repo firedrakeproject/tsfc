@@ -14,6 +14,8 @@ import loopy as lp
 
 import pymbolic.primitives as p
 from loopy.symbolic import SubArrayRef
+from loopy.program import make_program
+from loopy.transform.callable import register_callable_kernel, inline_callable_kernel
 
 from pytools import UniqueNameGenerator
 
@@ -21,6 +23,7 @@ from tsfc.parameters import is_complex
 
 from contextlib import contextmanager
 
+matfree_solve_knl = None
 
 @singledispatch
 def _assign_dtype(expression, self):
@@ -214,10 +217,6 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     # Create instructions
     instructions = statement(impero_c.tree, ctx)
 
-    for var, shape in ctx.new_variables.items():
-        # TODO how do we specify the dtype
-        data.append(lp.TemporaryVariable(var, shape=shape, initializer=None, address_space=lp.AddressSpace.LOCAL, read_only=False))
-
     # Create domains
     domains = create_domains(ctx.index_extent.items())
 
@@ -349,13 +348,15 @@ def statement_evaluate(leaf, ctx):
         if expr.matfree:
             idx = ctx.pymbolic_multiindex(expr.shape)
             var = ctx.pymbolic_variable(expr)
-            lhs = p.Subscript(var, idx)
+            lhs = (SubArrayRef(idx, p.Subscript(var, idx)),)
             reads = []
             for child in expr.children:
                 idx_reads = ctx.pymbolic_multiindex(child.shape)
                 var_reads = ctx.pymbolic_variable(child)
-                reads.append(p.Subscript(var_reads, idx_reads))
-            return loopy_matfree_solve(lhs, reads, ctx, expr.shape)
+                reads.append(SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)))
+            loopy_matfree_solve(lhs, reads, ctx, expr.shape)
+            rhs = p.Call(p.Variable(matfree_solve_knl.name), tuple(reads))
+            return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
 
         else:
             idx = ctx.pymbolic_multiindex(expr.shape)
@@ -371,23 +372,55 @@ def statement_evaluate(leaf, ctx):
     else:
         return [lp.Assignment(ctx.pymbolic_variable(expr), expression(expr, ctx, top=True), within_inames=ctx.active_inames())]
 
-def loopy_matfree_solve(lhs, reads, ctx, shape):
-    # TODO check that we got the right active inames here
-    # TODO implement our matfree solve of choice here
-    kernel = []
-    idxnew = reads[1].index
-    namenew = "new"
-    lhsnew = p.Subscript(p.Variable(namenew), idxnew)
-    ctx.new_variables[namenew] = shape # we keep track of this to add the additional TemporaryVariables to the kernel data
-    
-    idxnewnew = lhs.index
-    lhsnewnew = p.Subscript(p.Variable(namenew), idxnewnew)
 
-    kernel.append(lp.Assignment(lhsnew, 100000.*reads[1], within_inames=ctx.active_inames()))
-    kernel.append(lp.Assignment(lhs, 100000.*lhsnewnew, within_inames=ctx.active_inames()))
-    # ...
-    # filling!
-    return kernel
+def loopy_matfree_solve(lhs, reads, ctx, shape):
+    """
+        Matrix-free solve. Currently implemented as CG. WIP.
+    """
+    # NOTE potentially we would like to use a stop criterion
+    # like <> rkp1_norm_small = rkp1_norm < 0.00001 {dep=rkp1_norm0,inames=i_6:j_6}
+    # but I don't know how to abort a loop and maybe these is not ideal for parallelising either
+    import numpy as np
+
+    knl = lp.make_kernel(
+            """{ [i_0,i_1,j_1,i_2,j_2,i_3,i_4,i_5,i_6,i_7,j_7,i_8,j_8,i_9,i_10,i_11,i_12,i_13,i_14,i_15]: 
+                0<=i_0<n and 0<=i_1,j_1<n and 0<=i_2,j_2<n and 0<=i_3<n and 0<=i_4<n 
+                and 0<=i_5<n and 0<=i_6<=2*n and 0<=i_7,j_7<n and 0<=i_8,j_8<n 
+                and 0<=i_9<n and 0<=i_10<n and 0<=i_11<n and 0<=i_12<n and 0<=i_13<n
+                and 0<=i_14<n and 0<=i_15<n}""" ,
+            """
+                x[i_0] = b[i_0] {id=x0} 
+                A_on_x[:] = action_A(A[:,:], x[:]) {dep=x0, id=Aonx}
+                <> r[i_3] = A_on_x[i_3]-b[i_3] {dep=Aonx, id=residual0}
+                p[i_4] = -r[i_4] {dep=residual0, id=projector0}
+                <> rk_norm = 0 {dep=projector0, id=rk_norm0}
+                rk_norm = rk_norm + r[i_5]*r[i_5] {dep=projector0, id=rk_norm1}
+                for i_6
+                    A_on_p[:] = action_A_on_p(A[:,:], p[:]) {dep=rk_norm1, id=Aonp, inames=i_7:j_7}
+                    <> p_on_Ap = 0 {dep=Aonp, id=ponAp0}
+                    p_on_Ap = p_on_Ap + p[j_2]*A_on_p[j_2] {dep=ponAp0, id=ponAp}
+                    <> alpha[i_9] = rk_norm[i_9] / p_on_Ap[i_9] {dep=ponAp, id=alpha}
+                    x[i_10] = x[i_10] + alpha[i_10]*p[i_10] {dep=ponAp, id=xk}
+                    r[i_11] = r[i_11] + alpha[i_11]*Ap[i_11] {dep=xk,id=rk}
+                    <> rkp1_norm = 0 {dep=rk, id=rkp1_norm0}
+                    rkp1_norm = rkp1_norm + r[i_12]*r[i_12] {dep=rkp1_norm0, id=rkp1_normk}
+                    <> beta[i_13] = rkp1_norm[i_12] / rk_norm[i_13] {dep=rkp1_normk, id=beta}
+                    rk_norm[i_14] = rkp1_norm[i_14] {dep=beta, id=rk_normk}
+                    p[i_15] = beta[i_15] * p[i_15] - r[i_15] {dep=rk_normk, id=projectork}
+                end
+            """,
+            [lp.GlobalArg("A", np.float64, shape=(shape[0], shape[0])),
+            lp.GlobalArg("b", np.float64, shape=shape),
+            lp.GlobalArg("x", np.float64, shape=shape),
+            lp.TemporaryVariable("A_on_x", np.float64, shape=shape, address_space=lp.AddressSpace.LOCAL),
+            lp.TemporaryVariable("A_on_p", np.float64, shape=shape, address_space=lp.AddressSpace.LOCAL),
+            lp.TemporaryVariable("p", np.float64, shape=shape, address_space=lp.AddressSpace.LOCAL)],
+            target=lp.CTarget(),
+            name="matfree_cg_kernel",
+            lang_version=(2018, 2))
+    global matfree_solve_knl
+    matfree_solve_knl = knl
+
 
 def expression(expr, ctx, top=False):
     """Translates GEM expression into a pymbolic expression
