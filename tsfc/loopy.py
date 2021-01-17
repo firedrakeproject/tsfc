@@ -23,6 +23,7 @@ from tsfc.parameters import is_complex
 
 from contextlib import contextmanager
 
+global matfree_solve_knl
 matfree_solve_knl = None
 
 maxtype = partial(numpy.find_common_type, [])
@@ -239,10 +240,12 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
         insn_new.append(insn.copy(priority=len(knl.instructions) - i))
     knl = knl.copy(instructions=insn_new)
 
+    global matfree_solve_knl
     if matfree_solve_knl:
         prg = make_program(knl)
         prg = register_callable_kernel(prg, matfree_solve_knl.root_kernel)
         prg = inline_callable_kernel(prg, matfree_solve_knl.name)
+        matfree_solve_knl = None
         return prg
     else:
         return knl
