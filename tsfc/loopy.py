@@ -239,6 +239,7 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     if matfree_solve_knl:
         prg = make_program(knl)
         prg = register_callable_kernel(prg, matfree_solve_knl.root_kernel)
+        prg = _match_caller_callee_argument_dimension_(prg, matfree_solve_knl.name)
         prg = inline_callable_kernel(prg, matfree_solve_knl.name)
         matfree_solve_knl = None
         return prg
