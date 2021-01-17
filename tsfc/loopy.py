@@ -15,7 +15,7 @@ import loopy as lp
 import pymbolic.primitives as p
 from loopy.symbolic import SubArrayRef
 from loopy.program import make_program
-from loopy.transform.callable import register_callable_kernel, inline_callable_kernel
+from loopy.transform.callable import register_callable_kernel, inline_callable_kernel, _match_caller_callee_argument_dimension_
 
 from pytools import UniqueNameGenerator
 
