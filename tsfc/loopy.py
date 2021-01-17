@@ -405,7 +405,7 @@ def loopy_matfree_solve(lhs, reads, ctx, shape):
                 and 0<=i_9<9 and 0<=i_10<9 and 0<=i_11<9 and 0<=i_12<9 and 0<=i_13<9
                 and 0<=i_14<9 and 0<=i_15<9 and 0<=i_16<9}""" ,
             """
-                x[i_0] = b[i_0] {id=x0} 
+                x[i_0] = 1.0 {id=x0} 
                 A_on_x[:] = action_A(A[:,:], x[:]) {dep=x0, id=Aonx}
                 <> r[i_3] = A_on_x[i_3]-b[i_3] {dep=Aonx, id=residual0}
                 p[i_4] = -r[i_4] {dep=residual0, id=projector0}
