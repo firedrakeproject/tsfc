@@ -399,11 +399,11 @@ def loopy_matfree_solve(lhs, reads, ctx, shape):
     import numpy as np
 
     knl = lp.make_kernel(
-            """{ [i_0,i_1,j_1,i_2,j_2,i_3,i_4,i_5,i_6,i_7,j_7,i_8,j_8,i_9,i_10,i_11,i_12,i_13,i_14,i_15]: 
-                0<=i_0<n and 0<=i_1,j_1<n and 0<=i_2,j_2<n and 0<=i_3<n and 0<=i_4<n 
-                and 0<=i_5<n and 0<=i_6<=2*n and 0<=i_7,j_7<n and 0<=i_8,j_8<n 
-                and 0<=i_9<n and 0<=i_10<n and 0<=i_11<n and 0<=i_12<n and 0<=i_13<n
-                and 0<=i_14<n and 0<=i_15<n}""" ,
+            """{ [i_0,i_1,j_1,i_2,j_2,i_3,i_4,i_5,i_6,i_7,j_7,i_8,j_8,i_9,i_10,i_11,i_12,i_13,i_14,i_15,i_16]: 
+                0<=i_0<9 and 0<=i_1,j_1<9 and 0<=i_2,j_2<9 and 0<=i_3<9 and 0<=i_4<9 
+                and 0<=i_5<9 and 0<=i_6<=9 and 0<=i_7,j_7<9 and 0<=i_8,j_8<9 
+                and 0<=i_9<9 and 0<=i_10<9 and 0<=i_11<9 and 0<=i_12<9 and 0<=i_13<9
+                and 0<=i_14<9 and 0<=i_15<9 and 0<=i_16<9}""" ,
             """
                 x[i_0] = b[i_0] {id=x0} 
                 A_on_x[:] = action_A(A[:,:], x[:]) {dep=x0, id=Aonx}
@@ -415,19 +415,21 @@ def loopy_matfree_solve(lhs, reads, ctx, shape):
                     A_on_p[:] = action_A_on_p(A[:,:], p[:]) {dep=rk_norm1, id=Aonp, inames=i_7:j_7}
                     <> p_on_Ap = 0 {dep=Aonp, id=ponAp0}
                     p_on_Ap = p_on_Ap + p[j_2]*A_on_p[j_2] {dep=ponAp0, id=ponAp}
-                    <> alpha[i_9] = rk_norm[i_9] / p_on_Ap[i_9] {dep=ponAp, id=alpha}
-                    x[i_10] = x[i_10] + alpha[i_10]*p[i_10] {dep=ponAp, id=xk}
-                    r[i_11] = r[i_11] + alpha[i_11]*Ap[i_11] {dep=xk,id=rk}
+                    <> alpha = rk_norm / p_on_Ap {dep=ponAp, id=alpha}
+                    x[i_10] = x[i_10] + alpha*p[i_10] {dep=ponAp, id=xk}
+                    r[i_11] = r[i_11] + alpha*A_on_p[i_11] {dep=xk,id=rk}
                     <> rkp1_norm = 0 {dep=rk, id=rkp1_norm0}
                     rkp1_norm = rkp1_norm + r[i_12]*r[i_12] {dep=rkp1_norm0, id=rkp1_normk}
-                    <> beta[i_13] = rkp1_norm[i_12] / rk_norm[i_13] {dep=rkp1_normk, id=beta}
-                    rk_norm[i_14] = rkp1_norm[i_14] {dep=beta, id=rk_normk}
-                    p[i_15] = beta[i_15] * p[i_15] - r[i_15] {dep=rk_normk, id=projectork}
+                    <> beta = rkp1_norm / rk_norm {dep=rkp1_normk, id=beta}
+                    rk_norm = rkp1_norm {dep=beta, id=rk_normk}
+                    p[i_15] = beta * p[i_15] - r[i_15] {dep=rk_normk, id=projectork}
                 end
+                output[i_16] = x[i_16] {dep=projectork, id=out}
             """,
             [lp.GlobalArg("A", np.float64, shape=(shape[0], shape[0])),
             lp.GlobalArg("b", np.float64, shape=shape),
-            lp.GlobalArg("x", np.float64, shape=shape),
+            lp.TemporaryVariable("x", np.float64, shape=shape, address_space=lp.AddressSpace.LOCAL),
+            lp.GlobalArg("output", np.float64, shape=shape, is_output_only=True),
             lp.TemporaryVariable("A_on_x", np.float64, shape=shape, address_space=lp.AddressSpace.LOCAL),
             lp.TemporaryVariable("A_on_p", np.float64, shape=shape, address_space=lp.AddressSpace.LOCAL),
             lp.TemporaryVariable("p", np.float64, shape=shape, address_space=lp.AddressSpace.LOCAL)],
