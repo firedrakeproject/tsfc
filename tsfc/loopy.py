@@ -412,7 +412,7 @@ def loopy_matfree_solve(lhs, reads, ctx, shape):
                 <> rk_norm = 0 {dep=projector0, id=rk_norm0}
                 rk_norm = rk_norm + r[i_5]*r[i_5] {dep=projector0, id=rk_norm1}
                 for i_6
-                    A_on_p[:] = action_A_on_p(A[:,:], p[:]) {dep=rk_norm1, id=Aonp, inames=i_7:j_7}
+                    A_on_p[:] = action_A_on_p(A[:,:], p[:]) {dep=rk_norm1, id=Aonp}
                     <> p_on_Ap = 0 {dep=Aonp, id=ponAp0}
                     p_on_Ap = p_on_Ap + p[j_2]*A_on_p[j_2] {dep=ponAp0, id=ponAp}
                     <> alpha = rk_norm / p_on_Ap {dep=ponAp, id=alpha}
