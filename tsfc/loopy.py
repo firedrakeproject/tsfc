@@ -409,12 +409,12 @@ def loopy_matfree_solve(lhs, reads, ctx, shape):
     # bc the initialisation of A_on_p in the action call does not get inlined properly either
            
     knl = lp.make_kernel(
-            """{ [i_0,i_1,j_1,i_2,j_2,i_3,i_4,i_5,i_6,i_7,j_7,i_8,j_8,i_9,i_10,i_11,i_12,i_13,i_14,i_15,i_16]: 
-                0<=i_0<9 and 0<=i_1,j_1<9 and 0<=i_2,j_2<9 and 0<=i_3<9 and 0<=i_4<9 
-                and 0<=i_5<9 and 0<=i_6<=9 and 0<=i_7,j_7<9 and 0<=i_8,j_8<9 
-                and 0<=i_9<9 and 0<=i_10<9 and 0<=i_11<9 and 0<=i_12<9 and 0<=i_13<9
-                and 0<=i_14<9 and 0<=i_15<9 and 0<=i_16<9}""" ,
-            """
+            """{ [i_0,i_1,j_1,i_2,j_2,i_3,i_4,i_5,i_6,i_7,j_7,i_8,j_8,i_9,i_10,i_11,i_12,i_13,i_14,i_15,i_16,i_17]: 
+                0<=i_0<n and 0<=i_1,j_1<n and 0<=i_2,j_2<n and 0<=i_3<n and 0<=i_4<n 
+                and 0<=i_5<n and 0<=i_6<=3*n and 0<=i_7,j_7<n and 0<=i_8,j_8<n 
+                and 0<=i_9<n and 0<=i_10<n and 0<=i_11<n and 0<=i_12<n and 0<=i_13<n
+                and 0<=i_14<n and 0<=i_15<n and 0<=i_16<n and 0<=i_17<n}""" ,
+            ["""
                 x[i_0] = 1.0 {id=x0} 
                 A_on_x[:] = action_A(A[:,:], x[:]) {dep=x0, id=Aonx}
                 <> r[i_3] = A_on_x[i_3]-b[i_3] {dep=Aonx, id=residual0}
@@ -448,6 +448,8 @@ def loopy_matfree_solve(lhs, reads, ctx, shape):
             target=lp.CTarget(),
             name=name,
             lang_version=(2018, 2))
+
+    knl = lp.fix_parameters(knl, n=shape[0])
     global matfree_solve_knl
     matfree_solve_knl = knl
 
