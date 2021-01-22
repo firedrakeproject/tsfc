@@ -404,6 +404,9 @@ def loopy_matfree_solve(lhs, reads, ctx, shape):
                                      read_variables=["rkp1_norm"],
                                      depends_on="rkp1_normk",
                                      id="cond"),
+
+    # The last line in the loop to convergence is another WORKAROUND
+    # bc the initialisation of A_on_p in the action call does not get inlined properly either
            
     knl = lp.make_kernel(
             """{ [i_0,i_1,j_1,i_2,j_2,i_3,i_4,i_5,i_6,i_7,j_7,i_8,j_8,i_9,i_10,i_11,i_12,i_13,i_14,i_15,i_16]: 
@@ -431,6 +434,7 @@ def loopy_matfree_solve(lhs, reads, ctx, shape):
                     """<> beta = rkp1_norm / rk_norm {dep=cond, id=beta}
                     rk_norm = rkp1_norm {dep=beta, id=rk_normk}
                     p[i_15] = beta * p[i_15] - r[i_15] {dep=rk_normk, id=projectork}
+                    A_on_p[i_17] = 0. {dep=rk_normk, id=Aonp0, inames=i_6}
                 end
                 output[i_16] = x[i_16] {dep=projectork, id=out}
             """],
