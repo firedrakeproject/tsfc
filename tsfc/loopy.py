@@ -427,8 +427,8 @@ def loopy_matfree_solve(lhs, reads, ctx, shape):
                     r[i_11] = r[i_11] + alpha*A_on_p[i_11] {dep=xk,id=rk}
                     <> rkp1_norm = 0 {dep=rk, id=rkp1_norm0}
                     rkp1_norm = rkp1_norm + r[i_12]*r[i_12] {dep=rkp1_norm0, id=rkp1_normk}""",
-                    lp.CInstruction("","""if (rkp1_norm < 0.0001) break;""", assignees="", id="cond", depends_on="rkp1_normk"),
-                    """<> beta = rkp1_norm / rk_norm {dep=rkp1_normk, id=beta}
+                    stop_criterion,
+                    """<> beta = rkp1_norm / rk_norm {dep=cond, id=beta}
                     rk_norm = rkp1_norm {dep=beta, id=rk_normk}
                     p[i_15] = beta * p[i_15] - r[i_15] {dep=rk_normk, id=projectork}
                 end
