@@ -403,7 +403,7 @@ def loopy_matfree_solve(lhs, reads, ctx, shape):
                                      "if (" + prefix_after_inlining +"rkp1_norm < 0.000001) break;",
                                      read_variables=["rkp1_norm"],
                                      depends_on="rkp1_normk",
-                                     id="cond"),
+                                     id="cond")
 
     # The last line in the loop to convergence is another WORKAROUND
     # bc the initialisation of A_on_p in the action call does not get inlined properly either
