@@ -393,9 +393,6 @@ def loopy_matfree_solve(lhs, reads, ctx, shape):
     """
         Matrix-free solve. Currently implemented as CG. WIP.
     """
-    # NOTE potentially we would like to use a stop criterion
-    # like <> rkp1_norm_small = rkp1_norm < 0.00001 {dep=rkp1_norm0,inames=i_6:j_6}
-    # but I don't know how to abort a loop and maybe these is not ideal for parallelising either
     import numpy as np
 
     knl = lp.make_kernel(
