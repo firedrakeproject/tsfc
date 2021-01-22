@@ -395,6 +395,16 @@ def loopy_matfree_solve(lhs, reads, ctx, shape):
     """
     import numpy as np
 
+    # WORKAROUND to inline cinstruction for breaking the loop properly:
+    # prepend the first 4 letters of the kernel to the variable which the stop criterion depends on
+    name = "matfree_cg_kernel"
+    prefix_after_inlining = name[:4]+"_"
+    stop_criterion = lp.CInstruction("",
+                                     "if (" + prefix_after_inlining +"rkp1_norm < 0.000001) break;",
+                                     read_variables=["rkp1_norm"],
+                                     depends_on="rkp1_normk",
+                                     id="cond"),
+           
     knl = lp.make_kernel(
             """{ [i_0,i_1,j_1,i_2,j_2,i_3,i_4,i_5,i_6,i_7,j_7,i_8,j_8,i_9,i_10,i_11,i_12,i_13,i_14,i_15,i_16]: 
                 0<=i_0<9 and 0<=i_1,j_1<9 and 0<=i_2,j_2<9 and 0<=i_3<9 and 0<=i_4<9 
@@ -432,7 +442,7 @@ def loopy_matfree_solve(lhs, reads, ctx, shape):
             lp.TemporaryVariable("A_on_p", np.float64, shape=shape, address_space=lp.AddressSpace.LOCAL),
             lp.TemporaryVariable("p", np.float64, shape=shape, address_space=lp.AddressSpace.LOCAL)],
             target=lp.CTarget(),
-            name="matfree_cg_kernel",
+            name=name,
             lang_version=(2018, 2))
     global matfree_solve_knl
     matfree_solve_knl = knl
