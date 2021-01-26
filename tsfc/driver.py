@@ -26,7 +26,7 @@ from finat.point_set import PointSet
 from finat.quadrature import AbstractQuadratureRule, make_quadrature, QuadratureRule
 
 from tsfc import fem, ufl_utils
-from tsfc.fiatinterface import as_fiat_cell
+from tsfc.finatinterface import as_fiat_cell
 from tsfc.logging import logger
 from tsfc.parameters import default_parameters, is_complex
 from tsfc.ufl_utils import apply_mapping
@@ -267,7 +267,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     return builder.construct_kernel(kernel_name, impero_c, index_names, quad_rule)
 
 
-def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
+def compile_expression_dual_evaluation(expression, to_element, *,
                                        domain=None, interface=None,
                                        parameters=None, coffee=False):
     """Compile a UFL expression to be evaluated against a compile-time known reference element's dual basis.
@@ -275,15 +275,19 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
     Useful for interpolating UFL expressions into e.g. N1curl spaces.
 
     :arg expression: UFL expression
-    :arg to_element: A FIAT FiniteElement for the target space
-    :arg coordinates: the coordinate function
-    :arg domain: optional UFL domain the expression is defined on (useful when expression contains no domain).
+    :arg to_element: A FInAT element for the target space
+    :arg domain: optional UFL domain the expression is defined on (required when expression contains no domain).
     :arg interface: backend module for the kernel interface
     :arg parameters: parameters object
     :arg coffee: compile coffee kernel instead of loopy kernel
     """
     import coffee.base as ast
     import loopy as lp
+
+    # Just convert FInAT element to FIAT for now.
+    # Dual evaluation in FInAT will bring a thorough revision.
+    to_element = to_element.fiat_equivalent
+
     if any(len(dual.deriv_dict) != 0 for dual in to_element.dual_basis()):
         raise NotImplementedError("Can only interpolate onto dual basis functionals without derivative evaluation, sorry!")
 
@@ -323,17 +327,21 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
     argument_multiindices = tuple(builder.create_element(arg.ufl_element()).get_indices()
                                   for arg in arguments)
 
-    # Replace coordinates (if any)
-    domain = expression.ufl_domain()
-    if domain:
-        assert coordinates.ufl_domain() == domain
-        builder.domain_coordinate[domain] = coordinates
-        builder.set_cell_sizes(domain)
+    # Replace coordinates (if any) unless otherwise specified by kwarg
+    if domain is None:
+        domain = expression.ufl_domain()
+    assert domain is not None
 
     # Collect required coefficients
+    first_coefficient_fake_coords = False
     coefficients = extract_coefficients(expression)
     if has_type(expression, GeometricQuantity) or any(fem.needs_coordinate_mapping(c.ufl_element()) for c in coefficients):
-        coefficients = [coordinates] + coefficients
+        # Create a fake coordinate coefficient for a domain.
+        coords_coefficient = ufl.Coefficient(ufl.FunctionSpace(domain, domain.ufl_coordinate_element()))
+        builder.domain_coordinate[domain] = coords_coefficient
+        builder.set_cell_sizes(domain)
+        coefficients = [coords_coefficient] + coefficients
+        first_coefficient_fake_coords = True
     builder.set_coefficients(coefficients)
 
     # Split mixed coefficients
@@ -341,7 +349,7 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
 
     # Translate to GEM
     kernel_cfg = dict(interface=builder,
-                      ufl_cell=coordinates.ufl_domain().ufl_cell(),
+                      ufl_cell=domain.ufl_cell(),
                       argument_multiindices=argument_multiindices,
                       index_cache={},
                       scalar_type=parameters["scalar_type"])
@@ -426,7 +434,7 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
     # Handle kernel interface requirements
     builder.register_requirements([ir])
     # Build kernel tuple
-    return builder.construct_kernel(return_arg, impero_c, index_names)
+    return builder.construct_kernel(return_arg, impero_c, index_names, first_coefficient_fake_coords)
 
 
 def lower_integral_type(fiat_cell, integral_type):
