@@ -398,12 +398,8 @@ def loopy_matfree_solve(lhs, reads, ctx, shape):
     # WORKAROUND to inline cinstruction for breaking the loop properly:
     # prepend the first 4 letters of the kernel to the variable which the stop criterion depends on
     name = "matfree_cg_kernel"
-    prefix_after_inlining = name[:4]+"_"
-    stop_criterion = lp.CInstruction("",
-                                     "if (" + prefix_after_inlining +"rkp1_norm < 0.000001) break;",
-                                     read_variables=["rkp1_norm"],
-                                     depends_on="rkp1_normk",
-                                     id="cond")
+    
+    stop_criterion = generate_code_for_stop_criterion(name, "rkp1_norm", 0.000001)
 
     # The last line in the loop to convergence is another WORKAROUND
     # bc the initialisation of A_on_p in the action call does not get inlined properly either
@@ -452,6 +448,42 @@ def loopy_matfree_solve(lhs, reads, ctx, shape):
     knl = lp.fix_parameters(knl, n=shape[0])
     global matfree_solve_knl
     matfree_solve_knl = knl
+
+
+def generate_code_for_stop_criterion(knl_name, var_name, stop_value):
+    """ This method is workaround need since Loo.py does not support while loops yet.
+        FIXME whenever while loops become available
+
+        The workaround uses a Loo.py CInstruction. The Loo.py Cinstruction allows to write C code
+        so that the code defined via its second argument while appear unaltered in the final
+        produced code. Meaning, there are no transformation happening on this code.
+        First example where this becomes a problem is when a kernel containing the Cinstruction gets
+        inlined in another kernel, the variables in the instruction are not getting renamed.
+        Another examples is that the variable in the instruction do not get vectorised when prompted.
+
+        Inlining and vectorisation are made available through this ugly bit of code.
+    """
+    import pyop2
+    prefix_after_inlining = knl_name[:4]+"_"
+    # not sure where I can get the prefix, which the variable has in a vectorised kernel,
+    # dynamically from
+    prefix_if_vectorised = "slat_" if pyop2.configuration["vectorization_strategy"]=="ve" else ""
+    variable_name = prefix_if_vectorised + prefix_after_inlining + var_name
+    condition = " < " + str(stop_value)
+    if pyop2.configuration["simd_width"]:
+        # vectorisation of the stop criterion
+        variable = variable_name+ "["+str(0)+"]" + condition
+        for i in range(int(pyop2.configuration["simd_width"])-1):
+            variable += "&& " + variable_name + "["+str(i+1)+"]" + condition
+    else:
+        variable = variable_name
+    # note that depends_on and id need to match the instructions in the kernel,
+    # which uses the stop criterion
+    return lp.CInstruction("",
+                           "if (" + variable +") break;",
+                           read_variables=[var_name],
+                           depends_on="rkp1_normk",
+                           id="cond")
 
 
 def expression(expr, ctx, top=False):
