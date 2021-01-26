@@ -455,11 +455,14 @@ def generate_code_for_stop_criterion(knl_name, var_name, stop_value):
         FIXME whenever while loops become available
 
         The workaround uses a Loo.py CInstruction. The Loo.py Cinstruction allows to write C code
-        so that the code defined via its second argument while appear unaltered in the final
-        produced code. Meaning, there are no transformation happening on this code.
-        First example where this becomes a problem is when a kernel containing the Cinstruction gets
-        inlined in another kernel, the variables in the instruction are not getting renamed.
-        Another examples is that the variable in the instruction do not get vectorised when prompted.
+        so that the code (defined via its second argument) will appear unaltered in the final
+        produced code for the kernel. Meaning, there are no transformations happening on this
+        bit of code.
+        First example where this becomes a problem is in a kernel containing the Cinstruction,
+        which gets inlined in another kernel. In that case the variables in the instruction
+        are not renamed properly in the inlining process.
+        Another example is, that the variable in the code of the Cinstruction does not get
+        vectorised when prompted.
 
         Inlining and vectorisation are made available through this ugly bit of code.
     """
