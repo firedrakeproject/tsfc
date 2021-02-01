@@ -25,6 +25,8 @@ from contextlib import contextmanager
 
 global matfree_solve_knl
 matfree_solve_knl = None
+maxtype = partial(numpy.find_common_type, [])
+
 
 @singledispatch
 def _assign_dtype(expression, self):
@@ -234,9 +236,8 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     for i, insn in enumerate(knl.instructions):
         insn_new.append(insn.copy(priority=len(knl.instructions) - i))
     knl = knl.copy(instructions=insn_new)
-
-    global matfree_solve_knl
-    if matfree_solve_knl:
+    if ctx.matfree_solve_knl:
+        matfree_solve_knl = ctx.matfree_solve_knl
         prg = make_program(knl)
         prg = register_callable_kernel(prg, matfree_solve_knl.root_kernel)
         prg = _match_caller_callee_argument_dimension_(prg, matfree_solve_knl.name)
@@ -370,8 +371,8 @@ def statement_evaluate(leaf, ctx):
                 idx_reads = ctx.pymbolic_multiindex(child.shape)
                 var_reads = ctx.pymbolic_variable(child)
                 reads.append(SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)))
-            loopy_matfree_solve(lhs, reads, ctx, expr.shape)
-            rhs = p.Call(p.Variable(matfree_solve_knl.name), tuple(reads))
+            loopy_matfree_solve(lhs, reads, ctx, expr)
+            rhs = p.Call(p.Variable(ctx.matfree_solve_knl.name), tuple(reads))
             return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
 
         else:
