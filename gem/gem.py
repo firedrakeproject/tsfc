@@ -834,9 +834,9 @@ class Solve(Node):
 
     Represents the X obtained by solving AX = B.
     """
-    __slots__ = ('children', 'shape', 'matfree')
+    __slots__ = ('children', 'shape', 'matfree', '_Aonp', '_Aonx')
 
-    def __init__(self, A, B, matfree=False):
+    def __init__(self, A, B, matfree=False, Aonp=None, Aonx=None):
         # Shape requirements
         assert B.shape
         assert len(A.shape) == 2
@@ -846,6 +846,8 @@ class Solve(Node):
         self.children = (A, B)
         self.shape = A.shape[1:] + B.shape[1:]
         self.matfree = matfree
+        self._Aonp = Aonp
+        self._Aonx = Aonx
 
 
 class Action(Node):
