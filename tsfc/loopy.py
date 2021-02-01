@@ -480,7 +480,7 @@ def generate_code_for_stop_criterion(knl_name, var_name, stop_value):
         for i in range(int(pyop2.configuration["simd_width"])-1):
             variable += "&& " + variable_name + "["+str(i+1)+"]" + condition
     else:
-        variable = variable_name
+        variable = variable_name + condition
     # note that depends_on and id need to match the instructions in the kernel,
     # which uses the stop criterion
     return lp.CInstruction("",
