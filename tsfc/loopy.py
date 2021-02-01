@@ -188,7 +188,7 @@ def active_indices(mapping, ctx):
 
 
 def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_names=[],
-             return_increments=True):
+             return_increments=True, return_ctx=False):
     """Generates loopy code.
 
     :arg impero_c: ImperoC tuple with Impero AST and other data
@@ -205,17 +205,19 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     ctx.epsilon = numpy.finfo(scalar_type).resolution
     ctx.scalar_type = scalar_type
     ctx.return_increments = return_increments
+    ctx.matfree_solve_knl = None
 
     # Create arguments
     data = list(args)
     for i, (temp, dtype) in enumerate(assign_dtypes(impero_c.temporaries, scalar_type)):
-        name = "t%d" % i
-        if isinstance(temp, gem.Constant):
-            data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=dtype, initializer=temp.array, address_space=lp.AddressSpace.LOCAL, read_only=True))
-        else:
-            shape = tuple([i.extent for i in ctx.indices[temp]]) + temp.shape
-            data.append(lp.TemporaryVariable(name, shape=shape, dtype=dtype, initializer=None, address_space=lp.AddressSpace.LOCAL, read_only=False))
-        ctx.gem_to_pymbolic[temp] = p.Variable(name)
+        if not isinstance(temp, gem.Action):
+            name = ctx.name_gen(kernel_name)
+            if isinstance(temp, gem.Constant):
+                data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=dtype, initializer=temp.array, address_space=lp.AddressSpace.LOCAL, read_only=True))
+            else:
+                shape = tuple([i.extent for i in ctx.indices[temp]]) + temp.shape
+                data.append(lp.TemporaryVariable(name, shape=shape, dtype=dtype, initializer=None, address_space=lp.AddressSpace.LOCAL, read_only=False))
+            ctx.gem_to_pymbolic[temp] = p.Variable(name)
 
     # Create instructions
     instructions = statement(impero_c.tree, ctx)
@@ -242,10 +244,15 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
         prg = register_callable_kernel(prg, matfree_solve_knl.root_kernel)
         prg = _match_caller_callee_argument_dimension_(prg, matfree_solve_knl.name)
         prg = inline_callable_kernel(prg, matfree_solve_knl.name)
-        matfree_solve_knl = None
-        return prg
+        if return_ctx:
+            return prg, ctx.gem_to_pymbolic
+        else:
+            return prg
     else:
-        return knl
+        if return_ctx:
+            return knl, ctx.gem_to_pymbolic
+        else:
+            return knl
 
 
 def create_domains(indices):
@@ -390,7 +397,7 @@ def statement_evaluate(leaf, ctx):
         return [lp.Assignment(ctx.pymbolic_variable(expr), expression(expr, ctx, top=True), within_inames=ctx.active_inames())]
 
 
-def loopy_matfree_solve(lhs, reads, ctx, shape):
+def loopy_matfree_solve(lhs, reads, ctx, expr):
     """
         Matrix-free solve. Currently implemented as CG. WIP.
     """
@@ -399,8 +406,11 @@ def loopy_matfree_solve(lhs, reads, ctx, shape):
     # WORKAROUND to inline cinstruction for breaking the loop properly:
     # prepend the first 4 letters of the kernel to the variable which the stop criterion depends on
     name = "matfree_cg_kernel"
-    
-    stop_criterion = generate_code_for_stop_criterion(name, "rkp1_norm", 0.000001)
+    shape = expr.shape
+    A_on_x_name = expr._Aonx.name
+    A_on_p_name = expr._Aonp.name
+
+    stop_criterion = generate_code_for_stop_criterion(name, "rkp1_norm", 0.000000001)
 
     # The last line in the loop to convergence is another WORKAROUND
     # bc the initialisation of A_on_p in the action call does not get inlined properly either
@@ -412,43 +422,50 @@ def loopy_matfree_solve(lhs, reads, ctx, shape):
                 and 0<=i_9<n and 0<=i_10<n and 0<=i_11<n and 0<=i_12<n and 0<=i_13<n
                 and 0<=i_14<n and 0<=i_15<n and 0<=i_16<n and 0<=i_17<n}""" ,
             ["""
-                x[i_0] = 1.0 {id=x0} 
-                A_on_x[:] = action_A(A[:,:], x[:]) {dep=x0, id=Aonx}
-                <> r[i_3] = A_on_x[i_3]-b[i_3] {dep=Aonx, id=residual0}
-                p[i_4] = -r[i_4] {dep=residual0, id=projector0}
-                <> rk_norm = 0 {dep=projector0, id=rk_norm0}
-                rk_norm = rk_norm + r[i_5]*r[i_5] {dep=projector0, id=rk_norm1}
+                x[i_0] = b[i_0] {{id=x0}} 
+                {A_on_x}[:] = action_A(A[:,:], x[:]) {{dep=x0, id=Aonx}}
+                <> r[i_3] = {A_on_x}[i_3]-b[i_3] {{dep=Aonx, id=residual0}}
+                p[i_4] = -r[i_4] {{dep=residual0, id=projector0}}
+                <> rk_norm = 0 {{dep=projector0, id=rk_norm0}}
+                rk_norm = rk_norm + r[i_5]*r[i_5] {{dep=projector0, id=rk_norm1}}
                 for i_6
-                    A_on_p[:] = action_A_on_p(A[:,:], p[:]) {dep=rk_norm1, id=Aonp, inames=i_6}
-                    <> p_on_Ap = 0 {dep=Aonp, id=ponAp0}
-                    p_on_Ap = p_on_Ap + p[j_2]*A_on_p[j_2] {dep=ponAp0, id=ponAp}
-                    <> alpha = rk_norm / p_on_Ap {dep=ponAp, id=alpha}
-                    x[i_10] = x[i_10] + alpha*p[i_10] {dep=ponAp, id=xk}
-                    r[i_11] = r[i_11] + alpha*A_on_p[i_11] {dep=xk,id=rk}
-                    <> rkp1_norm = 0 {dep=rk, id=rkp1_norm0}
-                    rkp1_norm = rkp1_norm + r[i_12]*r[i_12] {dep=rkp1_norm0, id=rkp1_normk}""",
+                    {A_on_p}[:] = action_A_on_p(A[:,:], p[:]) {{dep=rk_norm1, id=Aonp, inames=i_6}}
+                    <> p_on_Ap = 0 {{dep=Aonp, id=ponAp0}}
+                    p_on_Ap = p_on_Ap + p[j_2]*{A_on_p}[j_2] {{dep=ponAp0, id=ponAp}}
+                    <> alpha = rk_norm / p_on_Ap {{dep=ponAp, id=alpha}}
+                    x[i_10] = x[i_10] + alpha*p[i_10] {{dep=ponAp, id=xk}}
+                    r[i_11] = r[i_11] + alpha*{A_on_p}[i_11] {{dep=xk,id=rk}}
+                    <> rkp1_norm = 0 {{dep=rk, id=rkp1_norm0}}
+                    rkp1_norm = rkp1_norm + r[i_12]*r[i_12] {{dep=rkp1_norm0, id=rkp1_normk}}
+                """.format(**{"A_on_x" : A_on_x_name, "A_on_p" : A_on_p_name}),
                     stop_criterion,
-                    """<> beta = rkp1_norm / rk_norm {dep=cond, id=beta}
-                    rk_norm = rkp1_norm {dep=beta, id=rk_normk}
-                    p[i_15] = beta * p[i_15] - r[i_15] {dep=rk_normk, id=projectork}
-                    A_on_p[i_17] = 0. {dep=rk_normk, id=Aonp0, inames=i_6}
+                    """<> beta = rkp1_norm / rk_norm {{dep=cond, id=beta}}
+                    rk_norm = rkp1_norm {{dep=beta, id=rk_normk}}
+                    p[i_15] = beta * p[i_15] - r[i_15] {{dep=rk_normk, id=projectork}}
+                    {A_on_p}[i_17] = 0. {{dep=rk_normk, id=Aonp0, inames=i_6}}
                 end
-                output[i_16] = x[i_16] {dep=projectork, id=out}
-            """],
+                output[i_16] = x[i_16] {{dep=projectork, id=out}}
+            """.format(**{"A_on_p" : A_on_p_name})],
             [lp.GlobalArg("A", np.float64, shape=(shape[0], shape[0])),
             lp.GlobalArg("b", np.float64, shape=shape),
             lp.TemporaryVariable("x", np.float64, shape=shape, address_space=lp.AddressSpace.LOCAL),
             lp.GlobalArg("output", np.float64, shape=shape, is_output_only=True),
-            lp.TemporaryVariable("A_on_x", np.float64, shape=shape, address_space=lp.AddressSpace.LOCAL),
-            lp.TemporaryVariable("A_on_p", np.float64, shape=shape, address_space=lp.AddressSpace.LOCAL),
+            lp.TemporaryVariable(A_on_x_name, np.float64, shape=shape, address_space=lp.AddressSpace.LOCAL),
+            lp.TemporaryVariable(A_on_p_name, np.float64, shape=shape, address_space=lp.AddressSpace.LOCAL),
             lp.TemporaryVariable("p", np.float64, shape=shape, address_space=lp.AddressSpace.LOCAL)],
             target=lp.CTarget(),
             name=name,
             lang_version=(2018, 2))
 
     knl = lp.fix_parameters(knl, n=shape[0])
-    global matfree_solve_knl
-    matfree_solve_knl = knl
+
+    # update gem to pym mapping
+    knl.root_kernel.id_to_insn["Aonx"].assignees[0].subscript.aggregate.name = knl.name[:4]+"_"+A_on_x_name
+    knl.root_kernel.id_to_insn["Aonp"].assignees[0].subscript.aggregate.name = knl.name[:4]+"_"+A_on_p_name
+    _ = ctx.pymbolic_variable(expr._Aonx)
+    _ = ctx.pymbolic_variable(expr._Aonp)
+    
+    ctx.matfree_solve_knl = knl
 
 
 def generate_code_for_stop_criterion(knl_name, var_name, stop_value):
