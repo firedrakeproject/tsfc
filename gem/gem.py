@@ -849,9 +849,9 @@ class Solve(Node):
 
 
 class Action(Node):
-    __slots__ = ('children', 'shape')
+    __slots__ = ('children', 'shape', 'name')
 
-    def __new__(cls, A, B):
+    def __new__(cls, A, B, name):
         # Shape requirements
         assert B.shape
         assert len(A.shape) == 2
@@ -861,6 +861,7 @@ class Action(Node):
         self = super(Action, cls).__new__(cls)
         self.children = A, B
         self.shape = A.shape[1:] + B.shape[1:]
+        self.name = name
         return self
 
 
