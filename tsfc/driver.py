@@ -377,7 +377,11 @@ def compile_expression_dual_evaluation(expression, to_element, *,
             quad_rule = QuadratureRule(point_set, to_element._weights)
             config["quadrature_rule"] = quad_rule
 
+        # evaluate expression at the points specified by point_set
         expr, = fem.compile_ufl(expression, **config, point_sum=False)
+        # the point set free indices should now be free indices of the compiled
+        # expression
+        assert set(point_set.indices) <= set(expr.free_indices)
         shape_indices = tuple(gem.Index() for _ in expr.shape)
         basis_indices = point_set.indices
         ir = gem.Indexed(expr, shape_indices)
@@ -395,7 +399,11 @@ def compile_expression_dual_evaluation(expression, to_element, *,
                 point_set = PointSet(pts)
                 config = kernel_cfg.copy()
                 config.update(point_set=point_set)
+                # evaluate expression at the points specified by point_set
                 expr, = fem.compile_ufl(expression, **config, point_sum=False)
+                # the point set free indices should now be free indices of the
+                # compiled expression
+                assert set(point_set.indices) <= set(expr.free_indices)
                 expr = gem.partial_indexed(expr, shape_indices)
                 expr_cache[pts] = expr, point_set
             weights = collections.defaultdict(list)

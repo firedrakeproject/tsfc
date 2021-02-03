@@ -3,7 +3,8 @@ geometric quantities into GEM expressions."""
 
 import collections
 import itertools
-from functools import singledispatch
+from functools import singledispatch, reduce
+import operator
 
 import numpy
 
@@ -697,6 +698,15 @@ def compile_ufl(expression, interior_facet=False, point_sum=False, **kwargs):
 
     # Translate UFL to GEM, lowering finite element specific nodes
     result = map_expr_dags(context.translator, expressions)
+    # Check that any indices from the PointSet have made it into the resulting
+    # expression. If not, blow up shape to include the missing indices using
+    # deltas - these will eventually be cancelled out but ensure each
+    # expression in our result has the expected free_indices and shape.
+    result = [reduce(operator.mul, (gem.Delta(j, j)
+                                    for j in context.point_indices
+                                    if j not in expr.free_indices),
+                     expr)
+              for expr in result]
     if point_sum:
         result = [gem.index_sum(expr, context.point_indices) for expr in result]
     return result
