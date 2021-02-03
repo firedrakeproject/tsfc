@@ -792,10 +792,6 @@ class Delta(Scalar, Terminal):
         assert isinstance(i, IndexBase)
         assert isinstance(j, IndexBase)
 
-        # \delta_{i,i} = 1
-        if i == j:
-            return one
-
         # Fixed indices
         if isinstance(i, int) and isinstance(j, int):
             return Literal(int(i == j))

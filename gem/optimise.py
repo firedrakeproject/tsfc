@@ -102,6 +102,8 @@ def replace_indices_delta(node, self, subst):
     j = substitute.get(node.j, node.j)
     if i == node.i and j == node.j:
         return node
+    elif i == j:
+        return one
     else:
         return Delta(i, j)
 
