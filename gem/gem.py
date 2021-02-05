@@ -853,16 +853,18 @@ class Solve(Node):
 class Action(Node):
     __slots__ = ('children', 'shape', 'name')
 
-    def __new__(cls, A, B, name):
+    def __new__(cls, A, B, name, pick_op):
         # Shape requirements
         assert B.shape
         assert len(A.shape) == 2
-        assert A.shape[0] == A.shape[1]
-        assert A.shape[0] == B.shape[0]
+        assert A.shape[pick_op] == B.shape[0]
 
         self = super(Action, cls).__new__(cls)
         self.children = A, B
-        self.shape = A.shape[1:] + B.shape[1:]
+        if pick_op == 1:
+            self.shape = A.shape[:1] + B.shape[1:]
+        else:
+            self.shape = A.shape[1:] + B.shape[1:]
         self.name = name
         return self
 
