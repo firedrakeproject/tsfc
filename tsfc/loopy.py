@@ -409,7 +409,7 @@ def loopy_matfree_solve(lhs, reads, ctx, expr):
     shape = expr.shape
     A_on_x_name = expr._Aonx.name
     A_on_p_name = expr._Aonp.name
-
+    
     stop_criterion = generate_code_for_stop_criterion(name, "rkp1_norm", 0.000000001)
 
     # The last line in the loop to convergence is another WORKAROUND
@@ -442,9 +442,9 @@ def loopy_matfree_solve(lhs, reads, ctx, expr):
                     """<> beta = rkp1_norm / rk_norm {{dep=cond, id=beta}}
                     rk_norm = rkp1_norm {{dep=beta, id=rk_normk}}
                     p[i_15] = beta * p[i_15] - r[i_15] {{dep=rk_normk, id=projectork}}
-                    {A_on_p}[i_17] = 0. {{dep=rk_normk, id=Aonp0, inames=i_6}}
+                    {A_on_p}[i_17] = 0. {{dep=projectork, id=Aonp0, inames=i_6}}
                 end
-                output[i_16] = x[i_16] {{dep=projectork, id=out}}
+                output[i_16] = x[i_16] {{dep=Aonp0, id=out}}
             """.format(**{"A_on_p" : A_on_p_name})],
             [lp.GlobalArg("A", np.float64, shape=(shape[0], shape[0])),
             lp.GlobalArg("b", np.float64, shape=shape),
