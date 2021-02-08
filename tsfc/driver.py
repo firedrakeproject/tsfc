@@ -363,7 +363,8 @@ def compile_expression_dual_evaluation(expression, element, *,
     ir_shape = element.dual_evaluation(UFLtoGEMCallback(expression, kernel_cfg, complex_mode))
     broadcast_shape = len(expression.ufl_shape) - len(element.value_shape)
     shape_indices = tuple(gem.Index() for _ in expression.ufl_shape[:broadcast_shape])
-    basis_indices = (gem.Index(), )
+    basis_indices = tuple(gem.Index(extent=ex) for ex in ir_shape.shape)
+    assert len(basis_indices) == 1
     ir = gem.Indexed(ir_shape, basis_indices)
 
     # Build kernel body
