@@ -156,6 +156,7 @@ def emit_operations(assignments, get_indices, emit_return_accumulate=True):
     :returns: list of Impero terminals correctly ordered to evaluate
               the assignments
     """
+    import pdb; pdb.set_trace()
     # Prepare reference counts
     refcount = collect_refcount([e for v, e in assignments])
 
