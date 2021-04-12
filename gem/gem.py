@@ -32,7 +32,7 @@ __all__ = ['Node', 'Identity', 'Literal', 'SparseLiteral', 'Zero', 'Failure',
            'MathFunction', 'MinValue', 'MaxValue', 'Comparison',
            'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
-           'IndexSum', 'SparseContraction', 'ListTensor', 'Concatenate', 'Delta',
+           'IndexSum', 'ListTensor', 'Concatenate', 'Delta',
            'index_sum', 'partial_indexed', 'reshape', 'view',
            'indices', 'as_gem', 'FlexiblyIndexed',
            'Inverse', 'Solve']
@@ -748,43 +748,6 @@ class IndexSum(Scalar):
         # Collect shape and free indices
         assert set(multiindex) <= set(summand.free_indices)
         self.free_indices = unique(set(summand.free_indices) - set(multiindex))
-
-        return self
-
-
-class SparseContraction(Scalar):
-    r"""
-    Similar to IndexSum, but specifically for a contraction involving a single
-    :py:class:`SparseLiteral`.
-    """
-    __slots__ = ('children', 'multiindex')
-    __back__ = ('multiindex',)
-
-    def __new__(cls, sparse, contractand, multiindex):
-        assert not sparse.shape
-        assert not contractand.shape
-
-        # Unroll singleton sums
-        unroll = tuple(index for index in multiindex if index.extent <= 1)
-        if unroll:
-            assert numpy.prod([index.extent for index in unroll]) == 1
-            summand = Indexed(ComponentTensor(summand, unroll),
-                              (0,) * len(unroll))
-            multiindex = tuple(index for index in multiindex
-                               if index not in unroll)
-
-        # No indices case
-        multiindex = tuple(multiindex)
-        if not multiindex:
-            raise NotImplementedError("SparseContraction with no contraction indices is ill-defined")
-
-        self = super(SparseContraction, cls).__new__(cls)
-        self.children = (sparse, contractand)
-        self.multiindex = multiindex
-
-        # Collect shape and free indices
-        assert set(multiindex) <= set(sparse.free_indices + contractand.free_indices)
-        self.free_indices = unique(set(sparse.free_indices + contractand.free_indices) - set(multiindex))
 
         return self
 
