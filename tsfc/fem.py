@@ -608,7 +608,15 @@ def fiat_to_ufl(fiat_dict, order):
 
 @translate.register(Argument)
 def translate_argument(terminal, mt, ctx):
-    argument_multiindex = ctx.argument_multiindices[terminal.number()]
+    # Te following try except is due to introducing an optimiser and actions in Slate.
+    # When action(Transpose(Tensor(form)), AssembledVector(f)) is part of an expression, it gets handled
+    # by replacing the first argument in the form associated with tensor by the coefficient f.
+    # FIXME This is ugly, maybe we can introduce new information on the ctx to make it cleaner.
+    no = terminal.number()
+    try:
+        argument_multiindex = ctx.argument_multiindices[no]
+    except:
+        argument_multiindex = ctx.argument_multiindices[0]
     sigma = tuple(gem.Index(extent=d) for d in mt.expr.ufl_shape)
     element = ctx.create_element(terminal.ufl_element(), restriction=mt.restriction)
 
