@@ -848,6 +848,7 @@ class Solve(Node):
         self.matfree = matfree
         self._Aonp = Aonp
         self._Aonx = Aonx
+        self.name = name
 
 
 class Action(Node):
