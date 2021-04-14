@@ -210,7 +210,7 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     # Create arguments
     data = list(args)
     for i, (temp, dtype) in enumerate(assign_dtypes(impero_c.temporaries, scalar_type)):
-        if not isinstance(temp, gem.Action):
+        if not isinstance(temp, gem.Action) and not (isinstance(temp, gem.Solve) and temp.matfree):
             name = ctx.name_gen(kernel_name)
             if isinstance(temp, gem.Constant):
                 data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=dtype, initializer=temp.array, address_space=lp.AddressSpace.LOCAL, read_only=True))
