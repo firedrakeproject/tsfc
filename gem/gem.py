@@ -854,7 +854,7 @@ class Solve(Node):
 
 class Action(Node):
     __slots__ = ('children', 'shape', 'name')
-    __back__ = ('name')
+    __back__ = ('name',)
 
     def __new__(cls, A, B, name, pick_op):
         # Shape requirements
