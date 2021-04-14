@@ -834,7 +834,8 @@ class Solve(Node):
 
     Represents the X obtained by solving AX = B.
     """
-    __slots__ = ('children', 'shape', 'matfree', '_Aonp', '_Aonx')
+    __slots__ = ('children', 'shape', 'name', 'matfree', '_Aonp', '_Aonx')
+    __back__ = ('name', 'matfree', '_Aonp', '_Aonx')
 
     def __init__(self, A, B, name = None, matfree=False, Aonp=None, Aonx=None):
         # Shape requirements
@@ -853,6 +854,7 @@ class Solve(Node):
 
 class Action(Node):
     __slots__ = ('children', 'shape', 'name')
+    __back__ = ('name')
 
     def __new__(cls, A, B, name, pick_op):
         # Shape requirements
