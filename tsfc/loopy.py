@@ -205,7 +205,7 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     ctx.epsilon = numpy.finfo(scalar_type).resolution
     ctx.scalar_type = scalar_type
     ctx.return_increments = return_increments
-    ctx.matfree_solve_knl = None
+    ctx.matfree_solve_knls = []
 
     # Create arguments
     data = list(args)
@@ -238,12 +238,12 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     for i, insn in enumerate(knl.instructions):
         insn_new.append(insn.copy(priority=len(knl.instructions) - i))
     knl = knl.copy(instructions=insn_new)
-    if ctx.matfree_solve_knl:
-        matfree_solve_knl = ctx.matfree_solve_knl
+    if ctx.matfree_solve_knls:
         prg = make_program(knl)
-        prg = register_callable_kernel(prg, matfree_solve_knl.root_kernel)
-        prg = _match_caller_callee_argument_dimension_(prg, matfree_solve_knl.name)
-        prg = inline_callable_kernel(prg, matfree_solve_knl.name)
+        for matfree_solve_knl in ctx.matfree_solve_knls:
+            prg = register_callable_kernel(prg, matfree_solve_knl.root_kernel)
+            prg = _match_caller_callee_argument_dimension_(prg, matfree_solve_knl.name)
+            prg = inline_callable_kernel(prg, matfree_solve_knl.name)
         if return_ctx:
             return prg, ctx.gem_to_pymbolic
         else:
@@ -379,7 +379,7 @@ def statement_evaluate(leaf, ctx):
                 var_reads = ctx.pymbolic_variable(child)
                 reads.append(SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)))
             loopy_matfree_solve(lhs, reads, ctx, expr)
-            rhs = p.Call(p.Variable(ctx.matfree_solve_knl.name), tuple(reads))
+            rhs = p.Call(p.Variable(ctx.matfree_solve_knls[-1].name), tuple(reads))
             return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
 
         else:
@@ -405,7 +405,7 @@ def loopy_matfree_solve(lhs, reads, ctx, expr):
 
     # WORKAROUND to inline cinstruction for breaking the loop properly:
     # prepend the first 4 letters of the kernel to the variable which the stop criterion depends on
-    name = "matfree_cg_kernel"
+    name = "matfree_cg_kernel_%d" % len(ctx.matfree_solve_kernels)
     shape = expr.shape
     A_on_x_name = expr._Aonx.name
     A_on_p_name = expr._Aonp.name
@@ -465,7 +465,7 @@ def loopy_matfree_solve(lhs, reads, ctx, expr):
     _ = ctx.pymbolic_variable(expr._Aonx)
     _ = ctx.pymbolic_variable(expr._Aonp)
     
-    ctx.matfree_solve_knl = knl
+    ctx.matfree_solve_knls.append(knl)
 
 
 def generate_code_for_stop_criterion(knl_name, var_name, stop_value):
