@@ -329,7 +329,7 @@ def statement_evaluate(leaf, ctx):
         idx_reads = ctx.pymbolic_multiindex(expr.children[0].shape)
         var_reads = ctx.pymbolic_variable(expr.children[0])
         reads = (SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)),)
-        rhs = p.Call(p.Variable("inv"), reads)
+        rhs = p.Call(p.Variable("inverse"), reads)
 
         return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
     elif isinstance(expr, gem.Solve):
