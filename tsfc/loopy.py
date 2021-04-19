@@ -229,12 +229,6 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     # Prevent loopy interchange by loopy
     knl = lp.prioritize_loops(knl, ",".join(ctx.index_extent.keys()))
 
-    # Help loopy in scheduling by assigning priority to instructions
-    insn_new = []
-    for i, insn in enumerate(knl.instructions):
-        insn_new.append(insn.copy(priority=len(knl.instructions) - i))
-    knl = knl.copy(instructions=insn_new)
-
     return knl
 
 
