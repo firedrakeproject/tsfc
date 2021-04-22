@@ -1,6 +1,6 @@
 import numpy
 from collections import namedtuple
-from itertools import chain, product
+from itertools import chain, product, repeat
 from functools import partial
 
 from ufl import Coefficient, MixedElement as ufl_MixedElement, FunctionSpace, FiniteElement
@@ -341,17 +341,24 @@ def prepare_coefficient(coefficient, name, scalar_type, interior_facet=False):
     finat_element = create_element(coefficient.ufl_element())
 
     shape = finat_element.index_shape
-    size = numpy.prod(shape, dtype=int)
 
+    # These shapes have to match what PyOP2 feeds the kernel.
     if not interior_facet:
-        expression = gem.reshape(gem.Variable(name, (size,)), shape)
+        # For most integrals, the shape matches
+        expression = gem.Variable(name, shape)
     else:
-        varexp = gem.Variable(name, (2*size,))
-        plus = gem.view(varexp, slice(size))
-        minus = gem.view(varexp, slice(size, 2*size))
-        expression = (gem.reshape(plus, shape), gem.reshape(minus, shape))
-        size = size * 2
-    funarg = lp.GlobalArg(name, dtype=scalar_type, shape=(size,))
+        # For interior facet integrals, there are two cells worth of
+        # dofs glued together.
+        # For ease, the shape we use just multiplies up the first
+        # dimension, rather than adding a new dimension.
+        # TODO: Check if that was the best thing to do.
+        head, *rest = shape
+        varexp = gem.Variable(name, (2*head, *rest))
+        plus = gem.view(varexp, slice(head), *repeat(slice(None), len(rest)))
+        minus = gem.view(varexp, slice(head, 2*head), *repeat(slice(None), len(rest)))
+        expression = (plus, minus)
+        shape = (2*head, *rest)
+    funarg = lp.GlobalArg(name, dtype=scalar_type, shape=shape)
     return funarg, expression
 
 
@@ -380,7 +387,6 @@ def prepare_arguments(arguments, multiindices, scalar_type, interior_facet=False
         return funarg, [expression]
 
     elements = tuple(create_element(arg.ufl_element()) for arg in arguments)
-    shapes = tuple(element.index_shape for element in elements)
 
     if diagonal:
         if len(arguments) != 2:
@@ -391,24 +397,28 @@ def prepare_arguments(arguments, multiindices, scalar_type, interior_facet=False
             raise ValueError("Diagonal only for diagonal blocks (test and trial spaces the same)")
 
         elements = (element, )
-        shapes = tuple(element.index_shape for element in elements)
         multiindices = multiindices[:1]
 
-    def expression(restricted):
-        return gem.Indexed(gem.reshape(restricted, *shapes),
-                           tuple(chain(*multiindices)))
-
-    u_shape = numpy.array([numpy.prod(shape, dtype=int) for shape in shapes])
+    shapes = tuple(element.index_shape for element in elements)
     if interior_facet:
-        c_shape = tuple(2 * u_shape)
-        slicez = [[slice(r * s, (r + 1) * s)
-                   for r, s in zip(restrictions, u_shape)]
-                  for restrictions in product((0, 1), repeat=len(arguments))]
+        # As for coefficients, the shape must be doubled up, which we
+        # do by multiplying the first entry by two.
+        shape = tuple(chain(*((2*head, *rest) for (head, *rest) in shapes)))
+        slicess = []
+        for restrictions in product((0, 1), repeat=len(shapes)):
+            slices = []
+            for r, (head, *rest) in zip(restrictions, shapes):
+                slices.append(slice(r*head, (r+1)*head))
+                slices.extend([slice(None) for _ in rest])
+            slicess.append(slices)
+        varexp = gem.Variable("A", shape)
+        expressions = [gem.Indexed(gem.view(varexp, *slices),
+                                   tuple(chain(*multiindices)))
+                       for slices in slicess]
     else:
-        c_shape = tuple(u_shape)
-        slicez = [[slice(s) for s in u_shape]]
+        shape = tuple(chain(*shapes))
+        varexp = gem.Variable("A", shape)
+        expressions = [gem.Indexed(varexp, tuple(chain(*multiindices)))]
 
-    funarg = lp.GlobalArg("A", dtype=scalar_type, shape=c_shape)
-    varexp = gem.Variable("A", c_shape)
-    expressions = [expression(gem.view(varexp, *slices)) for slices in slicez]
+    funarg = lp.GlobalArg("A", dtype=scalar_type, shape=shape)
     return funarg, prune(expressions)
