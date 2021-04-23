@@ -317,12 +317,19 @@ class KernelBuilder(KernelBuilderBase):
         return None
 
 
-def flat_shape(element):
+def var_shape(element):
+    def flatten(shape):
+        return (numpy.prod(shape, dtype=int).item(),)
+
     if isinstance(element, TensorFiniteElement):
         assert not element._transpose
-        return flat_shape(element._base_element) + element._shape
+        shape = element._shape
+        base = element._base_element
+        assert not isinstance(base, TensorFiniteElement)
+        return (flatten(base.index_shape) + shape,
+                (base.index_shape, *((s,) for s in shape)))
     else:
-        return (numpy.prod(element.index_shape, dtype=int).item(), )
+        return (flatten(element.index_shape), (element.index_shape, ))
 
 
 def prepare_coefficient(coefficient, name, scalar_type, interior_facet=False):
@@ -349,12 +356,11 @@ def prepare_coefficient(coefficient, name, scalar_type, interior_facet=False):
 
     finat_element = create_element(coefficient.ufl_element())
 
-    varshape = flat_shape(finat_element)
-    shape = finat_element.index_shape
+    varshape, reshapes = var_shape(finat_element)
     # These shapes have to match what PyOP2 feeds the kernel.
     if not interior_facet:
         # For most integrals, the shape matches
-        expression = gem.reshape(gem.Variable(name, varshape), shape)
+        expression = gem.reshape(gem.Variable(name, varshape), *reshapes)
     else:
         # For interior facet integrals, there are two cells worth of
         # dofs glued together.
@@ -365,7 +371,7 @@ def prepare_coefficient(coefficient, name, scalar_type, interior_facet=False):
         varexp = gem.Variable(name, (2*head, *rest))
         plus = gem.view(varexp, slice(head), *repeat(slice(None), len(rest)))
         minus = gem.view(varexp, slice(head, 2*head), *repeat(slice(None), len(rest)))
-        expression = (gem.reshape(plus, shape), gem.reshape(minus, shape))
+        expression = (gem.reshape(plus, *reshapes), gem.reshape(minus, *reshapes))
         varshape = (2*head, *rest)
     funarg = lp.GlobalArg(name, dtype=scalar_type, shape=varshape)
     return funarg, expression
@@ -408,10 +414,8 @@ def prepare_arguments(arguments, multiindices, scalar_type, interior_facet=False
         elements = (element, )
         multiindices = multiindices[:1]
 
-    varshapes = tuple(flat_shape(element) for element in elements)
-    shapes = tuple(element.index_shape for element in elements)
-    assert all(numpy.prod(v, dtype=int) == numpy.prod(s, dtype=int)
-               for v, s in zip(varshapes, shapes))
+    varshapes, reshapes = zip(*(var_shape(element) for element in elements))
+    reshape = tuple(chain(*reshapes))
     if interior_facet:
         # As for coefficients, the shape must be doubled up, which we
         # do by multiplying the first entry by two.
@@ -426,14 +430,14 @@ def prepare_arguments(arguments, multiindices, scalar_type, interior_facet=False
         varexp = gem.Variable("A", varshape)
         expressions = [gem.Indexed(gem.reshape(gem.view(varexp,
                                                         *slices),
-                                               *shapes),
+                                               *reshape),
                                    tuple(chain(*multiindices)))
                        for slices in slicess]
     else:
         varshape = tuple(chain(*varshapes))
         varexp = gem.Variable("A", varshape)
         slices = [slice(s) for s in varshape]
-        expressions = [gem.Indexed(gem.reshape(gem.view(varexp, *slices), *shapes),
+        expressions = [gem.Indexed(gem.reshape(gem.view(varexp, *slices), *reshape),
                                    tuple(chain(*multiindices)))]
 
     # def expression(restricted):
