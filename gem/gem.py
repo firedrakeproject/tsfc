@@ -651,7 +651,7 @@ class ComponentTensor(Node):
 
         # Collect shape
         shape = tuple(index.extent for index in multiindex)
-        assert all(shape)
+        assert all(s >= 0 for s in shape)
 
         # Zero folding
         if isinstance(expression, Zero):
