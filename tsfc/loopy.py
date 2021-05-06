@@ -412,9 +412,9 @@ def loopy_matfree_solve(lhs, reads, ctx, expr):
     # prepend the name of the kernel to the variable which the stop criterion depends on
     name = "mtf"+str(len(ctx.matfree_solve_knls))+"_cg_kernel_in_" + ctx.kernel_name  # FIXME Use UniqueNameGenerator
     shape = expr.shape
-    A_on_x_name = expr._Aonx.name
-    A_on_p_name = expr._Aonp.name
-    
+    child, _ = expr.children
+    A_on_x_name = ctx.gem_to_pymbolic[child].name+"_x"
+    A_on_p_name = ctx.gem_to_pymbolic[child].name+"_p"
     stop_criterion = generate_code_for_stop_criterion(name, "rkp1_norm", 0.000000001)
 
     # The last line in the loop to convergence is another WORKAROUND
@@ -469,7 +469,8 @@ def loopy_matfree_solve(lhs, reads, ctx, expr):
     # to the their pymbolic variables
     knl.root_kernel.id_to_insn["Aonx"].assignees[0].subscript.aggregate.name = knl.name+"_"+A_on_x_name
     knl.root_kernel.id_to_insn["Aonp"].assignees[0].subscript.aggregate.name = knl.name+"_"+A_on_p_name
-    
+    _ = ctx.pymbolic_variable(expr._Aonx, knl.root_kernel.id_to_insn["Aonx"].assignees[0].subscript.aggregate.name)
+    _ = ctx.pymbolic_variable(expr._Aonp, knl.root_kernel.id_to_insn["Aonp"].assignees[0].subscript.aggregate.name)
     ctx.matfree_solve_knls.append(knl)
 
 
