@@ -853,8 +853,8 @@ class Solve(Node):
 
 
 class Action(Node):
-    __slots__ = ('children', 'shape', 'name')
-    __back__ = ('name',)
+    __slots__ = ('children', 'shape', 'name', 'pick_op')
+    __back__ = ('name', 'pick_op')
 
     def __new__(cls, A, B, name, pick_op):
         # Shape requirements
@@ -869,6 +869,7 @@ class Action(Node):
         else:
             self.shape = A.shape[1:] + B.shape[1:]
         self.name = name
+        self.pick_op = pick_op
         return self
 
 
