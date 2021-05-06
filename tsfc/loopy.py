@@ -224,6 +224,8 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
 
     # Create instructions
     instructions = statement(impero_c.tree, ctx)
+    for c, insn in enumerate(instructions):
+        insn.id = kernel_name + "_" + str(c)
 
     # Create domains
     domains = create_domains(ctx.index_extent.items())
