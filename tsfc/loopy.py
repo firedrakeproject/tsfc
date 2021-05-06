@@ -153,19 +153,23 @@ class LoopyContext(object):
             return pym, ()
 
     # Generate pym variable or subscript
-    def pymbolic_variable(self, node):
-        pym = self._gem_to_pym_var(node)
+    def pymbolic_variable(self, node, name=None):
+        pym = self._gem_to_pym_var(node, name)
         if node in self.indices:
             indices = self.fetch_multiindex(self.indices[node])
             if indices:
                 return p.Subscript(pym, indices)
         return pym
 
-    def _gem_to_pym_var(self, node):
+    def _gem_to_pym_var(self, node, name):
         try:
             pym = self.gem_to_pymbolic[node]
         except KeyError:
-            name = self.name_gen(node.name)
+            if not name:
+                try:
+                    name = self.name_gen(node.name)
+                except:
+                    name = self.name_gen(self.kernel_name)
             pym = p.Variable(name)
             self.gem_to_pymbolic[node] = pym
         return pym
