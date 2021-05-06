@@ -188,7 +188,7 @@ def active_indices(mapping, ctx):
 
 
 def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_names=[],
-             return_increments=True, return_ctx=False):
+             return_increments=True, return_ctx=False, iname_prefix="i"):
     """Generates loopy code.
 
     :arg impero_c: ImperoC tuple with Impero AST and other data
@@ -199,13 +199,16 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     :arg return_increments: Does codegen for Return nodes increment the lvalue, or assign?
     :returns: loopy kernel
     """
-    ctx = LoopyContext()
+    from pytools import UniqueNameGenerator
+    ctx = LoopyContext(kernel_name)
     ctx.indices = impero_c.indices
-    ctx.index_names = defaultdict(lambda: "i", index_names)
+    ctx.namer = UniqueNameGenerator(forced_prefix=iname_prefix)
+    ctx.index_names = defaultdict(ctx.namer, index_names)
     ctx.epsilon = numpy.finfo(scalar_type).resolution
     ctx.scalar_type = scalar_type
     ctx.return_increments = return_increments
     ctx.matfree_solve_knls = []
+    ctx.knl_name = kernel_name
 
     # Create arguments
     data = list(args)
