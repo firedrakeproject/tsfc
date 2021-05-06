@@ -102,13 +102,14 @@ def assign_dtypes(expressions, scalar_type):
 
 
 class LoopyContext(object):
-    def __init__(self):
+    def __init__(self, kernel_name):
         self.indices = {}  # indices for declarations and referencing values, from ImperoC
         self.active_indices = {}  # gem index -> pymbolic variable
         self.index_extent = OrderedDict()  # pymbolic variable for indices -> extent
         self.gem_to_pymbolic = {}  # gem node -> pymbolic variable
         self.name_gen = UniqueNameGenerator()
         self.new_variables = OrderedDict() # pymbolic variale -> shape
+        self.kernel_name = kernel_name
 
     def fetch_multiindex(self, multiindex):
         indices = []
