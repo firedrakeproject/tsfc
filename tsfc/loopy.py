@@ -409,8 +409,8 @@ def loopy_matfree_solve(lhs, reads, ctx, expr):
     import numpy as np
 
     # WORKAROUND to inline cinstruction for breaking the loop properly:
-    # prepend the first 4 letters of the kernel to the variable which the stop criterion depends on
-    name = "matfree_cg_kernel_%d" % len(ctx.matfree_solve_kernels)
+    # prepend the name of the kernel to the variable which the stop criterion depends on
+    name = "mtf"+str(len(ctx.matfree_solve_knls))+"_cg_kernel_in_" + ctx.kernel_name  # FIXME Use UniqueNameGenerator
     shape = expr.shape
     A_on_x_name = expr._Aonx.name
     A_on_p_name = expr._Aonp.name
@@ -465,10 +465,10 @@ def loopy_matfree_solve(lhs, reads, ctx, expr):
     knl = lp.fix_parameters(knl, n=shape[0])
 
     # update gem to pym mapping
-    knl.root_kernel.id_to_insn["Aonx"].assignees[0].subscript.aggregate.name = knl.name[:4]+"_"+A_on_x_name
-    knl.root_kernel.id_to_insn["Aonp"].assignees[0].subscript.aggregate.name = knl.name[:4]+"_"+A_on_p_name
-    _ = ctx.pymbolic_variable(expr._Aonx)
-    _ = ctx.pymbolic_variable(expr._Aonp)
+    # by linking the actions of the matrix-free solve kernel
+    # to the their pymbolic variables
+    knl.root_kernel.id_to_insn["Aonx"].assignees[0].subscript.aggregate.name = knl.name+"_"+A_on_x_name
+    knl.root_kernel.id_to_insn["Aonp"].assignees[0].subscript.aggregate.name = knl.name+"_"+A_on_p_name
     
     ctx.matfree_solve_knls.append(knl)
 
