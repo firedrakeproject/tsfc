@@ -255,12 +255,12 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
             prg = _match_caller_callee_argument_dimension_(prg, matfree_solve_knl.name)
             prg = inline_callable_kernel(prg, matfree_solve_knl.name)
         if return_ctx:
-            return prg, ctx.gem_to_pymbolic, ctx.index_extent
+            return prg, ctx.gem_to_pymbolic
         else:
             return prg
     else:
         if return_ctx:
-            return knl, ctx.gem_to_pymbolic, ctx.index_extent
+            return knl, ctx.gem_to_pymbolic
         else:
             return knl
 
