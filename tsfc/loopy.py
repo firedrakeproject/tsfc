@@ -496,7 +496,7 @@ def generate_code_for_stop_criterion(knl_name, var_name, stop_value):
         Inlining and vectorisation are made available through this ugly bit of code.
     """
     import pyop2
-    prefix_after_inlining = knl_name[:4]+"_"
+    prefix_after_inlining = knl_name+"_"
     # not sure where I can get the prefix, which the variable has in a vectorised kernel,
     # dynamically from
     prefix_if_vectorised = "slat_" if pyop2.configuration["vectorization_strategy"]=="ve" else ""
