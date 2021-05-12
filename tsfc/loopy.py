@@ -169,7 +169,7 @@ class LoopyContext(object):
                 try:
                     name = self.name_gen(node.name)
                 except:
-                    name = self.name_gen(self.kernel_name)
+                    name = self.name_gen("node_"+self.kernel_name)
             pym = p.Variable(name)
             self.gem_to_pymbolic[node] = pym
         return pym
