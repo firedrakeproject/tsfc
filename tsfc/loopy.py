@@ -239,7 +239,7 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
         scheduled_instructions.append(insn.copy(priority=len(instructions) - i))
 
     # Create loopy kernel
-    knl = lp.make_function(domains, instructions, data, name=kernel_name, target=lp.CTarget(),
+    prg = lp.make_function(domains, scheduled_instructions, data, name=kernel_name, target=lp.CTarget(),
                            seq_dependencies=True, silenced_warnings=["summing_if_branches_ops"],
                            lang_version=(2018, 2))
 
