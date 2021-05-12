@@ -4,6 +4,7 @@ from functools import singledispatch
 def flops(expr):
     raise NotImplementedError
 
+
 class Int:
     children = () 
     def __init__(self, value):
@@ -11,6 +12,15 @@ class Int:
 
 @flops.register(Int)
 def flops_int(expr):
+    return 0
+
+
+class Zero: #Sets value to 0.0
+    def __init__(self, left, right):
+        self.value = 0
+
+@flops.register(Zero)
+def flops_zero(expr):
     return 0
 
 
@@ -49,6 +59,34 @@ class Divide:
 def flops_divide(expr):
     return 1 + sum(map(flops, expr.children))
 
+
+class LogicalNot:
+    def __init__(self, expression):
+        self.children = expression
+
+@flops.register(LogicalNot)
+def flops_(expr):
+    return 1 + sum(map(flops, expr.children)) #Should be 1+expression? 
+
+
+class LogicalAnd:
+    def __init__(self, left, right):
+        self.children = (left, right)
+
+@flops.register(LogicalAnd)
+def flops_(expr):
+    return 1 + sum(map(flops, expr.children))
+
+
+class LogicalOr:
+    def __init__(self, left, right):
+        self.children = (left, right)
+
+@flops.register(LogicalOr)
+def flops_(expr):
+    return 1 + sum(map(flops, expr.children))
+
+
 class IndexSum:
     def __init__(self, left, right):
         self.children = (left, right)
@@ -61,10 +99,11 @@ def flops_IndexSum(expr):
 #Component tensor = flops in the scalar term * size of matrix
 #List tensor = sum of things in it 
 
-['Node', 'Identity', 'Literal', 'Zero', 'Failure',
-'Variable', 'Sum', 'Product', 'Division', 'Power',
-'MathFunction', 'MinValue', 'MaxValue', 'Comparison',
-'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
-'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
-'IndexSum', 'ListTensor', 'Delta', 'FlexiblyIndexed',
-'Inverse', 'Solve']
+['Node', 'Identity', 'Literal', 'Failure', 'Variable', 
+
+
+'Power', 'MathFunction', 'MinValue', 'MaxValue', 'Comparison', 'Conditional',
+
+'Index', 'VariableIndex', 'Indexed', 'ComponentTensor','IndexSum', 
+
+'ListTensor', 'Delta', 'FlexiblyIndexed','Inverse', 'Solve']
