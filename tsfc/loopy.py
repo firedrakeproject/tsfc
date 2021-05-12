@@ -265,7 +265,12 @@ def create_domains(indices):
 
     if not domains:
         domains = [isl.BasicSet("[] -> {[]}")]
-    return domains
+
+    domains_bs = []
+    for d in domains:
+        domains_bs += [isl.BasicSet(str(d))]
+
+    return domains_bs
 
 
 @singledispatch
