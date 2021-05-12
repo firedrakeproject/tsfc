@@ -244,7 +244,7 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
                            lang_version=(2018, 2))
 
     # Prevent loopy interchange by loopy
-    knl = lp.prioritize_loops(knl, ",".join(ctx.index_extent.keys()))
+    prg = lp.prioritize_loops(prg, ",".join(ctx.index_extent.keys()))
 
     if return_ctx:
         return prg, ctx
