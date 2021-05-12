@@ -233,6 +233,11 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     # Create domains
     domains = create_domains(ctx.index_extent.items())
 
+    # Help loopy in scheduling by assigning priority to instructions
+    scheduled_instructions = []
+    for i, insn in enumerate(instructions):
+        scheduled_instructions.append(insn.copy(priority=len(instructions) - i))
+
     # Create loopy kernel
     knl = lp.make_function(domains, instructions, data, name=kernel_name, target=lp.CTarget(),
                            seq_dependencies=True, silenced_warnings=["summing_if_branches_ops"],
@@ -241,17 +246,6 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     # Prevent loopy interchange by loopy
     knl = lp.prioritize_loops(knl, ",".join(ctx.index_extent.keys()))
 
-    # Help loopy in scheduling by assigning priority to instructions
-    insn_new = []
-    for i, insn in enumerate(knl.instructions):
-        insn_new.append(insn.copy(priority=len(knl.instructions) - i))
-    knl = knl.copy(instructions=insn_new)
-    if ctx.matfree_solve_knls:
-        prg = make_program(knl)
-        for matfree_solve_knl in ctx.matfree_solve_knls:
-            prg = register_callable_kernel(prg, matfree_solve_knl.root_kernel)
-            prg = _match_caller_callee_argument_dimension_(prg, matfree_solve_knl.name)
-            prg = inline_callable_kernel(prg, matfree_solve_knl.name)
         if return_ctx:
             return prg, ctx.gem_to_pymbolic
         else:
