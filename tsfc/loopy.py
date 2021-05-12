@@ -246,15 +246,10 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     # Prevent loopy interchange by loopy
     knl = lp.prioritize_loops(knl, ",".join(ctx.index_extent.keys()))
 
-        if return_ctx:
-            return prg, ctx.gem_to_pymbolic
-        else:
-            return prg
+    if return_ctx:
+        return prg, ctx
     else:
-        if return_ctx:
-            return knl, ctx.gem_to_pymbolic
-        else:
-            return knl
+        return prg
 
 
 def create_domains(indices):
