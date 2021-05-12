@@ -14,8 +14,6 @@ import loopy as lp
 
 import pymbolic.primitives as p
 from loopy.symbolic import SubArrayRef
-from loopy.program import make_program
-from loopy.transform.callable import register_callable_kernel, inline_callable_kernel, _match_caller_callee_argument_dimension_
 
 from pytools import UniqueNameGenerator
 
@@ -213,7 +211,6 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     ctx.epsilon = numpy.finfo(scalar_type).resolution
     ctx.scalar_type = scalar_type
     ctx.return_increments = return_increments
-    ctx.matfree_solve_knls = []
     ctx.knl_name = kernel_name
 
     # Create arguments
@@ -381,142 +378,21 @@ def statement_evaluate(leaf, ctx):
     elif isinstance(expr, gem.Solve):
 
         if expr.matfree:
-            idx = ctx.pymbolic_multiindex(expr.shape)
-            var = ctx.pymbolic_variable(expr)
-            lhs = (SubArrayRef(idx, p.Subscript(var, idx)),)
-            reads = []
-            for child in expr.children:
-                idx_reads = ctx.pymbolic_multiindex(child.shape)
-                var_reads = ctx.pymbolic_variable(child)
-                reads.append(SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)))
-            loopy_matfree_solve(lhs, reads, ctx, expr)
-            rhs = p.Call(p.Variable(ctx.matfree_solve_knls[-1].name), tuple(reads))
-            return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
-
+            name = "mtf_solve"
         else:
-            idx = ctx.pymbolic_multiindex(expr.shape)
-            var = ctx.pymbolic_variable(expr)
-            lhs = (SubArrayRef(idx, p.Subscript(var, idx)),)
-            reads = []
-            for child in expr.children:
-                idx_reads = ctx.pymbolic_multiindex(child.shape)
-                var_reads = ctx.pymbolic_variable(child)
-                reads.append(SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)))
-            rhs = p.Call(p.Variable("solve"), tuple(reads))
-            return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
+            name = "solve"
+        idx = ctx.pymbolic_multiindex(expr.shape)
+        var = ctx.pymbolic_variable(expr)
+        lhs = (SubArrayRef(idx, p.Subscript(var, idx)),)
+        reads = []
+        for child in expr.children:
+            idx_reads = ctx.pymbolic_multiindex(child.shape)
+            var_reads = ctx.pymbolic_variable(child)
+            reads.append(SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)))
+        rhs = p.Call(p.Variable(name), tuple(reads))
+        return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
     else:
         return [lp.Assignment(ctx.pymbolic_variable(expr), expression(expr, ctx, top=True), within_inames=ctx.active_inames())]
-
-
-def loopy_matfree_solve(lhs, reads, ctx, expr):
-    """
-        Matrix-free solve. Currently implemented as CG. WIP.
-    """
-    import numpy as np
-
-    # WORKAROUND to inline cinstruction for breaking the loop properly:
-    # prepend the name of the kernel to the variable which the stop criterion depends on
-    name = "mtf"+str(len(ctx.matfree_solve_knls))+"_cg_kernel_in_" + ctx.kernel_name  # FIXME Use UniqueNameGenerator
-    shape = expr.shape
-    child, _ = expr.children
-    A_on_x_name = ctx.gem_to_pymbolic[child].name+"_x"
-    A_on_p_name = ctx.gem_to_pymbolic[child].name+"_p"
-    stop_criterion = generate_code_for_stop_criterion(name, "rkp1_norm", 0.000000001)
-
-    # The last line in the loop to convergence is another WORKAROUND
-    # bc the initialisation of A_on_p in the action call does not get inlined properly either
-           
-    knl = lp.make_kernel(
-            """{ [i_0,i_1,j_1,i_2,j_2,i_3,i_4,i_5,i_6,i_7,j_7,i_8,j_8,i_9,i_10,i_11,i_12,i_13,i_14,i_15,i_16,i_17]: 
-                0<=i_0<n and 0<=i_1,j_1<n and 0<=i_2,j_2<n and 0<=i_3<n and 0<=i_4<n 
-                and 0<=i_5<n and 0<=i_6<=3*n and 0<=i_7,j_7<n and 0<=i_8,j_8<n 
-                and 0<=i_9<n and 0<=i_10<n and 0<=i_11<n and 0<=i_12<n and 0<=i_13<n
-                and 0<=i_14<n and 0<=i_15<n and 0<=i_16<n and 0<=i_17<n}""" ,
-            ["""
-                x[i_0] = b[i_0] {{id=x0}} 
-                {A_on_x}[:] = action_A(A[:,:], x[:]) {{dep=x0, id=Aonx}}
-                <> r[i_3] = {A_on_x}[i_3]-b[i_3] {{dep=Aonx, id=residual0}}
-                p[i_4] = -r[i_4] {{dep=residual0, id=projector0}}
-                <> rk_norm = 0 {{dep=projector0, id=rk_norm0}}
-                rk_norm = rk_norm + r[i_5]*r[i_5] {{dep=projector0, id=rk_norm1}}
-                for i_6
-                    {A_on_p}[:] = action_A_on_p(A[:,:], p[:]) {{dep=rk_norm1, id=Aonp, inames=i_6}}
-                    <> p_on_Ap = 0 {{dep=Aonp, id=ponAp0}}
-                    p_on_Ap = p_on_Ap + p[j_2]*{A_on_p}[j_2] {{dep=ponAp0, id=ponAp}}
-                    <> alpha = rk_norm / p_on_Ap {{dep=ponAp, id=alpha}}
-                    x[i_10] = x[i_10] + alpha*p[i_10] {{dep=ponAp, id=xk}}
-                    r[i_11] = r[i_11] + alpha*{A_on_p}[i_11] {{dep=xk,id=rk}}
-                    <> rkp1_norm = 0 {{dep=rk, id=rkp1_norm0}}
-                    rkp1_norm = rkp1_norm + r[i_12]*r[i_12] {{dep=rkp1_norm0, id=rkp1_normk}}
-                """.format(**{"A_on_x" : A_on_x_name, "A_on_p" : A_on_p_name}),
-                    stop_criterion,
-                    """<> beta = rkp1_norm / rk_norm {{dep=cond, id=beta}}
-                    rk_norm = rkp1_norm {{dep=beta, id=rk_normk}}
-                    p[i_15] = beta * p[i_15] - r[i_15] {{dep=rk_normk, id=projectork}}
-                    {A_on_p}[i_17] = 0. {{dep=projectork, id=Aonp0, inames=i_6}}
-                end
-                output[i_16] = x[i_16] {{dep=Aonp0, id=out}}
-            """.format(**{"A_on_p" : A_on_p_name})],
-            [lp.GlobalArg("A", np.float64, shape=(shape[0], shape[0])),
-            lp.GlobalArg("b", np.float64, shape=shape),
-            lp.TemporaryVariable("x", np.float64, shape=shape, address_space=lp.AddressSpace.LOCAL),
-            lp.GlobalArg("output", np.float64, shape=shape, is_output_only=True),
-            lp.TemporaryVariable(A_on_x_name, np.float64, shape=shape, address_space=lp.AddressSpace.LOCAL),
-            lp.TemporaryVariable(A_on_p_name, np.float64, shape=shape, address_space=lp.AddressSpace.LOCAL),
-            lp.TemporaryVariable("p", np.float64, shape=shape, address_space=lp.AddressSpace.LOCAL)],
-            target=lp.CTarget(),
-            name=name,
-            lang_version=(2018, 2))
-
-    knl = lp.fix_parameters(knl, n=shape[0])
-
-    # update gem to pym mapping
-    # by linking the actions of the matrix-free solve kernel
-    # to the their pymbolic variables
-    knl.root_kernel.id_to_insn["Aonx"].assignees[0].subscript.aggregate.name = knl.name+"_"+A_on_x_name
-    knl.root_kernel.id_to_insn["Aonp"].assignees[0].subscript.aggregate.name = knl.name+"_"+A_on_p_name
-    _ = ctx.pymbolic_variable(expr._Aonx, knl.root_kernel.id_to_insn["Aonx"].assignees[0].subscript.aggregate.name)
-    _ = ctx.pymbolic_variable(expr._Aonp, knl.root_kernel.id_to_insn["Aonp"].assignees[0].subscript.aggregate.name)
-    ctx.matfree_solve_knls.append(knl)
-
-
-def generate_code_for_stop_criterion(knl_name, var_name, stop_value):
-    """ This method is workaround need since Loo.py does not support while loops yet.
-        FIXME whenever while loops become available
-
-        The workaround uses a Loo.py CInstruction. The Loo.py Cinstruction allows to write C code
-        so that the code (defined via its second argument) will appear unaltered in the final
-        produced code for the kernel. Meaning, there are no transformations happening on this
-        bit of code.
-        First example where this becomes a problem is in a kernel containing the Cinstruction,
-        which gets inlined in another kernel. In that case the variables in the instruction
-        are not renamed properly in the inlining process.
-        Another example is, that the variable in the code of the Cinstruction does not get
-        vectorised when prompted.
-
-        Inlining and vectorisation are made available through this ugly bit of code.
-    """
-    import pyop2
-    prefix_after_inlining = knl_name+"_"
-    # not sure where I can get the prefix, which the variable has in a vectorised kernel,
-    # dynamically from
-    prefix_if_vectorised = "slat_" if pyop2.configuration["vectorization_strategy"]=="ve" else ""
-    variable_name = prefix_if_vectorised + prefix_after_inlining + var_name
-    condition = " < " + str(stop_value)
-    if pyop2.configuration["simd_width"]:
-        # vectorisation of the stop criterion
-        variable = variable_name+ "["+str(0)+"]" + condition
-        for i in range(int(pyop2.configuration["simd_width"])-1):
-            variable += "&& " + variable_name + "["+str(i+1)+"]" + condition
-    else:
-        variable = variable_name + condition
-    # note that depends_on and id need to match the instructions in the kernel,
-    # which uses the stop criterion
-    return lp.CInstruction("",
-                           "if (" + variable +") break;",
-                           read_variables=[var_name],
-                           depends_on="rkp1_normk",
-                           id="cond")
 
 
 def expression(expr, ctx, top=False):
