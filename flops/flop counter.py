@@ -1,12 +1,13 @@
 from functools import singledispatch
-import numpy as np
+import numpy 
+from numpy import asarray
 
 @singledispatch
 def flops(expr):
     raise NotImplementedError
 
 
-class Int:
+class Int: #Integer value
     children = () 
     def __init__(self, value):
         self.value = value
@@ -25,19 +26,20 @@ def flops_failure(expr):
     return 0
 
 
-class Variable:
+class Variable: 
     children = () 
-    def __init__(self, value):
-        self.value = value
+    def __init__(self, name, shape):
+        self.name = name
+        self.shape = shape
 @flops.register(Variable)
 def flops_variable(expr):
     return 0
 
 
-class Identity:
+class Identity: #Identity matrix of size dim
     children = () 
-    def __init__(self, value):
-        self.value = value
+    def __init__(self, dim):
+        self.dim = dim
 @flops.register(Identity)
 def flops_identity(expr):
     return 0
@@ -57,6 +59,42 @@ class Zero: #Sets value to 0.0
         self.shape = shape
 @flops.register(Zero)
 def flops_zero(expr):
+    return 0
+
+
+class Index:
+    children = () 
+    def __init__(self, name=None, extent=None):
+        self.name = name
+        Index._count += 1
+        self.count = Index._count
+        self.extent = extent
+@flops.register(Index)
+def flops_index(expr):
+    return 0
+
+
+class VariableIndex: 
+    children = () 
+    def __init__(self, expression):
+        assert isinstance(expression, Node)
+        assert not expression.free_indices
+        assert not expression.shape
+        self.expression = expression
+@flops.register(VariableIndex)
+def flops_variableindex(expr):
+    return 0
+
+
+class Literal: #Literal array of numbers
+    def __init__(self, array):
+        array = asarray(array)
+        try:
+            self.array = array.astype(float, casting="safe")
+        except TypeError:
+            self.array = array.astype(complex)
+@flops.register(Literal)
+def flops_literal(expr):
     return 0
 
 
@@ -97,6 +135,15 @@ class Power:
         self.children = (base, exponent)
 @flops.register(Power)
 def flops_power(expr):
+    return 1 + sum(map(flops, expr.children)) 
+
+
+class MathFunction: #e.g. sin(some_expr)
+    def __init__(self, name, child):
+        self.name= name
+        self.children = child
+@flops.register(MathFunction)
+def flops_mathfunction(expr):
     return 1 + sum(map(flops, expr.children)) 
 
 
@@ -171,7 +218,7 @@ class ListTensor:
         self.array = array
 @flops.register(ListTensor)
 def flops_listtensor(expr):
-    return np.sum(expr.array) + sum(map(flops, expr.children)) #Sum of array elements + children flop count
+    return numpy.sum(expr.array) + sum(map(flops, expr.children)) #Sum of array elements + children flop count
 
 
 
@@ -179,5 +226,5 @@ def flops_listtensor(expr):
 #Component tensor = flops in the scalar term * size of matrix
 
 
-['Node', 'Index', 'Literal', 'Power', 'MathFunction', 'Conditional', 'Indexed', 'IndexSum', 'VariableIndex', 'FlexiblyIndexed', 'ComponentTensor']
+['Conditional', 'Indexed', 'IndexSum', 'FlexiblyIndexed', 'ComponentTensor', 'Power']
 
