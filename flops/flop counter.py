@@ -62,30 +62,6 @@ def flops_zero(expr):
     return 0
 
 
-class Index:
-    children = () 
-    def __init__(self, name=None, extent=None):
-        self.name = name
-        Index._count += 1
-        self.count = Index._count
-        self.extent = extent
-@flops.register(Index)
-def flops_index(expr):
-    return 0
-
-
-class VariableIndex: 
-    children = () 
-    def __init__(self, expression):
-        assert isinstance(expression, Node)
-        assert not expression.free_indices
-        assert not expression.shape
-        self.expression = expression
-@flops.register(VariableIndex)
-def flops_variableindex(expr):
-    return 0
-
-
 class Literal: #Literal array of numbers
     def __init__(self, array):
         array = asarray(array)
@@ -135,7 +111,17 @@ class Power:
         self.children = (base, exponent)
 @flops.register(Power)
 def flops_power(expr):
-    return 1 + sum(map(flops, expr.children)) 
+    exponent = expr.exponent
+    if exponent == 0:
+        return 0
+    elif abs(exponent) < 1:
+        exponent = 1/exponent
+    if exponent < 0:
+        exponent = -1*exponent
+    if exponent < 5:
+        return exponent + sum(map(flops, expr.condition))
+    else:
+        return 5 + sum(map(flops, expr.condition))
 
 
 class MathFunction: #e.g. sin(some_expr)
@@ -145,6 +131,16 @@ class MathFunction: #e.g. sin(some_expr)
 @flops.register(MathFunction)
 def flops_mathfunction(expr):
     return 1 + sum(map(flops, expr.children)) 
+
+
+class Conditional:
+    def __init__(self, condition, left, right):
+        self.condition = condition
+        self.left = left
+        self.right = right
+@flops.register(Conditional)
+def flops_conditional(expr):
+    return sum(map(flops, expr.condition)) + max(sum(map(flops, expr.left)), sum(map(flops, expr.right)))
 
 
 class MinValue:
@@ -187,6 +183,52 @@ def flops_logicalor(expr):
     return 1 + sum(map(flops, expr.children))
 
 
+class Index:
+    children = () 
+    def __init__(self, name=None, extent=None):
+        self.name = name
+        Index._count += 1
+        self.count = Index._count
+        self.extent = extent
+@flops.register(Index)
+def flops_index(expr):
+    return 0
+
+
+class Indexed:
+    def __init__(self, child):
+        self.children = child
+@flops.register(Indexed)
+def flops_indexed(expr):
+    return sum(map(flops, expr.children)) / numpy.product(expr.child.shape) #Average flops per entry
+
+
+class FlexiblyIndexed:
+    def __init__(self, child):
+        self.children = child
+@flops.register(FlexiblyIndexed)
+def flops_flexiblyindexed(expr):
+    return sum(map(flops, expr.children)) / numpy.product(expr.child.shape) #Average flops per entry, same as Indexed
+
+
+class VariableIndex: 
+    children = () 
+    def __init__(self, expression):
+        self.expression = expression
+@flops.register(VariableIndex)
+def flops_variableindex(expr):
+    return 0
+
+
+class IndexSum:
+    def __init__(self, child, index):
+        self.children = child
+        self.index = index
+@flops.register(IndexSum)
+def flops_indexsum(expr):
+    return sum(map(flops, expr.children)) * max(expr.index) #Sum of the child flops multiplied by the extent of the indicies being summed over
+
+
 class Comparison:
     def __init__(self, left, right):
         self.children = (left, right)
@@ -221,10 +263,11 @@ def flops_listtensor(expr):
     return numpy.sum(expr.array) + sum(map(flops, expr.children)) #Sum of array elements + children flop count
 
 
-
-#Index sum = flops in the inside term * size of sum in the outside
-#Component tensor = flops in the scalar term * size of matrix
-
-
-['Conditional', 'Indexed', 'IndexSum', 'FlexiblyIndexed', 'ComponentTensor', 'Power']
+class ComponentTensor:
+    def __init__(self, child, index):
+        self.children = child
+        self.index = index
+@flops.register(ComponentTensor)
+def flops_componenttensor(expr):
+    return sum(map(flops, expr.children)) * max(expr.index) #Sum of the child flops multiplied by the extent of the indicies being turned into shape
 
