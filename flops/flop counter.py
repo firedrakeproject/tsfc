@@ -164,7 +164,7 @@ class LogicalNot:
         self.children = child
 @flops.register(LogicalNot)
 def flops_logicalnot(expr):
-    return 1 + sum(map(flops, expr.children)) #Should be 1+children or 0+children? 
+    return 0 + sum(map(flops, expr.children)) #Should be 1+children or 0+children? 
 
 
 class LogicalAnd:
@@ -172,7 +172,7 @@ class LogicalAnd:
         self.children = (left, right)
 @flops.register(LogicalAnd)
 def flops_logicaland(expr):
-    return 1 + sum(map(flops, expr.children))
+    return 0 + sum(map(flops, expr.children))
 
 
 class LogicalOr:
@@ -180,7 +180,7 @@ class LogicalOr:
         self.children = (left, right)
 @flops.register(LogicalOr)
 def flops_logicalor(expr):
-    return 1 + sum(map(flops, expr.children))
+    return 0 + sum(map(flops, expr.children))
 
 
 class Index:

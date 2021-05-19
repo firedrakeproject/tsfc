@@ -17,6 +17,7 @@ from ufl.utils.sequences import max_degree
 
 import gem
 import gem.impero_utils as impero_utils
+from gem.flop_count import count_flops
 
 import FIAT
 from FIAT.reference_element import TensorProductCell
@@ -226,6 +227,8 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
                           [mode.finalise_options.items()
                            for mode in mode_irs.keys()]))
     expressions = impero_utils.preprocess_gem(expressions, **options)
+    flops_counts = count_flops(expressions)
+    print(flop_counts)
     assignments = list(zip(return_variables, expressions))
 
     # Let the kernel interface inspect the optimised IR to register
