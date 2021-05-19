@@ -20,14 +20,28 @@ def flops_failure(expr, self):
 @flops.register(gem.Delta)
 @flops.register(gem.Zero)
 @flops.register(gem.Literal)
-def flops_literal(expr, self):
+@flops.register(gem.Index)
+@flops.register(gem.VariableIndex)
+def flops_zero(expr, self):
     return 0
+
+
+@flops.register(gem.LogicalNot)
+@flops.register(gem.LogicalAnd)
+@flops.register(gem.LogicalOr)
+@flops.register(gem.ListTensor)
+def flops_zeroplus(expr, self):
+    return 0 + sum(map(self, expr.children)) 
 
 
 @flops.register(gem.Sum)
 @flops.register(gem.Product)
 @flops.register(gem.Division)
-def flops_division(expr, self):
+@flops.register(gem.Comparison)
+@flops.register(gem.MathFunction)
+@flops.register(gem.MinValue)
+@flops.register(gem.MaxValue)
+def flops_oneplus(expr, self):
     return 1 + sum(map(self, expr.children))
 
 
@@ -43,34 +57,10 @@ def flops_power(expr, self):
         return base_flops + 5 # heuristic
 
 
-@flops.register(gem.MathFunction)
-def flops_mathfunction(expr, self):
-    return 1 + sum(map(self, expr.children)) 
-
-
 @flops.register(gem.Conditional)
 def flops_conditional(expr, self):
     condition, then, else_ = map(self, expr.children)
     return condition + max(then, else_)
-
-
-@flops.register(gem.MinValue)
-@flops.register(gem.MaxValue)
-def flops_maxvalue(expr, self):
-    return 1 + sum(map(flops, expr.children))
-
-
-@flops.register(gem.LogicalNot)
-@flops.register(gem.LogicalAnd)
-@flops.register(gem.LogicalOr)
-def flops_logicalnot(expr, self):
-    return 0 + sum(map(self, expr.children)) 
-
-
-@flops.register(gem.Index)
-@flops.register(gem.VariableIndex)
-def flops_index(expr, self):
-    return 0
 
 
 @flops.register(gem.Indexed)
@@ -83,13 +73,7 @@ def flops_indexed(expr, self):
 @flops.register(gem.IndexSum)
 def flops_indexsum(expr, self):
     # Sum of the child flops multiplied by the extent of the indices being summed over
-    return (sum(map(self, expr.children)) 
-        * numpy.product([i.extent for i in expr.multiindex], dtype=int))
-
-
-@flops.register(gem.Comparison)
-def flops_comparison(expr, self):
-    return 1 + sum(map(self, expr.children))
+    return (sum(map(self, expr.children)) * numpy.product([i.extent for i in expr.multiindex], dtype=int))
 
 
 @flops.register(gem.Inverse)
@@ -105,17 +89,10 @@ def flops_solve(expr, self):
     return 2*n*m + 2*n**3 + sum(map(self, expr.children)) 
 
 
-@flops.register(gem.ListTensor)
-def flops_listtensor(expr, self):
-    # Child flop counts
-    return sum(map(self, expr.children))
-
-
 @flops.register(gem.ComponentTensor)
 def flops_componenttensor(expr, self):
     # Sum of the child flops multiplied by the extent of the indices being turned into shape
-    return (sum(map(self, expr.children)) 
-        * numpy.product([i.extent for i in expr.multiindex], dtype=int))
+    return (sum(map(self, expr.children)) * numpy.product([i.extent for i in expr.multiindex], dtype=int))
 
 
 def count_flops(expressions):
