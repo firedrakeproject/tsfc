@@ -267,7 +267,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     return builder.construct_kernel(kernel_name, impero_c, index_names, quad_rule)
 
 
-def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
+def compile_expression_dual_evaluation(expression, to_element, *,
                                        domain=None, interface=None,
                                        parameters=None, coffee=False):
     """Compile a UFL expression to be evaluated against a compile-time known reference element's dual basis.
@@ -276,8 +276,7 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
 
     :arg expression: UFL expression
     :arg to_element: A FInAT element for the target space
-    :arg coordinates: the coordinate function
-    :arg domain: optional UFL domain the expression is defined on (useful when expression contains no domain).
+    :arg domain: optional UFL domain the expression is defined on (required when expression contains no domain).
     :arg interface: backend module for the kernel interface
     :arg parameters: parameters object
     :arg coffee: compile coffee kernel instead of loopy kernel
@@ -328,17 +327,21 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
     argument_multiindices = tuple(builder.create_element(arg.ufl_element()).get_indices()
                                   for arg in arguments)
 
-    # Replace coordinates (if any)
-    domain = expression.ufl_domain()
-    if domain:
-        assert coordinates.ufl_domain() == domain
-        builder.domain_coordinate[domain] = coordinates
-        builder.set_cell_sizes(domain)
+    # Replace coordinates (if any) unless otherwise specified by kwarg
+    if domain is None:
+        domain = expression.ufl_domain()
+    assert domain is not None
 
     # Collect required coefficients
+    first_coefficient_fake_coords = False
     coefficients = extract_coefficients(expression)
     if has_type(expression, GeometricQuantity) or any(fem.needs_coordinate_mapping(c.ufl_element()) for c in coefficients):
-        coefficients = [coordinates] + coefficients
+        # Create a fake coordinate coefficient for a domain.
+        coords_coefficient = ufl.Coefficient(ufl.FunctionSpace(domain, domain.ufl_coordinate_element()))
+        builder.domain_coordinate[domain] = coords_coefficient
+        builder.set_cell_sizes(domain)
+        coefficients = [coords_coefficient] + coefficients
+        first_coefficient_fake_coords = True
     builder.set_coefficients(coefficients)
 
     # Split mixed coefficients
@@ -346,7 +349,10 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
 
     # Translate to GEM
     kernel_cfg = dict(interface=builder,
-                      ufl_cell=coordinates.ufl_domain().ufl_cell(),
+                      ufl_cell=domain.ufl_cell(),
+                      # FIXME: change if we ever implement
+                      # interpolation on facets.
+                      integral_type="cell",
                       argument_multiindices=argument_multiindices,
                       index_cache={},
                       scalar_type=parameters["scalar_type"])
@@ -375,6 +381,9 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
             config["quadrature_rule"] = quad_rule
 
         expr, = fem.compile_ufl(expression, **config, point_sum=False)
+        # In some cases point_set.indices may be dropped from expr, but nothing
+        # new should now appear
+        assert set(expr.free_indices) <= set(chain(point_set.indices, *argument_multiindices))
         shape_indices = tuple(gem.Index() for _ in expr.shape)
         basis_indices = point_set.indices
         ir = gem.Indexed(expr, shape_indices)
@@ -393,6 +402,9 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
                 config = kernel_cfg.copy()
                 config.update(point_set=point_set)
                 expr, = fem.compile_ufl(expression, **config, point_sum=False)
+                # In some cases point_set.indices may be dropped from expr, but
+                # nothing new should now appear
+                assert set(expr.free_indices) <= set(chain(point_set.indices, *argument_multiindices))
                 expr = gem.partial_indexed(expr, shape_indices)
                 expr_cache[pts] = expr, point_set
             weights = collections.defaultdict(list)
@@ -431,7 +443,7 @@ def compile_expression_dual_evaluation(expression, to_element, coordinates, *,
     # Handle kernel interface requirements
     builder.register_requirements([ir])
     # Build kernel tuple
-    return builder.construct_kernel(return_arg, impero_c, index_names)
+    return builder.construct_kernel(return_arg, impero_c, index_names, first_coefficient_fake_coords)
 
 
 def lower_integral_type(fiat_cell, integral_type):

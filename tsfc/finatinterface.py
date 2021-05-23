@@ -49,6 +49,7 @@ supported_elements = {
     "Nonconforming Arnold-Winther": finat.ArnoldWintherNC,
     "Conforming Arnold-Winther": finat.ArnoldWinther,
     "Hermite": finat.Hermite,
+    "Kong-Mulder-Veldhuizen": finat.KongMulderVeldhuizen,
     "Argyris": finat.Argyris,
     "Mardal-Tai-Winther": finat.MardalTaiWinther,
     "Morley": finat.Morley,
@@ -252,6 +253,11 @@ def convert_hdivelement(element, **kwargs):
 def convert_hcurlelement(element, **kwargs):
     finat_elem, deps = _create_element(element._element, **kwargs)
     return finat.HCurlElement(finat_elem), deps
+
+
+@convert.register(ufl.WithMapping)
+def convert_withmapping(element, **kwargs):
+    return _create_element(element.wrapee, **kwargs)
 
 
 @convert.register(ufl.RestrictedElement)
