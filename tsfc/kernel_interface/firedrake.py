@@ -306,7 +306,7 @@ class KernelBuilder(KernelBuilderBase):
                 name_, rank=shape), qualifiers=["const"]))
 
         self.kernel.quadrature_rule = quadrature_rule
-
+        self.kernel.name = name
         self.kernel.ast = KernelBuilderBase.construct_kernel(self, name, args, body)
         return self.kernel
 
