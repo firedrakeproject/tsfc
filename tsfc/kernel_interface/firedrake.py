@@ -28,7 +28,7 @@ def make_builder(*args, **kwargs):
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
                  "domain_number", "needs_cell_sizes", "tabulations",
-                 "coefficient_numbers", "external_data_numbers", "external_data_parts", "__weakref__")
+                 "coefficient_numbers", "external_data_numbers", "external_data_parts", "name", "__weakref__")
     """A compiled Kernel object.
 
     :kwarg ast: The COFFEE ast for the kernel.
@@ -55,7 +55,8 @@ class Kernel(object):
                  coefficient_numbers=(),
                  external_data_numbers=(), external_data_parts=(),
                  needs_cell_sizes=False,
-                 tabulations=None):
+                 tabulations=None,
+                 name=None):
         # Defaults
         self.ast = ast
         self.integral_type = integral_type
@@ -67,6 +68,7 @@ class Kernel(object):
         self.external_data_parts = external_data_parts
         self.needs_cell_sizes = needs_cell_sizes
         self.tabulations = tabulations
+        self.name = name
         super(Kernel, self).__init__()
 
 
@@ -354,12 +356,13 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
                       external_data_parts=external_data_parts,
                       oriented=oriented,
                       needs_cell_sizes=needs_cell_sizes,
-                      tabulations=tabulations)
+                      tabulations=tabulations,
+                      name=kernel_name)
 
     def construct_empty_kernel(self, kernel_name):
         """Return None, since Firedrake needs no empty kernels.
 
-        :arg name: function name
+        :arg kernel_name: function name
         :returns: None
         """
         return None

@@ -128,6 +128,17 @@ class CoordinateMapping(PhysicalGeometry):
         self.mt = mt
         self.interface = interface
 
+    def preprocess(self, expr, context):
+        """Preprocess a UFL expression for translation.
+
+        :arg expr: A UFL expression
+        :arg context: The translation context.
+        :returns: A new UFL expression
+        """
+        ifacet = self.interface.integral_type.startswith("interior_facet")
+        return preprocess_expression(expr, complex_mode=context.complex_mode,
+                                     do_apply_restrictions=ifacet)
+
     @property
     def config(self):
         config = {name: getattr(self.interface, name)
@@ -149,7 +160,7 @@ class CoordinateMapping(PhysicalGeometry):
         config = {"point_set": PointSingleton(point)}
         config.update(self.config)
         context = PointSetContext(**config)
-        expr = preprocess_expression(expr, complex_mode=context.complex_mode)
+        expr = self.preprocess(expr, context)
         return map_expr_dag(context.translator, expr)
 
     def detJ_at(self, point):
@@ -158,11 +169,10 @@ class CoordinateMapping(PhysicalGeometry):
             expr = PositiveRestricted(expr)
         elif self.mt.restriction == '-':
             expr = NegativeRestricted(expr)
-        expr = preprocess_expression(expr)
-
         config = {"point_set": PointSingleton(point)}
         config.update(self.config)
         context = PointSetContext(**config)
+        expr = self.preprocess(expr, context)
         return map_expr_dag(context.translator, expr)
 
     def reference_normals(self):
@@ -203,7 +213,7 @@ class CoordinateMapping(PhysicalGeometry):
         config = {"point_set": PointSingleton([1/3, 1/3])}
         config.update(self.config)
         context = PointSetContext(**config)
-        expr = preprocess_expression(expr, complex_mode=context.complex_mode)
+        expr = self.preprocess(expr, context)
         return map_expr_dag(context.translator, expr)
 
     def physical_points(self, point_set, entity=None):
@@ -219,13 +229,13 @@ class CoordinateMapping(PhysicalGeometry):
             expr = PositiveRestricted(expr)
         elif self.mt.restriction == '-':
             expr = NegativeRestricted(expr)
-        expr = preprocess_expression(expr)
         config = {"point_set": point_set}
         config.update(self.config)
         if entity is not None:
             config.update({name: getattr(self.interface, name)
                            for name in ["integration_dim", "entity_ids"]})
         context = PointSetContext(**config)
+        expr = self.preprocess(expr, context)
         mapped = map_expr_dag(context.translator, expr)
         indices = tuple(gem.Index() for _ in mapped.shape)
         return gem.ComponentTensor(gem.Indexed(mapped, indices), point_set.indices + indices)

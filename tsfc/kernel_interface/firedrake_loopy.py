@@ -18,7 +18,8 @@ from tsfc.loopy import generate as generate_loopy
 
 
 # Expression kernel description type
-ExpressionKernel = namedtuple('ExpressionKernel', ['ast', 'oriented', 'needs_cell_sizes', 'coefficients', 'first_coefficient_fake_coords', 'tabulations'])
+ExpressionKernel = namedtuple('ExpressionKernel', ['ast', 'oriented', 'needs_cell_sizes', 'coefficients',
+                                                   'first_coefficient_fake_coords', 'tabulations', 'name'])
 
 
 def make_builder(*args, **kwargs):
@@ -28,7 +29,7 @@ def make_builder(*args, **kwargs):
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
                  "domain_number", "needs_cell_sizes", "tabulations",
-                 "coefficient_numbers", "external_data_numbers", "external_data_parts", "__weakref__")
+                 "coefficient_numbers", "external_data_numbers", "external_data_parts", "name", "__weakref__")
     """A compiled Kernel object.
 
     :kwarg ast: The loopy kernel object.
@@ -49,13 +50,15 @@ class Kernel(object):
         structure that the kernel needs.
     :kwarg tabulations: The runtime tabulations this kernel requires
     :kwarg needs_cell_sizes: Does the kernel require cell sizes.
+    :kwarg name: The name of this kernel.
     """
     def __init__(self, ast=None, integral_type=None, oriented=False,
                  subdomain_id=None, domain_number=None,
                  coefficient_numbers=(),
                  external_data_numbers=(), external_data_parts=(),
                  needs_cell_sizes=False,
-                 tabulations=None):
+                 tabulations=None,
+                 name=None):
         # Defaults
         self.ast = ast
         self.integral_type = integral_type
@@ -67,6 +70,7 @@ class Kernel(object):
         self.external_data_parts = external_data_parts
         self.needs_cell_sizes = needs_cell_sizes
         self.tabulations = tabulations
+        self.name = name
         super(Kernel, self).__init__()
 
 
@@ -184,11 +188,12 @@ class ExpressionKernelBuilder(KernelBuilderBase):
         for name_, shape in self.tabulations:
             args.append(lp.GlobalArg(name_, dtype=self.scalar_type, shape=shape))
 
+        name = "expression_kernel"
         loopy_kernel = generate_loopy(impero_c, args, self.scalar_type,
-                                      "expression_kernel", index_names)
+                                      name, index_names)
         return ExpressionKernel(loopy_kernel, self.oriented, self.cell_sizes,
                                 self.coefficients, first_coefficient_fake_coords,
-                                self.tabulations)
+                                self.tabulations, name)
 
 
 class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
@@ -355,12 +360,13 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
                       external_data_parts=external_data_parts,
                       oriented=oriented,
                       needs_cell_sizes=needs_cell_sizes,
-                      tabulations=tabulations)
+                      tabulations=tabulations,
+                      name=kernel_name)
 
     def construct_empty_kernel(self, kernel_name):
         """Return None, since Firedrake needs no empty kernels.
 
-        :arg name: function name
+        :arg kernel_name: function name
         :returns: None
         """
         return None

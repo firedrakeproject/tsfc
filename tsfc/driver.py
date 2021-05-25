@@ -368,6 +368,9 @@ def compile_expression_dual_evaluation(expression, to_element, *,
     # Translate to GEM
     kernel_cfg = dict(interface=builder,
                       ufl_cell=domain.ufl_cell(),
+                      # FIXME: change if we ever implement
+                      # interpolation on facets.
+                      integral_type="cell",
                       argument_multiindices=argument_multiindices,
                       index_cache={},
                       scalar_type=parameters["scalar_type"])
@@ -396,6 +399,9 @@ def compile_expression_dual_evaluation(expression, to_element, *,
             config["quadrature_rule"] = quad_rule
 
         expr, = fem.compile_ufl(expression, **config, point_sum=False)
+        # In some cases point_set.indices may be dropped from expr, but nothing
+        # new should now appear
+        assert set(expr.free_indices) <= set(chain(point_set.indices, *argument_multiindices))
         shape_indices = tuple(gem.Index() for _ in expr.shape)
         basis_indices = point_set.indices
         ir = gem.Indexed(expr, shape_indices)
@@ -414,6 +420,9 @@ def compile_expression_dual_evaluation(expression, to_element, *,
                 config = kernel_cfg.copy()
                 config.update(point_set=point_set)
                 expr, = fem.compile_ufl(expression, **config, point_sum=False)
+                # In some cases point_set.indices may be dropped from expr, but
+                # nothing new should now appear
+                assert set(expr.free_indices) <= set(chain(point_set.indices, *argument_multiindices))
                 expr = gem.partial_indexed(expr, shape_indices)
                 expr_cache[pts] = expr, point_set
             weights = collections.defaultdict(list)
