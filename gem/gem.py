@@ -929,7 +929,7 @@ def strides_of(shape):
 def decompose_variable_view(expression):
     """Extract information from a shaped node.
        Decompose ComponentTensor + FlexiblyIndexed."""
-    if (isinstance(expression, (Variable, Inverse, Solve))):
+    if (isinstance(expression, (Variable, Inverse, Solve, Action))):
         variable = expression
         indexes = tuple(Index(extent=extent) for extent in expression.shape)
         dim2idxs = tuple((0, ((index, 1),)) for index in indexes)
