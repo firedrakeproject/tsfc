@@ -31,7 +31,7 @@ def flops_zero(expr, self):
 @flops.register(gem.LogicalOr)
 @flops.register(gem.ListTensor)
 def flops_zeroplus(expr, self):
-    return 0 + sum(map(self, expr.children)) 
+    return 0 + sum(map(self, expr.children))
 
 
 @flops.register(gem.Sum)
@@ -85,8 +85,8 @@ def flops_inverse(expr, self):
 @flops.register(gem.Solve)
 def flops_solve(expr, self):
     n, m = expr.shape
-    # 2mn + inversion cost of A + children flop count 
-    return 2*n*m + 2*n**3 + sum(map(self, expr.children)) 
+    # 2mn + inversion cost of A + children flop count
+    return 2*n*m + 2*n**3 + sum(map(self, expr.children))
 
 
 @flops.register(gem.ComponentTensor)
