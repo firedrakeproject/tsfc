@@ -228,7 +228,6 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
                           [mode.finalise_options.items()
                            for mode in mode_irs.keys()]))
     expressions = impero_utils.preprocess_gem(expressions, **options)
-    flop_counts = count_flops(expressions)
     assignments = list(zip(return_variables, expressions))
 
     # Let the kernel interface inspect the optimised IR to register
@@ -242,6 +241,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     index_ordering = tuple(quadrature_indices) + split_argument_indices
     try:
         impero_c = impero_utils.compile_gem(assignments, index_ordering, remove_zeros=True)
+        flop_count = count_flops(impero_c)
     except impero_utils.NoopError:
         # No operations, construct empty kernel
         return builder.construct_empty_kernel(kernel_name)
@@ -267,7 +267,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     for multiindex, name in zip(argument_multiindices, ['j', 'k']):
         name_multiindex(multiindex, name)
 
-    return builder.construct_kernel(kernel_name, impero_c, index_names, quad_rule, flop_count=sum(flop_counts))
+    return builder.construct_kernel(kernel_name, impero_c, index_names, quad_rule, flop_count=flop_count)
 
 
 def compile_expression_dual_evaluation(expression, to_element, *,

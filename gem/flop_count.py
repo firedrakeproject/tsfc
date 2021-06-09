@@ -1,17 +1,66 @@
 import gem.gem as gem
-from gem.node import Memoizer
+import gem.impero as imp
 from functools import singledispatch
 import numpy
 import math
 
 
 @singledispatch
-def flops(expr, self):
+def statement(tree, parameters):
+    raise NotImplementedError
+
+
+@statement.register(imp.Block)
+def statement_block(tree, parameters):
+    flops = sum(statement(child, parameters) for child in tree.children)
+    return flops
+
+
+@statement.register(imp.For)
+def statement_for(tree, parameters):
+    extent = tree.index.extent
+    assert extent is not None
+    child, = tree.children
+    flops = statement(child, parameters)
+    return flops * extent
+
+
+@statement.register(imp.Initialise)
+def statement_initialise(tree, parameters):
+    return 0
+
+
+@statement.register(imp.Accumulate)
+def statement_accumulate(tree, parameters):
+    flops = expression_flops(tree.indexsum.children[0], parameters)
+    return flops + 1
+
+
+@statement.register(imp.Return)
+def statement_return(tree, parameters):
+    flops = expression_flops(tree.expression, parameters)
+    return flops + 1
+
+
+@statement.register(imp.ReturnAccumulate)
+def statement_returnaccumulate(tree, parameters):
+    flops = expression_flops(tree.indexsum.children[0], parameters)
+    return flops + 1
+
+
+@statement.register(imp.Evaluate)
+def statement_evaluate(tree, parameters):
+    flops = expression_flops(tree.expression, parameters, top=True)
+    return flops
+
+
+@singledispatch
+def flops(expr, parameters):
     raise NotImplementedError(f"Don't know how to count flops of {type(expr)}")
 
 
 @flops.register(gem.Failure)
-def flops_failure(expr, self):
+def flops_failure(expr, parameters):
     raise ValueError("Not expecting a Failure node")
 
 
@@ -22,7 +71,7 @@ def flops_failure(expr, self):
 @flops.register(gem.Literal)
 @flops.register(gem.Index)
 @flops.register(gem.VariableIndex)
-def flops_zero(expr, self):
+def flops_zero(expr, parameters):
     return 0
 
 
@@ -30,8 +79,9 @@ def flops_zero(expr, self):
 @flops.register(gem.LogicalAnd)
 @flops.register(gem.LogicalOr)
 @flops.register(gem.ListTensor)
-def flops_zeroplus(expr, self):
-    return 0 + sum(map(self, expr.children))
+def flops_zeroplus(expr, parameters):
+    return 0 + sum(expression_flops(child, parameters)
+                   for child in expr.children)
 
 
 @flops.register(gem.Sum)
@@ -41,14 +91,15 @@ def flops_zeroplus(expr, self):
 @flops.register(gem.MathFunction)
 @flops.register(gem.MinValue)
 @flops.register(gem.MaxValue)
-def flops_oneplus(expr, self):
-    return 1 + sum(map(self, expr.children))
+def flops_oneplus(expr, parameters):
+    return 1 + sum(expression_flops(child, parameters)
+                   for child in expr.children)
 
 
 @flops.register(gem.Power)
-def flops_power(expr, self):
+def flops_power(expr, parameters):
     base, exponent = expr.children
-    base_flops = self(base)
+    base_flops = expression_flops(base, parameters)
     if isinstance(exponent, gem.Literal):
         exponent = exponent.value
         if exponent > 0 and exponent == math.floor(exponent):
@@ -58,48 +109,64 @@ def flops_power(expr, self):
 
 
 @flops.register(gem.Conditional)
-def flops_conditional(expr, self):
-    condition, then, else_ = map(self, expr.children)
+def flops_conditional(expr, parameters):
+    condition, then, else_ = (expression_flops(child, parameters)
+                              for child in expr.children)
     return condition + max(then, else_)
 
 
 @flops.register(gem.Indexed)
 @flops.register(gem.FlexiblyIndexed)
-def flops_indexed(expr, self):
+def flops_indexed(expr, parameters):
+    aggregate = sum(expression_flops(child, parameters)
+                    for child in expr.children)
     # Average flops per entry
-    return sum(map(self, expr.children)) / numpy.product(expr.children[0].shape, dtype=int)
+    return aggregate / numpy.product(expr.children[0].shape, dtype=int)
 
 
 @flops.register(gem.IndexSum)
-def flops_indexsum(expr, self):
-    # Sum of the child flops multiplied by the extent of the indices being summed over
-    return (sum(map(self, expr.children)) * numpy.product([i.extent for i in expr.multiindex], dtype=int))
+def flops_indexsum(expr, parameters):
+    raise ValueError("Not expecting IndexSum")
 
 
 @flops.register(gem.Inverse)
-def flops_inverse(expr, self):
+def flops_inverse(expr, parameters):
     n, _ = expr.shape
     # 2n^3 + child flop count
-    return 2*n**3 + sum(map(self, expr.children))
+    return 2*n**3 + sum(expression_flops(child, parameters)
+                        for child in expr.children)
 
 @flops.register(gem.Solve)
-def flops_solve(expr, self):
+def flops_solve(expr, parameters):
     n, m = expr.shape
     # 2mn + inversion cost of A + children flop count
-    return 2*n*m + 2*n**3 + sum(map(self, expr.children))
+    return 2*n*m + 2*n**3 + sum(expression_flops(child, parameters)
+                                for child in expr.children)
 
 
 @flops.register(gem.ComponentTensor)
-def flops_componenttensor(expr, self):
-    # Sum of the child flops multiplied by the extent of the indices being turned into shape
-    return (sum(map(self, expr.children)) * numpy.product([i.extent for i in expr.multiindex], dtype=int))
+def flops_componenttensor(expr, parameters):
+    raise ValueError("Not expecting ComponentTensor")
 
 
-def count_flops(expressions):
+def expression_flops(expression, parameters, top=False):
     """An approximation to flops required for each expression.
 
-    :arg expressions: iterable of gem expression.
-    :returns: list of flop counts for each expression
+    :arg expression: GEM expression.
+    :arg parameters: Useful miscellaneous information.
+    :arg top: are we at the root?
+    :returns: flop count for the expression
     """
-    mapper = Memoizer(flops)
-    return [mapper(expr) for expr in expressions]
+    if not top and expression in parameters.temporaries:
+        return 0
+    else:
+        return flops(expression, parameters)
+
+
+def count_flops(impero_c):
+    """An approximation to flops required for a scheduled impero_c tree.
+
+    :arg impero_c: a :class:`~.Impero_C` object.
+    :returns: approximate flop count for the tree.
+    """
+    return statement(impero_c.tree, impero_c)
