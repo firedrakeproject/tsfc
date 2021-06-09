@@ -67,7 +67,7 @@ def flops_conditional(expr, self):
 @flops.register(gem.FlexiblyIndexed)
 def flops_indexed(expr, self):
     # Average flops per entry
-    return sum(map(self, expr.children)) / numpy.product(expr.child.shape, dtype=int)
+    return sum(map(self, expr.children)) / numpy.product(expr.children[0].shape, dtype=int)
 
 
 @flops.register(gem.IndexSum)
