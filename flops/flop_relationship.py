@@ -22,13 +22,13 @@ for k in K:
                            coffee=True)
     # Record new flops here, and compare asymptotics and approximate
     # order of magnitude.
-    
-    newflops = count_flops(kernel.ast)
+
+    newflops = kernel.flop_count
     new_flops.append(newflops)
 
     oldflops = EstimateFlops().visit(kernel.ast)
     old_flops.append(oldflops)
-    
+
     print(f"New flops for degree {k}: {newflops}")
     print(f"Old flops for degree {k}: {oldflops}")
 
