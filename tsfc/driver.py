@@ -228,7 +228,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
                           [mode.finalise_options.items()
                            for mode in mode_irs.keys()]))
     expressions = impero_utils.preprocess_gem(expressions, **options)
-    flops_counts = count_flops(expressions)
+    flop_counts = count_flops(expressions)
     print(flop_counts)
     assignments = list(zip(return_variables, expressions))
 
