@@ -229,7 +229,6 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
                            for mode in mode_irs.keys()]))
     expressions = impero_utils.preprocess_gem(expressions, **options)
     flop_counts = count_flops(expressions)
-    print(flop_counts)
     assignments = list(zip(return_variables, expressions))
 
     # Let the kernel interface inspect the optimised IR to register
@@ -268,7 +267,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     for multiindex, name in zip(argument_multiindices, ['j', 'k']):
         name_multiindex(multiindex, name)
 
-    return builder.construct_kernel(kernel_name, impero_c, index_names, quad_rule)
+    return builder.construct_kernel(kernel_name, impero_c, index_names, quad_rule, flop_count=sum(flop_counts))
 
 
 def compile_expression_dual_evaluation(expression, to_element, *,
