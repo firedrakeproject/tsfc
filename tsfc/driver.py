@@ -430,7 +430,8 @@ class UFLtoGEMCallback(object):
             else:
                 dexpression = ReferenceGrad(dexpression)
             dexpression = ufl_utils.preprocess_expression(dexpression, complex_mode=self.complex_mode)
-        gem_expr, = fem.compile_ufl(dexpression, **config, point_sum=False)
+        # TODO: will need to be fem.GemPointContext in certain cases
+        gem_expr, = fem.compile_ufl(dexpression, fem.PointSetContext(**config), point_sum=False)
         # In some cases point_set.indices may be dropped from expr, but nothing
         # new should now appear
         argument_multiindices = config["argument_multiindices"]
