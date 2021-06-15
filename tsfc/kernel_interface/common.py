@@ -158,8 +158,8 @@ class KernelBuilderMixin(object):
         config.update(quadrature_rule=quad_rule)
         config['argument_multiindices'] = argument_multiindices or self.argument_multiindices
         expressions = fem.compile_ufl(integrand,
-                                      interior_facet=self.interior_facet,
-                                      **config)
+                                      fem.PointSetContext(**config),
+                                      interior_facet=self.interior_facet)
         self.quadrature_indices.extend(quad_rule.point_set.indices)
         return expressions
 
