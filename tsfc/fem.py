@@ -361,7 +361,7 @@ class Translator(MultiFunction, ModifiedTerminalMixin, ufl2gem.Mixin):
         return expr
 
     def external_operator(self, o):
-        return self.modified_terminal(o.get_coefficient())
+        return self.modified_terminal(o.result_coefficient())
 
     def modified_terminal(self, o):
         """Overrides the modified terminal handler from
