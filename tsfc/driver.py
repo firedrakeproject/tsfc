@@ -268,7 +268,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     return builder.construct_kernel(kernel_name, impero_c, index_names, quad_rule, flop_count=flop_count)
 
 
-def compile_expression_dual_evaluation(expression, element, *,
+def compile_expression_dual_evaluation(expression, to_element, *,
                                        domain=None, interface=None,
                                        parameters=None, coffee=False):
     """Compile a UFL expression to be evaluated against a compile-time known reference element's dual basis.
@@ -276,7 +276,7 @@ def compile_expression_dual_evaluation(expression, element, *,
     Useful for interpolating UFL expressions into e.g. N1curl spaces.
 
     :arg expression: UFL expression
-    :arg element: A FInAT element for the target space
+    :arg to_element: A FInAT element for the target space
     :arg domain: optional UFL domain the expression is defined on (required when expression contains no domain).
     :arg interface: backend module for the kernel interface
     :arg parameters: parameters object
@@ -297,7 +297,7 @@ def compile_expression_dual_evaluation(expression, element, *,
 
     # Find out which mapping to apply
     try:
-        mapping, = set((element.mapping,))
+        mapping, = set((to_element.mapping,))
     except ValueError:
         raise NotImplementedError("Don't know how to interpolate onto zany spaces, sorry")
     expression = apply_mapping(expression, mapping, domain)
@@ -352,8 +352,8 @@ def compile_expression_dual_evaluation(expression, element, *,
                       scalar_type=parameters["scalar_type"])
 
     # Use dual evaluation method to get gem tensor with (num_nodes, ) shape.
-    ir_shape = element.dual_evaluation(UFLtoGEMCallback(expression, kernel_cfg, complex_mode))
-    broadcast_shape = len(expression.ufl_shape) - len(element.value_shape)
+    ir_shape = to_element.dual_evaluation(UFLtoGEMCallback(expression, kernel_cfg, complex_mode))
+    broadcast_shape = len(expression.ufl_shape) - len(to_element.value_shape)
     shape_indices = gem.indices(broadcast_shape)
     basis_indices = tuple(gem.Index(extent=ex) for ex in ir_shape.shape)
     ir = gem.Indexed(ir_shape, basis_indices)
