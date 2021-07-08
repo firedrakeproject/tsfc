@@ -191,4 +191,7 @@ def count_flops(impero_c):
     :arg impero_c: a :class:`~.Impero_C` object.
     :returns: approximate flop count for the tree.
     """
-    return statement(impero_c.tree, impero_c)
+    try:
+        return statement(impero_c.tree, impero_c)
+    except (ValueError, NotImplementedError):
+        return 0
