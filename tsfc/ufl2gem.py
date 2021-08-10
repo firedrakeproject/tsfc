@@ -93,6 +93,9 @@ class Mixin(object):
     def bessel_y(self, o, nu, arg):
         return MathFunction(o._name, nu, arg)
 
+    def hyper_geometric_2f1(self, o, a, b, c, x):
+        return MathFunction("hyp2f1", a, b, c, x)
+
     def min_value(self, o, *ops):
         return MinValue(*ops)
 

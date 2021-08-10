@@ -421,10 +421,11 @@ def _expression_mathfunction(expr, ctx):
             else:
                 return p.Variable(f"{name}n")(nu_, arg_)
     else:
-        if expr.name == "ln":
+        name = expr.name
+        if name == "ln":
             name = "log"
-        else:
-            name = expr.name
+        elif name == "hyp2f1":
+            name = "hcephes_hyp2f1"
         # Not all mathfunctions apply to complex numbers, but this
         # will be picked up in loopy. This way we allow erf(real(...))
         # in complex mode (say).
