@@ -19,7 +19,7 @@ import FIAT
 from FIAT.functional import PointEvaluation
 
 from finat.point_set import PointSet, UnknownPointSet
-from finat.quadrature import AbstractQuadratureRule, make_quadrature, QuadratureRule
+from finat.quadrature import QuadratureRule
 from finat.quadrature_element import QuadratureElement
 
 from tsfc import fem, ufl_utils
