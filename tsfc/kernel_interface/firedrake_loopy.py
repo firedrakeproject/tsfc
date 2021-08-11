@@ -8,6 +8,7 @@ from ufl import Coefficient, MixedElement as ufl_MixedElement, FunctionSpace, Fi
 
 import gem
 from gem.optimise import remove_componenttensors as prune
+from gem.flop_count import count_flops
 
 import loopy as lp
 
@@ -29,7 +30,7 @@ def make_builder(*args, **kwargs):
 class Kernel(object):
     __slots__ = ("ast", "integral_type", "oriented", "subdomain_id",
                  "domain_number", "needs_cell_sizes", "tabulations",
-                 "coefficient_numbers", "external_data_numbers", "external_data_parts", "name", "__weakref__")
+                 "coefficient_numbers", "external_data_numbers", "external_data_parts", "flop_count", "name", "__weakref__")
     """A compiled Kernel object.
 
     :kwarg ast: The loopy kernel object.
@@ -51,6 +52,7 @@ class Kernel(object):
     :kwarg tabulations: The runtime tabulations this kernel requires
     :kwarg needs_cell_sizes: Does the kernel require cell sizes.
     :kwarg name: The name of this kernel.
+    :kwarg flop_count: Estimated total flops for this kernel.
     """
     def __init__(self, ast=None, integral_type=None, oriented=False,
                  subdomain_id=None, domain_number=None,
@@ -58,6 +60,7 @@ class Kernel(object):
                  external_data_numbers=(), external_data_parts=(),
                  needs_cell_sizes=False,
                  tabulations=None,
+                 flop_count=0,
                  name=None):
         # Defaults
         self.ast = ast
@@ -70,6 +73,7 @@ class Kernel(object):
         self.external_data_parts = external_data_parts
         self.needs_cell_sizes = needs_cell_sizes
         self.tabulations = tabulations
+        self.flop_count = flop_count
         self.name = name
         super(Kernel, self).__init__()
 
@@ -350,6 +354,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         index_cache = self.fem_config['index_cache']
         index_names = get_index_names(self.quadrature_indices, self.argument_multiindices, index_cache)
         ast = generate_loopy(impero_c, args, self.scalar_type, kernel_name, index_names)
+        flop_count = count_flops(impero_c)  # Estimated total flops for this kernel.
 
         return Kernel(ast=ast,
                       integral_type=integral_data.integral_type,
@@ -361,6 +366,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
                       oriented=oriented,
                       needs_cell_sizes=needs_cell_sizes,
                       tabulations=tabulations,
+                      flop_count=flop_count,
                       name=kernel_name)
 
     def construct_empty_kernel(self, kernel_name):
@@ -388,10 +394,10 @@ def prepare_coefficient(ufl_element, name, scalar_type, interior_facet=False):
 
     if ufl_element.family() == 'Real':
         # Constant
-        funarg = lp.GlobalArg(name, dtype=scalar_type, shape=(ufl_element.value_size(),))
-        expression = gem.reshape(gem.Variable(name, (None,)),
+        value_size = ufl_element.value_size()
+        funarg = lp.GlobalArg(name, dtype=scalar_type, shape=(value_size,))
+        expression = gem.reshape(gem.Variable(name, (value_size,)),
                                  ufl_element.value_shape())
-
         return funarg, expression
 
     finat_element = create_element(ufl_element)
