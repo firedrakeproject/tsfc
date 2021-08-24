@@ -358,10 +358,12 @@ def compile_expression_dual_evaluation(expression, to_element, *,
     # method of every FInAT element will create the necessary gem code.
     from finat.tensorfiniteelement import TensorFiniteElement
     runtime_quadrature_rule = (
-        isinstance(finat_to_element, QuadratureElement) or
         (
-            isinstance(finat_to_element, TensorFiniteElement) and
-            isinstance(finat_to_element.base_element, QuadratureElement)
+            isinstance(finat_to_element, QuadratureElement) or
+            (
+                isinstance(finat_to_element, TensorFiniteElement) and
+                isinstance(finat_to_element.base_element, QuadratureElement)
+            )
         ) and
         isinstance(finat_to_element._rule.point_set, UnknownPointSet)
     )
