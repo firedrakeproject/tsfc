@@ -22,7 +22,7 @@ from ufl.geometry import QuadratureWeight
 from ufl.geometry import Jacobian, JacobianDeterminant, JacobianInverse
 from ufl.classes import (Abs, Argument, CellOrientation, Coefficient,
                          ComponentTensor, Expr, FloatValue, Division,
-                         Indexed, MixedElement, MultiIndex, Product,
+                         MixedElement, MultiIndex, Product,
                          ScalarValue, Sqrt, Zero, CellVolume, FacetArea)
 
 from gem.node import MemoizerArg
@@ -389,11 +389,14 @@ def apply_mapping(expression, element, domain):
 
       G(X) = det(J)^2 K g(x) K^T  i.e. G_il(X)=(detJ)^2 K_ij g_jk K_lk
 
-    If 'contravariant piola' or 'covariant piola' are applied to a
-    matrix-valued function, the appropriate mappings are applied row-by-row.
+    If 'contravariant piola' or 'covariant piola' (or their double
+    variants) are applied to a matrix-valued function, the appropriate
+    mappings are applied row-by-row.
 
     :arg expression: UFL expression
     :arg mapping: a string indicating the mapping to apply
+    :returns: an appropriately mapped UFL expression
+    :raises NotImplementedError: For unhandled mappings
     """
     mesh = expression.ufl_domain()
     if mesh is None:
@@ -406,21 +409,28 @@ def apply_mapping(expression, element, domain):
         return expression
     elif mapping == "covariant piola":
         J = Jacobian(mesh)
-        *i, j, k = indices(len(expression.ufl_shape) + 1)
-        expression = Indexed(expression, MultiIndex((*i, k)))
-        return as_tensor(J.T[j, k] * expression, (*i, j))
+        *k, i, j = indices(len(expression.ufl_shape) + 1)
+        kj = (*k, j)
+        return as_tensor(J[j, i] * expression[kj], (*k, i))
+    elif mapping == "l2 piola":
+        detJ = JacobianDeterminant(mesh)
+        return expression * detJ
     elif mapping == "contravariant piola":
         K = JacobianInverse(mesh)
         detJ = JacobianDeterminant(mesh)
-        *i, j, k = indices(len(expression.ufl_shape) + 1)
-        expression = Indexed(expression, MultiIndex((*i, k)))
-        return as_tensor(detJ * K[j, k] * expression, (*i, j))
-    elif mapping == "double covariant piola" and rank == 2:
+        *k, i, j = indices(len(expression.ufl_shape) + 1)
+        kj = (*k, j)
+        return as_tensor(detJ * K[i, j] * expression[kj], (*k, i))
+    elif mapping == "double covariant piola":
         J = Jacobian(mesh)
-        return J.T * expression * J
-    elif mapping == "double contravariant piola" and rank == 2:
+        *k, i, j, m, n = indices(len(expression.ufl_shape) + 2)
+        kmn = (*k, m, n)
+        return as_tensor(J[m, i] * expression[kmn] * J[n, j], (*k, i, j))
+    elif mapping == "double contravariant piola":
         K = JacobianInverse(mesh)
         detJ = JacobianDeterminant(mesh)
-        return (detJ)**2 * K * expression * K.T
+        *k, i, j, m, n = indices(len(expression.ufl_shape) + 2)
+        kmn = (*k, m, n)
+        return as_tensor(detJ**2 * K[i, m] * expression[kmn] * K[j, n], (*k, i, j))
     else:
         raise NotImplementedError("Don't know how to handle mapping type %s for expression of rank %d" % (mapping, rank))
