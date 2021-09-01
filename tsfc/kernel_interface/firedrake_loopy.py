@@ -7,7 +7,6 @@ from functools import partial
 from ufl import Coefficient, MixedElement as ufl_MixedElement, FunctionSpace, FiniteElement
 
 import gem
-from gem.flop_count import count_flops
 from gem.optimise import remove_componenttensors as prune
 from gem.flop_count import count_flops
 

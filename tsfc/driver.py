@@ -1,10 +1,7 @@
-import collections
 import time
 import sys
 from functools import partial
 from itertools import chain
-
-from numpy import asarray
 
 import ufl
 from ufl.algorithms import extract_arguments, extract_coefficients
@@ -15,13 +12,7 @@ from ufl.log import GREEN
 import gem
 import gem.impero_utils as impero_utils
 
-import FIAT
-from FIAT.functional import PointEvaluation
-
 import finat
-from finat.point_set import PointSet, UnknownPointSet
-from finat.quadrature import QuadratureRule
-from finat.quadrature_element import QuadratureElement
 
 from tsfc import fem, ufl_utils
 from tsfc.logging import logger

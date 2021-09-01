@@ -8,7 +8,6 @@ from ufl import Coefficient, MixedElement as ufl_MixedElement, FunctionSpace, Fi
 import coffee.base as coffee
 
 import gem
-from gem.flop_count import count_flops
 from gem.node import traversal
 from gem.optimise import remove_componenttensors as prune
 from gem.flop_count import count_flops
