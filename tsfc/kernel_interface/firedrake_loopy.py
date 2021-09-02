@@ -1,5 +1,4 @@
 import numpy
-import collections
 from collections import namedtuple
 from itertools import chain, product
 from functools import partial
@@ -244,8 +243,6 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         self.integral_data = integral_data
         self.arguments = integral_data.arguments
         self.local_tensor, self.return_variables, self.argument_multiindices = self.set_arguments(self.arguments)
-        self.mode_irs = collections.OrderedDict()
-        self.quadrature_indices = []
 
     def set_arguments(self, arguments):
         """Process arguments.
@@ -327,20 +324,21 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         provided by the kernel interface."""
         return check_requirements(ir)
 
-    def construct_kernel(self, kernel_name, external_data_numbers=(), external_data_parts=()):
+    def construct_kernel(self, kernel_name, ctx, external_data_numbers=(), external_data_parts=()):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument
         list for assembly kernels.
 
         :arg kernel_name: function name
+        :arg ctx: builder context
         :kwarg external_data_numbers: see :class:`Kernel`.
         :kwarg external_data_parts: see :class:`Kernel.`
         :returns: :class:`Kernel` object
         """
         integral_data = self.integral_data
 
-        impero_c, oriented, needs_cell_sizes, tabulations = self.compile_gem()
+        impero_c, oriented, needs_cell_sizes, tabulations = self.compile_gem(ctx)
 
         if impero_c is None:
             return self.construct_empty_kernel(kernel_name)
@@ -357,8 +355,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
             args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(2,)))
         for name, shape in tabulations:
             args.append(lp.GlobalArg(name, dtype=self.scalar_type, shape=shape))
-        index_cache = self.fem_config['index_cache']
-        index_names = get_index_names(self.quadrature_indices, self.argument_multiindices, index_cache)
+        index_names = get_index_names(ctx['quadrature_indices'], self.argument_multiindices, ctx['index_cache'])
         ast = generate_loopy(impero_c, args, self.scalar_type, kernel_name, index_names)
         flop_count = count_flops(impero_c)  # Estimated total flops for this kernel.
 

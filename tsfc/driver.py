@@ -250,17 +250,18 @@ def compile_integral(tsfc_integral_data, prefix, parameters, interface, coffee, 
                         parameters["scalar_type_c"] if coffee else parameters["scalar_type"],
                         parameters["scalar_type"],
                         diagonal=diagonal)
+    ctx = builder.create_context()
     # Compile UFL -> gem
     for integral in tsfc_integral_data.integrals:
         params = parameters.copy()
         params.update(integral.metadata())  # integral metadata overrides
-        integrand_exprs = builder.compile_ufl(integral.integrand(), params)
+        integrand_exprs = builder.compile_ufl(integral.integrand(), params, ctx)
         integral_exprs = builder.construct_integrals(integrand_exprs, params)
-        builder.stash_integrals(integral_exprs, params)
+        builder.stash_integrals(integral_exprs, params, ctx)
     # Compile gem -> kernel
     kernel_name = "%s_%s_integral_%s" % (prefix, tsfc_integral_data.integral_type, tsfc_integral_data.subdomain_id)
     kernel_name = kernel_name.replace("-", "_")  # Handle negative subdomain_id
-    return builder.construct_kernel(kernel_name)
+    return builder.construct_kernel(kernel_name, ctx)
 
 
 def preprocess_parameters(parameters):

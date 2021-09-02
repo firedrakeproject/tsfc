@@ -1,5 +1,4 @@
 import numpy
-import collections
 import functools
 from itertools import chain, product
 
@@ -60,8 +59,6 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         self.integral_data = integral_data
         self.arguments = integral_data.arguments
         self.local_tensor, self.return_variables, self.argument_multiindices = self.set_arguments(self.arguments)
-        self.mode_irs = collections.OrderedDict()
-        self.quadrature_indices = []
 
     def set_arguments(self, arguments):
         """Process arguments.
@@ -143,7 +140,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         provided by the kernel interface."""
         return None, None, None
 
-    def construct_kernel(self, name, external_data_numbers=(), external_data_parts=(), quadrature_rule=None):
+    def construct_kernel(self, name, ctx, external_data_numbers=(), external_data_parts=(), quadrature_rule=None):
         """Construct a fully built kernel function.
 
         This function contains the logic for building the argument
@@ -157,11 +154,10 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         """
         from tsfc.coffee import generate as generate_coffee
 
-        impero_c, oriented, needs_cell_sizes, tabulations = self.compile_gem()
+        impero_c, oriented, needs_cell_sizes, tabulations = self.compile_gem(ctx)
         if impero_c is None:
             return self.construct_empty_kernel(name)
-        index_cache = self.fem_config['index_cache']
-        index_names = get_index_names(self.quadrature_indices, self.argument_multiindices, index_cache)
+        index_names = get_index_names(ctx['quadrature_indices'], self.argument_multiindices, ctx['index_cache'])
         body = generate_coffee(impero_c, index_names, scalar_type=self.scalar_type)
         return self._construct_kernel_from_body(name, body)
 

@@ -129,7 +129,7 @@ class KernelBuilderBase(KernelInterface):
 class KernelBuilderMixin(object):
     """Mixin for KernelBuilder classes."""
 
-    def compile_ufl(self, integrand, params, argument_multiindices=None):
+    def compile_ufl(self, integrand, params, ctx, argument_multiindices=None):
         """Compile UFL integrand.
 
         :arg integrand: UFL integrand.
@@ -157,10 +157,11 @@ class KernelBuilderMixin(object):
         config = self.fem_config.copy()
         config.update(quadrature_rule=quad_rule)
         config['argument_multiindices'] = argument_multiindices or self.argument_multiindices
+        config['index_cache'] = ctx['index_cache']
         expressions = fem.compile_ufl(integrand,
                                       fem.PointSetContext(**config),
                                       interior_facet=self.interior_facet)
-        self.quadrature_indices.extend(quad_rule.point_set.indices)
+        ctx['quadrature_indices'].extend(quad_rule.point_set.indices)
         return expressions
 
     def construct_integrals(self, expressions, params):
@@ -170,21 +171,20 @@ class KernelBuilderMixin(object):
                               self.argument_multiindices,
                               params)
 
-    def stash_integrals(self, reps, params):
+    def stash_integrals(self, reps, params, ctx):
         mode = pick_mode(params["mode"])
-        mode_irs = self.mode_irs
+        mode_irs = ctx['mode_irs']
         mode_irs.setdefault(mode, collections.OrderedDict())
         for var, rep in zip(self.return_variables, reps):
             mode_irs[mode].setdefault(var, []).append(rep)
 
-    def compile_gem(self):
+    def compile_gem(self, ctx):
         # Finalise mode representations into a set of assignments
-        mode_irs = self.mode_irs
-        index_cache = self.fem_config['index_cache']
+        mode_irs = ctx['mode_irs']
 
         assignments = []
         for mode, var_reps in mode_irs.items():
-            assignments.extend(mode.flatten(var_reps.items(), index_cache))
+            assignments.extend(mode.flatten(var_reps.items(), ctx['index_cache']))
 
         if assignments:
             return_variables, expressions = zip(*assignments)
@@ -205,7 +205,7 @@ class KernelBuilderMixin(object):
 
         # Construct ImperoC
         assignments = list(zip(return_variables, expressions))
-        index_ordering = get_index_ordering(self.quadrature_indices, return_variables)
+        index_ordering = get_index_ordering(ctx['quadrature_indices'], return_variables)
         try:
             impero_c = impero_utils.compile_gem(assignments, index_ordering, remove_zeros=True)
         except impero_utils.NoopError:
@@ -219,16 +219,6 @@ class KernelBuilderMixin(object):
 
     @cached_property
     def fem_config(self):
-        # Map from UFL FiniteElement objects to multiindices.  This is
-        # so we reuse Index instances when evaluating the same coefficient
-        # multiple times with the same table.
-        #
-        # We also use the same dict for the unconcatenate index cache,
-        # which maps index objects to tuples of multiindices.  These two
-        # caches shall never conflict as their keys have different types
-        # (UFL finite elements vs. GEM index objects).
-        #
-        # -> fem_config['index_cache']
         integral_type = self.integral_data.integral_type
         cell = self.integral_data.domain.ufl_cell()
         fiat_cell = as_fiat_cell(cell)
@@ -238,8 +228,37 @@ class KernelBuilderMixin(object):
                     integral_type=integral_type,
                     integration_dim=integration_dim,
                     entity_ids=entity_ids,
-                    index_cache={},
                     scalar_type=self.fem_scalar_type)
+
+    def create_context(self):
+        """Create builder context.
+
+        *index_cache*
+
+        Map from UFL FiniteElement objects to multiindices.
+        This is so we reuse Index instances when evaluating the same
+        coefficient multiple times with the same table.
+
+        We also use the same dict for the unconcatenate index cache,
+        which maps index objects to tuples of multiindices. These two
+        caches shall never conflict as their keys have different types
+        (UFL finite elements vs. GEM index objects).
+
+        *quadrature_indices*
+
+        List of quadrature indices used.
+
+        *mode_irs*
+
+        Dict for mode representations.
+
+        This attribute is dedicated to a specific IntegralData.integrals,
+        which means that one needs to create new one to compile a
+        different instance of IntegralData.integrals.
+        """
+        return {'index_cache': {},
+                'quadrature_indices': [],
+                'mode_irs': collections.OrderedDict()}
 
 
 def get_index_ordering(quadrature_indices, return_variables):
