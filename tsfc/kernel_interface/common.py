@@ -8,8 +8,6 @@ import numpy
 
 import coffee.base as coffee
 
-from ufl.utils.sequences import max_degree
-
 import gem
 
 from gem.utils import cached_property
@@ -18,7 +16,6 @@ import gem.impero_utils as impero_utils
 from tsfc import fem, ufl_utils
 from tsfc.kernel_interface import KernelInterface
 from tsfc.finatinterface import as_fiat_cell, lower_integral_type
-from tsfc.logging import logger
 
 
 class KernelBuilderBase(KernelInterface):
@@ -212,8 +209,9 @@ class KernelBuilderMixin(object):
 
     @cached_property
     def fem_config(self):
-        integral_type = self.integral_data.integral_type
-        cell = self.integral_data.domain.ufl_cell()
+        info = self.integral_data_info
+        integral_type = info.integral_type
+        cell = info.domain.ufl_cell()
         fiat_cell = as_fiat_cell(cell)
         integration_dim, entity_ids = lower_integral_type(fiat_cell, integral_type)
         return dict(interface=self,

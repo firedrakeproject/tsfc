@@ -156,8 +156,6 @@ class TSFCIntegralData(object):
         * TSFC can forget `ufl.IntegralData.enabled_coefficients`,
     """
     def __init__(self, integral_data_key, intg_data_info, tsfc_form_data, domain_number, function_tuple):
-        self.domain, self.integral_type, self.subdomain_id = integral_data_key
-        self.domain_number = domain_number
         # Gather/preprocess integrals.
         integrals = []
         _integral_index_to_form_data_index = []
@@ -176,7 +174,7 @@ class TSFCIntegralData(object):
             functions.update(function_tuple[form_data_index])
         self.integrals = tuple(integrals)
         self._integral_index_to_form_data_index = _integral_index_to_form_data_index
-        self.arguments = tsfc_form_data.arguments
+        arguments = tsfc_form_data.arguments
         # This is which coefficient in the original form the
         # current coefficient is.
         # Ex:
@@ -186,12 +184,48 @@ class TSFCIntegralData(object):
         # self.coefficients                  : c1, c5
         # self.coefficent_numbers            :  1,  5
         functions = sorted(functions, key=lambda c: c.count())
-        self.coefficients = tuple(tsfc_form_data.function_replace_map[f] for f in functions)
-        self.coefficient_numbers = tuple(tsfc_form_data.original_coefficient_positions[tsfc_form_data.reduced_coefficients.index(f)] for f in functions)
+        coefficients = tuple(tsfc_form_data.function_replace_map[f] for f in functions)
+        coefficient_numbers = tuple(tsfc_form_data.original_coefficient_positions[tsfc_form_data.reduced_coefficients.index(f)] for f in functions)
+
+        self.info = TSFCIntegralDataInfo(*integral_data_key, domain_number,
+                                         arguments,
+                                         coefficients, coefficient_numbers)
 
     def integral_index_to_form_data_index(self, integral_index):
         r"""Return the form data index given an integral index."""
         return self._integral_index_to_form_data_index[integral_index]
+
+    def __getattr__(self, attr):
+        return getattr(self.info, attr)
+
+
+class TSFCIntegralDataInfo(object):
+    __slots__ = ("domain", "integral_type", "subdomain_id", "domain_number",
+                 "arguments",
+                 "coefficients", "coefficient_numbers")
+    """A bag of high-level information of :class:`~.TSFCIntegralData`.
+
+    :arg domain: The mesh.
+    :arg integral_type: The type of integral.
+    :arg subdomain_id: What is the subdomain id for this kernel.
+    :arg domain_number: Which domain number in the original form
+        does this kernel correspond to (can be used to index into
+        original_form.ufl_domains() to get the correct domain).
+    :arg coefficients: A list of coefficients.
+    :arg coefficient_numbers: A list of which coefficients from the
+        form the kernel needs.
+    """
+    def __init__(self, domain, integral_type, subdomain_id, domain_number,
+                 arguments,
+                 coefficients, coefficient_numbers):
+        self.domain = domain
+        self.integral_type = integral_type
+        self.subdomain_id = subdomain_id
+        self.arguments = arguments
+        self.coefficients = coefficients
+        self.domain_number = domain_number
+        self.coefficient_numbers = coefficient_numbers
+        super(TSFCIntegralDataInfo, self).__init__()
 
 
 def compile_form(form, prefix="form", parameters=None, interface=None, coffee=True, diagonal=False):
@@ -251,7 +285,7 @@ def compile_integral(tsfc_integral_data, prefix, parameters, interface, coffee, 
             import tsfc.kernel_interface.firedrake_loopy as firedrake_interface_loopy
             interface = firedrake_interface_loopy.KernelBuilder
 
-    builder = interface(tsfc_integral_data,
+    builder = interface(tsfc_integral_data.info,
                         parameters["scalar_type_c"] if coffee else parameters["scalar_type"],
                         parameters["scalar_type"],
                         diagonal=diagonal)

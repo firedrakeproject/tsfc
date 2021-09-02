@@ -23,11 +23,11 @@ create_element = functools.partial(_create_element, shape_innermost=False)
 class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
     """Helper class for building a :class:`Kernel` object."""
 
-    def __init__(self, integral_data, scalar_type, fem_scalar_type, diagonal=False):
+    def __init__(self, integral_data_info, scalar_type, fem_scalar_type, diagonal=False):
         """Initialise a kernel builder."""
         if diagonal:
             raise NotImplementedError("Assembly of diagonal not implemented yet, sorry")
-        KernelBuilder.__init__(self, scalar_type, integral_data.integral_type.startswith("interior_facet"))
+        KernelBuilder.__init__(self, scalar_type, integral_data_info.integral_type.startswith("interior_facet"))
         self.fem_scalar_type = fem_scalar_type
 
         self.coordinates_args = None
@@ -41,7 +41,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         else:
             self._cell_orientations = (gem.Variable("cell_orientation", ()),)
 
-        integral_type = integral_data.integral_type
+        integral_type = integral_data_info.integral_type
         if integral_type == "exterior_facet":
             self._entity_number = {None: gem.VariableIndex(gem.Variable("facet", ()))}
         elif integral_type == "interior_facet":
@@ -52,12 +52,12 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         elif integral_type == "vertex":
             self._entity_number = {None: gem.VariableIndex(gem.Variable("vertex", ()))}
 
-        self.set_coordinates(integral_data.domain)
-        self.set_cell_sizes(integral_data.domain)
-        self.set_coefficients(integral_data.coefficients)
+        self.set_coordinates(integral_data_info.domain)
+        self.set_cell_sizes(integral_data_info.domain)
+        self.set_coefficients(integral_data_info.coefficients)
 
-        self.integral_data = integral_data
-        self.arguments = integral_data.arguments
+        self.integral_data_info = integral_data_info
+        self.arguments = integral_data_info.arguments
         self.local_tensor, self.return_variables, self.argument_multiindices = self.set_arguments(self.arguments)
 
     def set_arguments(self, arguments):
@@ -177,7 +177,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         args.extend(self.coordinates_args)
 
         # Facet and vertex number(s)
-        integral_type = self.integral_data.integral_type
+        integral_type = self.integral_data_info.integral_type
         if integral_type == "exterior_facet":
             args.append(coffee.Decl("std::size_t", coffee.Symbol("facet")))
         elif integral_type == "interior_facet":

@@ -208,10 +208,10 @@ class ExpressionKernelBuilder(KernelBuilderBase):
 class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
     """Helper class for building a :class:`Kernel` object."""
 
-    def __init__(self, integral_data, scalar_type, fem_scalar_type,
+    def __init__(self, integral_data_info, scalar_type, fem_scalar_type,
                  dont_split=(), function_replace_map={}, diagonal=False):
         """Initialise a kernel builder."""
-        KernelBuilderBase.__init__(self, scalar_type, integral_data.integral_type.startswith("interior_facet"))
+        KernelBuilderBase.__init__(self, scalar_type, integral_data_info.integral_type.startswith("interior_facet"))
         self.fem_scalar_type = fem_scalar_type
 
         self.diagonal = diagonal
@@ -223,7 +223,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         self.dont_split = frozenset(function_replace_map[f] for f in dont_split if f in function_replace_map)
 
         # Facet number
-        integral_type = integral_data.integral_type
+        integral_type = integral_data_info.integral_type
         if integral_type in ['exterior_facet', 'exterior_facet_vert']:
             facet = gem.Variable('facet', (1,))
             self._entity_number = {None: gem.VariableIndex(gem.Indexed(facet, (0,)))}
@@ -236,12 +236,12 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         elif integral_type == 'interior_facet_horiz':
             self._entity_number = {'+': 1, '-': 0}
 
-        self.set_coordinates(integral_data.domain)
-        self.set_cell_sizes(integral_data.domain)
-        self.set_coefficients(integral_data.coefficients)
+        self.set_coordinates(integral_data_info.domain)
+        self.set_cell_sizes(integral_data_info.domain)
+        self.set_coefficients(integral_data_info.coefficients)
 
-        self.integral_data = integral_data
-        self.arguments = integral_data.arguments
+        self.integral_data_info = integral_data_info
+        self.arguments = integral_data_info.arguments
         self.local_tensor, self.return_variables, self.argument_multiindices = self.set_arguments(self.arguments)
 
     def set_arguments(self, arguments):
@@ -336,7 +336,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         :kwarg external_data_parts: see :class:`Kernel.`
         :returns: :class:`Kernel` object
         """
-        integral_data = self.integral_data
+        info = self.integral_data_info
 
         impero_c, oriented, needs_cell_sizes, tabulations = self.compile_gem(ctx)
 
@@ -349,9 +349,9 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         if needs_cell_sizes:
             args.append(self.cell_sizes_arg)
         args.extend(self.coefficient_args + self.external_data_args)
-        if integral_data.integral_type in ["exterior_facet", "exterior_facet_vert"]:
+        if info.integral_type in ["exterior_facet", "exterior_facet_vert"]:
             args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(1,)))
-        elif integral_data.integral_type in ["interior_facet", "interior_facet_vert"]:
+        elif info.integral_type in ["interior_facet", "interior_facet_vert"]:
             args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(2,)))
         for name, shape in tabulations:
             args.append(lp.GlobalArg(name, dtype=self.scalar_type, shape=shape))
@@ -360,10 +360,10 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         flop_count = count_flops(impero_c)  # Estimated total flops for this kernel.
 
         return Kernel(ast=ast,
-                      integral_type=integral_data.integral_type,
-                      subdomain_id=integral_data.subdomain_id,
-                      domain_number=integral_data.domain_number,
-                      coefficient_numbers=integral_data.coefficient_numbers,
+                      integral_type=info.integral_type,
+                      subdomain_id=info.subdomain_id,
+                      domain_number=info.domain_number,
+                      coefficient_numbers=info.coefficient_numbers,
                       external_data_numbers=external_data_numbers,
                       external_data_parts=external_data_parts,
                       oriented=oriented,
