@@ -3,21 +3,26 @@ import sys
 from functools import partial
 from itertools import chain
 
+from numpy import asarray
+
 import ufl
 from ufl.algorithms import extract_arguments, extract_coefficients
 from ufl.algorithms.analysis import has_type
 from ufl.classes import Form, GeometricQuantity, Coefficient, FunctionSpace
+from ufl.utils.sequences import max_degree
 from ufl.log import GREEN
 
 import gem
 import gem.impero_utils as impero_utils
 
 import finat
+from finat.quadrature import AbstractQuadratureRule, make_quadrature
 
 from tsfc import fem, ufl_utils
 from tsfc.logging import logger
 from tsfc.parameters import default_parameters, is_complex
 from tsfc.ufl_utils import apply_mapping
+from tsfc.finatinterface import as_fiat_cell, lower_integral_type
 
 # To handle big forms. The various transformations might need a deeper stack
 sys.setrecursionlimit(3000)
@@ -252,9 +257,11 @@ def compile_integral(tsfc_integral_data, prefix, parameters, interface, coffee, 
                         diagonal=diagonal)
     ctx = builder.create_context()
     # Compile UFL -> gem
+    functions = list(builder.arguments) + [builder.coordinate(tsfc_integral_data.domain)] + list(tsfc_integral_data.coefficients)
     for integral in tsfc_integral_data.integrals:
         params = parameters.copy()
         params.update(integral.metadata())  # integral metadata overrides
+        set_quad_rule(params, tsfc_integral_data.domain.ufl_cell(), tsfc_integral_data.integral_type, functions)
         integrand_exprs = builder.compile_ufl(integral.integrand(), params, ctx)
         integral_exprs = builder.construct_integrals(integrand_exprs, params)
         builder.stash_integrals(integral_exprs, params, ctx)
@@ -277,6 +284,36 @@ def preprocess_parameters(parameters):
     if parameters.get("quadrature_rule") in ["auto", "default", None]:
         del parameters["quadrature_rule"]
     return parameters
+
+
+def set_quad_rule(params, cell, integral_type, functions):
+    # Check if the integral has a quad degree attached, otherwise use
+    # the estimated polynomial degree attached by compute_form_data
+    try:
+        quadrature_degree = params["quadrature_degree"]
+    except KeyError:
+        quadrature_degree = params["estimated_polynomial_degree"]
+        function_degrees = [f.ufl_function_space().ufl_element().degree() for f in functions]
+        if all((asarray(quadrature_degree) > 10 * asarray(degree)).all()
+               for degree in function_degrees):
+            logger.warning("Estimated quadrature degree %s more "
+                           "than tenfold greater than any "
+                           "argument/coefficient degree (max %s)",
+                           quadrature_degree, max_degree(function_degrees))
+    if params.get("quadrature_rule") == "default":
+        del params["quadrature_rule"]
+    try:
+        quad_rule = params["quadrature_rule"]
+    except KeyError:
+        fiat_cell = as_fiat_cell(cell)
+        integration_dim, _ = lower_integral_type(fiat_cell, integral_type)
+        integration_cell = fiat_cell.construct_subelement(integration_dim)
+        quad_rule = make_quadrature(integration_cell, quadrature_degree)
+        params["quadrature_rule"] = quad_rule
+
+    if not isinstance(quad_rule, AbstractQuadratureRule):
+        raise ValueError("Expected to find a QuadratureRule object, not a %s" %
+                         type(quad_rule))
 
 
 def compile_expression_dual_evaluation(expression, to_element, *,
