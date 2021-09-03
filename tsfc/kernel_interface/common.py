@@ -5,8 +5,13 @@ from functools import reduce
 from itertools import chain
 
 import numpy
+from numpy import asarray
+
+from ufl.utils.sequences import max_degree
 
 import coffee.base as coffee
+
+from finat.quadrature import AbstractQuadratureRule, make_quadrature
 
 import gem
 
@@ -16,6 +21,7 @@ import gem.impero_utils as impero_utils
 from tsfc import fem, ufl_utils
 from tsfc.kernel_interface import KernelInterface
 from tsfc.finatinterface import as_fiat_cell, lower_integral_type
+from tsfc.logging import logger
 
 
 class KernelBuilderBase(KernelInterface):
@@ -143,6 +149,9 @@ class KernelBuilderMixin(object):
         if self.coefficient_split:
             integrand = ufl_utils.split_coefficients(integrand, self.coefficient_split)
         # Compile: ufl -> gem
+        info = self.integral_data_info
+        functions = list(info.arguments) + [self.coordinate(info.domain)] + list(info.coefficients)
+        set_quad_rule(params, info.domain.ufl_cell(), info.integral_type, functions)
         quad_rule = params["quadrature_rule"]
         config = self.fem_config.copy()
         config.update(quadrature_rule=quad_rule)
@@ -250,6 +259,36 @@ class KernelBuilderMixin(object):
         return {'index_cache': {},
                 'quadrature_indices': [],
                 'mode_irs': collections.OrderedDict()}
+
+
+def set_quad_rule(params, cell, integral_type, functions):
+    # Check if the integral has a quad degree attached, otherwise use
+    # the estimated polynomial degree attached by compute_form_data
+    try:
+        quadrature_degree = params["quadrature_degree"]
+    except KeyError:
+        quadrature_degree = params["estimated_polynomial_degree"]
+        function_degrees = [f.ufl_function_space().ufl_element().degree() for f in functions]
+        if all((asarray(quadrature_degree) > 10 * asarray(degree)).all()
+               for degree in function_degrees):
+            logger.warning("Estimated quadrature degree %s more "
+                           "than tenfold greater than any "
+                           "argument/coefficient degree (max %s)",
+                           quadrature_degree, max_degree(function_degrees))
+    if params.get("quadrature_rule") == "default":
+        del params["quadrature_rule"]
+    try:
+        quad_rule = params["quadrature_rule"]
+    except KeyError:
+        fiat_cell = as_fiat_cell(cell)
+        integration_dim, _ = lower_integral_type(fiat_cell, integral_type)
+        integration_cell = fiat_cell.construct_subelement(integration_dim)
+        quad_rule = make_quadrature(integration_cell, quadrature_degree)
+        params["quadrature_rule"] = quad_rule
+
+    if not isinstance(quad_rule, AbstractQuadratureRule):
+        raise ValueError("Expected to find a QuadratureRule object, not a %s" %
+                         type(quad_rule))
 
 
 def get_index_ordering(quadrature_indices, return_variables):
