@@ -13,6 +13,7 @@ from ufl.utils.sequences import max_degree
 from ufl.log import GREEN
 
 import gem
+from gem.utils import cached_property
 import gem.impero_utils as impero_utils
 
 import finat
@@ -136,7 +137,7 @@ class TSFCFormData(object):
             domain, _, _ = key
             domain_number = original_form.domain_numbering()[domain]
             integral_data_list.append(TSFCIntegralData(key, intg_data_info,
-                                                       self, domain_number, function_tuple))
+                                                       self, domain_number, function_tuple, len(form_data_tuple)))
         self.integral_data = tuple(integral_data_list)
 
 
@@ -155,9 +156,9 @@ class TSFCIntegralData(object):
         * Only essential information about the `ufl.IntegralData`s is retained.
         * TSFC can forget `ufl.IntegralData.enabled_coefficients`,
     """
-    def __init__(self, integral_data_key, intg_data_info, tsfc_form_data, domain_number, function_tuple):
+    def __init__(self, integral_data_key, intg_data_info, tsfc_form_data, domain_number, function_tuple, n):
         # Gather/preprocess integrals.
-        integrals = []
+        integrals_list = [[] for _ in range(n)]
         _integral_index_to_form_data_index = []
         functions = set()
         for intg_data, form_data, form_data_index in intg_data_info:
@@ -166,14 +167,11 @@ class TSFCIntegralData(object):
                 # Replace functions with Coefficients here.
                 integrand = ufl.replace(integrand, tsfc_form_data.function_replace_map)
                 new_integral = integral.reconstruct(integrand=integrand)
-                integrals.append(new_integral)
-                # Remember which form_data this integral is associated with.
-                _integral_index_to_form_data_index.append(form_data_index)
+                integrals_list[form_data_index].append(new_integral)
             # Gather functions that are enabled in this `TSFCIntegralData`.
             functions.update(f for f, enabled in zip(form_data.reduced_coefficients, intg_data.enabled_coefficients) if enabled)
             functions.update(function_tuple[form_data_index])
-        self.integrals = tuple(integrals)
-        self._integral_index_to_form_data_index = _integral_index_to_form_data_index
+        self.integrals_tuple = tuple(integrals_list)
         arguments = tsfc_form_data.arguments
         # This is which coefficient in the original form the
         # current coefficient is.
@@ -190,10 +188,9 @@ class TSFCIntegralData(object):
         self.info = TSFCIntegralDataInfo(*integral_data_key, domain_number,
                                          arguments,
                                          coefficients, coefficient_numbers)
-
-    def integral_index_to_form_data_index(self, integral_index):
-        r"""Return the form data index given an integral index."""
-        return self._integral_index_to_form_data_index[integral_index]
+    @cached_property
+    def integrals(self):
+        return list(chain(*self.integrals_tuple))
 
     def __getattr__(self, attr):
         return getattr(self.info, attr)
