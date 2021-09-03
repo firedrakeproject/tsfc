@@ -13,12 +13,9 @@ import ufl
 from ufl.algorithms import extract_arguments, extract_coefficients
 from ufl.algorithms.analysis import has_type
 from ufl.classes import Form, GeometricQuantity
-from ufl.coefficient import Coefficient
-from ufl.functionspace import FunctionSpace
 from ufl.log import GREEN
 from ufl.utils.sequences import max_degree
 
-import gem
 import gem.impero_utils as impero_utils
 
 from FIAT.reference_element import TensorProductCell
@@ -353,7 +350,6 @@ def compile_expression_dual_evaluation(expression, to_element, ufl_element, *,
     # Get the gem expression for dual evaluation and corresponding basis
     # indices needed for compilation of the expression
     evaluation, basis_indices = to_element.dual_evaluation(fn)
-
     # Build kernel body
     from tsfc.kernel_interface.firedrake_loopy import prepare_arguments
 
@@ -362,19 +358,20 @@ def compile_expression_dual_evaluation(expression, to_element, ufl_element, *,
     output, (return_expr,) = prepare_arguments((arg, *arguments), (basis_indices, tuple(chain(*argument_multiindices))), builder.scalar_type)
 
     return_indices = basis_indices + tuple(chain(*argument_multiindices))
-    # output, return_var = prepare_coefficient(Coefficient(FunctionSpace(domain, ufl_element)), "A", builder.scalar_type)
-    # return_indices = basis_indices + tuple(chain(*argument_multiindices))
-    # return_shape = tuple(i.extent for i in return_indices)
-    # # return_var = gem.Variable('A', return_shape)
-    # return_expr = gem.Indexed(return_var, return_indices)
 
     # TODO: one should apply some GEM optimisations as in assembly,
     # but we don't for now.
     evaluation, = impero_utils.preprocess_gem([evaluation])
 
     from gem.unconcatenate import unconcatenate
-    from gem.optimise import contraction
-    pairs = unconcatenate([(return_expr, contraction(evaluation))])
+    from gem.optimise import contraction, unroll_indexsum
+    pairs = unconcatenate([(return_expr, evaluation)])
+    variables, expressions = zip(*pairs)
+
+    expressions = [contraction(e) for e in
+                   unroll_indexsum(expressions,
+                                   lambda i: i.extent <= parameters["unroll_indexsum"])]
+    pairs = list(zip(variables, expressions))
     impero_c = impero_utils.compile_gem(pairs, return_indices)
     index_names = dict((idx, "p%d" % i) for (i, idx) in enumerate(basis_indices))
     # Handle kernel interface requirements
