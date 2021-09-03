@@ -185,6 +185,11 @@ def _to_str_componenttensor(node, ctx, prec):
     return to_str(node.children[0], ctx) + '|' + ','.join(ctx.index(i) for i in node.multiindex)
 
 
+@_to_str.register(gem.Delta)
+def _to_str_delta(node, ctx, prec):
+    return 'δ_{' + ','.join(map(ctx.index, (node.i, node.j))) + '}'
+
+
 @_to_str.register(gem.Sum)
 def _to_str_sum(node, ctx, prec):
     children = [to_str(child, ctx, prec=1) for child in node.children]
