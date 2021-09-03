@@ -161,10 +161,9 @@ class ExpressionKernelBuilder(KernelBuilderBase):
         provided by the kernel interface."""
         self.oriented, self.cell_sizes, self.tabulations = check_requirements(ir)
 
-    def set_output(self, o):
+    def set_output(self, arg):
         """Produce the kernel return argument"""
-        self.return_arg = lp.GlobalArg(o.name, dtype=self.scalar_type,
-                                       shape=o.shape)
+        self.return_arg = arg
 
     def construct_kernel(self, impero_c, index_names, first_coefficient_fake_coords):
         """Constructs an :class:`ExpressionKernel`.

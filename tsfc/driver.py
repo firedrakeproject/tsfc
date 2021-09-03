@@ -13,6 +13,8 @@ import ufl
 from ufl.algorithms import extract_arguments, extract_coefficients
 from ufl.algorithms.analysis import has_type
 from ufl.classes import Form, GeometricQuantity
+from ufl.coefficient import Coefficient
+from ufl.functionspace import FunctionSpace
 from ufl.log import GREEN
 from ufl.utils.sequences import max_degree
 
@@ -353,19 +355,31 @@ def compile_expression_dual_evaluation(expression, to_element, ufl_element, *,
     evaluation, basis_indices = to_element.dual_evaluation(fn)
 
     # Build kernel body
+    from tsfc.kernel_interface.firedrake_loopy import prepare_arguments
+
+    arg = ufl.Argument(ufl.FunctionSpace(domain, ufl_element),
+                       number=1 + len(arguments))
+    output, (return_expr,) = prepare_arguments((arg, *arguments), (basis_indices, tuple(chain(*argument_multiindices))), builder.scalar_type)
+
     return_indices = basis_indices + tuple(chain(*argument_multiindices))
-    return_shape = tuple(i.extent for i in return_indices)
-    return_var = gem.Variable('A', return_shape)
-    return_expr = gem.Indexed(return_var, return_indices)
+    # output, return_var = prepare_coefficient(Coefficient(FunctionSpace(domain, ufl_element)), "A", builder.scalar_type)
+    # return_indices = basis_indices + tuple(chain(*argument_multiindices))
+    # return_shape = tuple(i.extent for i in return_indices)
+    # # return_var = gem.Variable('A', return_shape)
+    # return_expr = gem.Indexed(return_var, return_indices)
 
     # TODO: one should apply some GEM optimisations as in assembly,
     # but we don't for now.
     evaluation, = impero_utils.preprocess_gem([evaluation])
-    impero_c = impero_utils.compile_gem([(return_expr, evaluation)], return_indices)
+
+    from gem.unconcatenate import unconcatenate
+    from gem.optimise import contraction
+    pairs = unconcatenate([(return_expr, contraction(evaluation))])
+    impero_c = impero_utils.compile_gem(pairs, return_indices)
     index_names = dict((idx, "p%d" % i) for (i, idx) in enumerate(basis_indices))
     # Handle kernel interface requirements
     builder.register_requirements([evaluation])
-    builder.set_output(return_var)
+    builder.set_output(output)
     # Build kernel tuple
     return builder.construct_kernel(impero_c, index_names, first_coefficient_fake_coords)
 
