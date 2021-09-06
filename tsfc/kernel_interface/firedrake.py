@@ -7,9 +7,9 @@ from ufl import Coefficient, MixedElement as ufl_MixedElement, FunctionSpace, Fi
 import coffee.base as coffee
 
 import gem
+from gem.flop_count import count_flops
 from gem.node import traversal
 from gem.optimise import remove_componenttensors as prune
-from gem.flop_count import count_flops
 
 from tsfc.finatinterface import create_element
 from tsfc.kernel_interface.common import KernelBuilderBase as _KernelBuilderBase, KernelBuilderMixin, get_index_names
@@ -135,7 +135,8 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
     def __init__(self, integral_data_info, scalar_type, fem_scalar_type,
                  dont_split=(), function_replace_map={}, diagonal=False):
         """Initialise a kernel builder."""
-        KernelBuilderBase.__init__(self, scalar_type, integral_data_info.integral_type.startswith("interior_facet"))
+        integral_type = integral_data_info.integral_type
+        KernelBuilderBase.__init__(self, scalar_type, integral_type.startswith("interior_facet"))
         self.fem_scalar_type = fem_scalar_type
 
         self.diagonal = diagonal
@@ -147,7 +148,6 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         self.dont_split = frozenset(function_replace_map[f] for f in dont_split if f in function_replace_map)
 
         # Facet number
-        integral_type = integral_data_info.integral_type
         if integral_type in ['exterior_facet', 'exterior_facet_vert']:
             facet = gem.Variable('facet', (1,))
             self._entity_number = {None: gem.VariableIndex(gem.Indexed(facet, (0,)))}
@@ -160,13 +160,12 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         elif integral_type == 'interior_facet_horiz':
             self._entity_number = {'+': 1, '-': 0}
 
+        self.arguments = integral_data_info.arguments
+        self.set_arguments(self.arguments)
         self.set_coordinates(integral_data_info.domain)
         self.set_cell_sizes(integral_data_info.domain)
         self.set_coefficients(integral_data_info.coefficients)
-
         self.integral_data_info = integral_data_info
-        self.arguments = integral_data_info.arguments
-        self.local_tensor, self.return_variables, self.argument_multiindices = self.set_arguments(self.arguments)
 
     def set_arguments(self, arguments):
         """Process arguments.
@@ -189,7 +188,9 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
                                                            self.scalar_type,
                                                            interior_facet=self.interior_facet,
                                                            diagonal=self.diagonal)
-        return local_tensor, return_variables, argument_multiindices
+        self.local_tensor = local_tensor
+        self.return_variables = return_variables
+        self.argument_multiindices = argument_multiindices
 
     def set_coordinates(self, domain):
         """Prepare the coordinate field.
@@ -248,25 +249,22 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         provided by the kernel interface."""
         return check_requirements(ir)
 
-    def construct_kernel(self, kernel_name, ctx, external_data_numbers=(), external_data_parts=()):
+    def construct_kernel(self, name, ctx, external_data_numbers=(), external_data_parts=()):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument
         list for assembly kernels.
 
-        :arg kernel_name: function name
-        :arg ctx: builder context
+        :arg name: kernel name
+        :arg ctx: kernel builder context to get impero_c from
         :kwarg external_data_numbers: see :class:`Kernel`.
         :kwarg external_data_parts: see :class:`Kernel.`
         :returns: :class:`Kernel` object
         """
-        info = self.integral_data_info
-
         impero_c, oriented, needs_cell_sizes, tabulations = self.compile_gem(ctx)
-
         if impero_c is None:
-            return self.construct_empty_kernel(kernel_name)
-
+            return self.construct_empty_kernel(name)
+        info = self.integral_data_info
         args = [self.local_tensor, self.coordinates_arg]
         if oriented:
             args.append(cell_orientations_coffee_arg)
@@ -281,12 +279,12 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
             args.append(coffee.Decl("unsigned int",
                                     coffee.Symbol("facet", rank=(2,)),
                                     qualifiers=["const"]))
-        for name, shape in tabulations:
+        for name_, shape in tabulations:
             args.append(coffee.Decl(self.scalar_type, coffee.Symbol(
-                name, rank=shape), qualifiers=["const"]))
+                name_, rank=shape), qualifiers=["const"]))
         index_names = get_index_names(ctx['quadrature_indices'], self.argument_multiindices, ctx['index_cache'])
         body = generate_coffee(impero_c, index_names, self.scalar_type)
-        ast = KernelBuilderBase.construct_kernel(self, kernel_name, args, body)
+        ast = KernelBuilderBase.construct_kernel(self, name, args, body)
         flop_count = count_flops(impero_c)  # Estimated total flops for this kernel.
 
         return Kernel(ast=ast,
@@ -300,12 +298,12 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
                       needs_cell_sizes=needs_cell_sizes,
                       tabulations=tabulations,
                       flop_count=flop_count,
-                      name=kernel_name)
+                      name=name)
 
-    def construct_empty_kernel(self, kernel_name):
+    def construct_empty_kernel(self, name):
         """Return None, since Firedrake needs no empty kernels.
 
-        :arg kernel_name: function name
+        :arg name: function name
         :returns: None
         """
         return None

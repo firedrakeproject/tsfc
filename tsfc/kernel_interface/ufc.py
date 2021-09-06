@@ -25,9 +25,10 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
 
     def __init__(self, integral_data_info, scalar_type, fem_scalar_type, diagonal=False):
         """Initialise a kernel builder."""
+        integral_type = integral_data_info.integral_type
         if diagonal:
             raise NotImplementedError("Assembly of diagonal not implemented yet, sorry")
-        KernelBuilder.__init__(self, scalar_type, integral_data_info.integral_type.startswith("interior_facet"))
+        KernelBuilder.__init__(self, scalar_type, integral_type.startswith("interior_facet"))
         self.fem_scalar_type = fem_scalar_type
 
         self.coordinates_args = None
@@ -41,7 +42,6 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         else:
             self._cell_orientations = (gem.Variable("cell_orientation", ()),)
 
-        integral_type = integral_data_info.integral_type
         if integral_type == "exterior_facet":
             self._entity_number = {None: gem.VariableIndex(gem.Variable("facet", ()))}
         elif integral_type == "interior_facet":
@@ -52,13 +52,12 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         elif integral_type == "vertex":
             self._entity_number = {None: gem.VariableIndex(gem.Variable("vertex", ()))}
 
+        self.arguments = integral_data_info.arguments
+        self.set_arguments(self.arguments)
         self.set_coordinates(integral_data_info.domain)
         self.set_cell_sizes(integral_data_info.domain)
         self.set_coefficients(integral_data_info.coefficients)
-
         self.integral_data_info = integral_data_info
-        self.arguments = integral_data_info.arguments
-        self.local_tensor, self.return_variables, self.argument_multiindices = self.set_arguments(self.arguments)
 
     def set_arguments(self, arguments):
         """Process arguments.
@@ -73,7 +72,9 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         local_tensor, prepare, return_variables = prepare_arguments(
             arguments, argument_multiindices, self.scalar_type, interior_facet=self.interior_facet)
         self.apply_glue(prepare)
-        return local_tensor, return_variables, argument_multiindices
+        self.local_tensor = local_tensor
+        self.return_variables = return_variables
+        self.argument_multiindices = argument_multiindices
 
     def set_coordinates(self, domain):
         """Prepare the coordinate field.
@@ -140,13 +141,14 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         provided by the kernel interface."""
         return None, None, None
 
-    def construct_kernel(self, name, ctx, external_data_numbers=(), external_data_parts=(), quadrature_rule=None):
+    def construct_kernel(self, name, ctx, external_data_numbers=(), external_data_parts=()):
         """Construct a fully built kernel function.
 
         This function contains the logic for building the argument
         list for assembly kernels.
 
-        :arg name: function name
+        :arg name: kernel name
+        :arg ctx: kernel builder context to get impero_c from
         :arg external_data_numbers: ignored
         :arg external_data_parts: ignored
         :arg quadrature rule: quadrature rule (not used, stubbed out for Themis integration)
@@ -154,14 +156,14 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         """
         from tsfc.coffee import generate as generate_coffee
 
-        impero_c, oriented, needs_cell_sizes, tabulations = self.compile_gem(ctx)
+        impero_c, _, _, _ = self.compile_gem(ctx)
         if impero_c is None:
             return self.construct_empty_kernel(name)
         index_names = get_index_names(ctx['quadrature_indices'], self.argument_multiindices, ctx['index_cache'])
         body = generate_coffee(impero_c, index_names, scalar_type=self.scalar_type)
         return self._construct_kernel_from_body(name, body)
 
-    def _construct_kernel_from_body(self, name, body, quadrature_rule):
+    def _construct_kernel_from_body(self, name, body):
         """Construct a fully built kernel function.
 
         This function contains the logic for building the argument

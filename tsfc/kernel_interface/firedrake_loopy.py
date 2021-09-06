@@ -6,8 +6,8 @@ from functools import partial
 from ufl import Coefficient, MixedElement as ufl_MixedElement, FunctionSpace, FiniteElement
 
 import gem
-from gem.optimise import remove_componenttensors as prune
 from gem.flop_count import count_flops
+from gem.optimise import remove_componenttensors as prune
 
 import loopy as lp
 
@@ -211,7 +211,8 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
     def __init__(self, integral_data_info, scalar_type, fem_scalar_type,
                  dont_split=(), function_replace_map={}, diagonal=False):
         """Initialise a kernel builder."""
-        KernelBuilderBase.__init__(self, scalar_type, integral_data_info.integral_type.startswith("interior_facet"))
+        integral_type = integral_data_info.integral_type
+        KernelBuilderBase.__init__(self, scalar_type, integral_type.startswith("interior_facet"))
         self.fem_scalar_type = fem_scalar_type
 
         self.diagonal = diagonal
@@ -223,7 +224,6 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         self.dont_split = frozenset(function_replace_map[f] for f in dont_split if f in function_replace_map)
 
         # Facet number
-        integral_type = integral_data_info.integral_type
         if integral_type in ['exterior_facet', 'exterior_facet_vert']:
             facet = gem.Variable('facet', (1,))
             self._entity_number = {None: gem.VariableIndex(gem.Indexed(facet, (0,)))}
@@ -236,13 +236,12 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         elif integral_type == 'interior_facet_horiz':
             self._entity_number = {'+': 1, '-': 0}
 
+        self.arguments = integral_data_info.arguments
+        self.set_arguments(self.arguments)
         self.set_coordinates(integral_data_info.domain)
         self.set_cell_sizes(integral_data_info.domain)
         self.set_coefficients(integral_data_info.coefficients)
-
         self.integral_data_info = integral_data_info
-        self.arguments = integral_data_info.arguments
-        self.local_tensor, self.return_variables, self.argument_multiindices = self.set_arguments(self.arguments)
 
     def set_arguments(self, arguments):
         """Process arguments.
@@ -265,7 +264,9 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
                                                            self.scalar_type,
                                                            interior_facet=self.interior_facet,
                                                            diagonal=self.diagonal)
-        return local_tensor, return_variables, argument_multiindices
+        self.local_tensor = local_tensor
+        self.return_variables = return_variables
+        self.argument_multiindices = argument_multiindices
 
     def set_coordinates(self, domain):
         """Prepare the coordinate field.
@@ -324,25 +325,22 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         provided by the kernel interface."""
         return check_requirements(ir)
 
-    def construct_kernel(self, kernel_name, ctx, external_data_numbers=(), external_data_parts=()):
+    def construct_kernel(self, name, ctx, external_data_numbers=(), external_data_parts=()):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument
         list for assembly kernels.
 
-        :arg kernel_name: function name
-        :arg ctx: builder context
+        :arg name: kernel name
+        :arg ctx: kernel builder context to get impero_c from
         :kwarg external_data_numbers: see :class:`Kernel`.
         :kwarg external_data_parts: see :class:`Kernel.`
         :returns: :class:`Kernel` object
         """
-        info = self.integral_data_info
-
         impero_c, oriented, needs_cell_sizes, tabulations = self.compile_gem(ctx)
-
         if impero_c is None:
-            return self.construct_empty_kernel(kernel_name)
-
+            return self.construct_empty_kernel(name)
+        info = self.integral_data_info
         args = [self.local_tensor, self.coordinates_arg]
         if oriented:
             args.append(self.cell_orientations_loopy_arg)
@@ -353,12 +351,11 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
             args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(1,)))
         elif info.integral_type in ["interior_facet", "interior_facet_vert"]:
             args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(2,)))
-        for name, shape in tabulations:
-            args.append(lp.GlobalArg(name, dtype=self.scalar_type, shape=shape))
+        for name_, shape in tabulations:
+            args.append(lp.GlobalArg(name_, dtype=self.scalar_type, shape=shape))
         index_names = get_index_names(ctx['quadrature_indices'], self.argument_multiindices, ctx['index_cache'])
-        ast = generate_loopy(impero_c, args, self.scalar_type, kernel_name, index_names)
+        ast = generate_loopy(impero_c, args, self.scalar_type, name, index_names)
         flop_count = count_flops(impero_c)  # Estimated total flops for this kernel.
-
         return Kernel(ast=ast,
                       integral_type=info.integral_type,
                       subdomain_id=info.subdomain_id,
@@ -370,12 +367,12 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
                       needs_cell_sizes=needs_cell_sizes,
                       tabulations=tabulations,
                       flop_count=flop_count,
-                      name=kernel_name)
+                      name=name)
 
-    def construct_empty_kernel(self, kernel_name):
+    def construct_empty_kernel(self, name):
         """Return None, since Firedrake needs no empty kernels.
 
-        :arg kernel_name: function name
+        :arg name: function name
         :returns: None
         """
         return None
@@ -410,9 +407,9 @@ def prepare_coefficient(ufl_element, name, scalar_type, interior_facet=False):
     if not interior_facet:
         expression = gem.reshape(gem.Variable(name, (size,)), shape)
     else:
-        varexp = gem.Variable(name, (2 * size,))
+        varexp = gem.Variable(name, (2*size,))
         plus = gem.view(varexp, slice(size))
-        minus = gem.view(varexp, slice(size, 2 * size))
+        minus = gem.view(varexp, slice(size, 2*size))
         expression = (gem.reshape(plus, shape), gem.reshape(minus, shape))
         size = size * 2
     funarg = lp.GlobalArg(name, dtype=scalar_type, shape=(size,))
@@ -433,6 +430,7 @@ def prepare_arguments(arguments, multiindices, scalar_type, interior_facet=False
          expressions - GEM expressions referring to the argument
                        tensor
     """
+
     assert isinstance(interior_facet, bool)
 
     if len(arguments) == 0:
