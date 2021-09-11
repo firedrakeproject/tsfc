@@ -116,6 +116,20 @@ def replace_indices_indexed(node, self, subst):
         # Inline ComponentTensor and augment the substitution rules
         substitute.update(zip(child.multiindex, multiindex))
         return self(child.children[0], tuple(sorted(substitute.items())))
+    elif isinstance(child, Literal):
+        # Reduce rank of Literals which are constant along an axis.
+        array = child.array
+        multiindex = tuple(
+            0 if (isinstance(index, Index) and
+                  numpy.allclose(array, array.mean(axis=i)))
+            else index
+            for i, index in enumerate(multiindex)
+        )
+        array = array[tuple(i if isinstance(i, int)
+                            else slice(None)
+                            for i in multiindex)]
+        return Indexed(Literal(array), (i for i in multiindex
+                                        if not isinstance(i, int)))
     else:
         # Replace indices
         new_child = self(child, subst)
