@@ -300,24 +300,24 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
             self.coefficient_args.append(self._coefficient(c, "w_%d" % i))
 
     def set_external_data(self, elements):
-        """Prepare external data structures.
-
-        :arg elements: a tuple of `ufl.FiniteElement`s.
-        :returns: gem expressions for the data represented by elements.
-
-        The retuned gem expressions are to be used in the operations
-        applied to the gem expressions obtained by compiling UFL before
-        compiling gem. The users are responsible for bridging these
-        gem expressions and actual data by setting correct values in
-        `external_data_numbers` and `external_data_parts` in the kernel.
-        """
-        if any(type(element) == ufl_MixedElement for element in elements):
-            raise ValueError("Unable to handle `MixedElement`s.")
-        expressions = []
+        _reverse_map = []
+        _elements = []
         for i, element in enumerate(elements):
+            if type(element) == ufl_MixedElement:
+                sub_elements = element.sub_elements()
+                _elements.extend(sub_elements)
+                _reverse_map.extend([[i, j] for j in range(len(sub_elements))])
+            else:
+                _elements.append(element)
+                _reverse_map.append([i, None])
+        expressions = []
+        external_data_reverse_map = {}
+        for i, element in enumerate(_elements):
             funarg, expression = prepare_coefficient(element, "e_%d" % i, self.scalar_type, interior_facet=self.interior_facet)
             self.external_data_args.append(funarg)
             expressions.append(expression)
+            external_data_reverse_map[expression.children[0].children[0]] = (i, _reverse_map[i][0], _reverse_map[i][1])
+        self.external_data_reverse_map = external_data_reverse_map
         return tuple(expressions)
 
     def register_requirements(self, ir):
@@ -325,7 +325,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         provided by the kernel interface."""
         return check_requirements(ir)
 
-    def construct_kernel(self, name, ctx, external_data_numbers=(), external_data_parts=()):
+    def construct_kernel(self, name, ctx, external_data_numbers=(), external_data_parts=(), lgmap_temp=()):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument
@@ -346,7 +346,8 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
             args.append(self.cell_orientations_loopy_arg)
         if needs_cell_sizes:
             args.append(self.cell_sizes_arg)
-        args.extend(self.coefficient_args + self.external_data_args)
+        args.extend(self.coefficient_args)
+        args.extend([self.external_data_args[i] for i in lgmap_temp])
         if info.integral_type in ["exterior_facet", "exterior_facet_vert"]:
             args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(1,)))
         elif info.integral_type in ["interior_facet", "interior_facet_vert"]:
