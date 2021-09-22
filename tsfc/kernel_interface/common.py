@@ -207,11 +207,31 @@ class KernelBuilderMixin(object):
         # Construct ImperoC
         assignments = list(zip(return_variables, expressions))
         index_ordering = get_index_ordering(ctx['quadrature_indices'], return_variables)
+        # Collect gem variables actually enabled.
+        variable_set = impero_utils.collect_variables(assignments)
+        self.compute_enabled_parts(variable_set, "external_data")
         try:
             impero_c = impero_utils.compile_gem(assignments, index_ordering, remove_zeros=True)
         except impero_utils.NoopError:
             impero_c = None
         return impero_c, oriented, needs_cell_sizes, tabulations
+
+    def compute_enabled_parts(self, variable_set, object_type):
+        rmap = getattr(self, object_type + "_reverse_map")
+        # number of original unsplit coefficients/external_data
+        n = max([number for _, (_, number, _) in rmap.items()]) + 1 if rmap else 0
+        enabled = [None for _ in range(n)]
+        for _, (_, number, index) in rmap.items():
+            if index is not None:
+                # MixedElement
+                enabled[number] = []
+        for v in variable_set:
+            if v in rmap:
+                _, number, index = rmap[v]
+                if index is not None:
+                    # MixedElement
+                    enabled[number].append(index)
+        setattr(self, object_type + "_enabled_parts", tuple(map(lambda a: sorted(a) if a is not None else None, enabled)))
 
     @cached_property
     def argument_multiindices_dummy(self):

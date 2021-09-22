@@ -38,6 +38,16 @@ def preprocess_gem(expressions, replace_delta=True, remove_componenttensors=True
     return expressions
 
 
+def collect_variables(assignments):
+    """Collect Variable objects that are actually used in assignments."""
+    expressions = [expression for variable, expression in assignments]
+    vset = set()
+    for node in traversal(expressions):
+        if isinstance(node, gem.Variable):
+            vset.add(node)
+    return tuple(vset)
+
+
 def compile_gem(assignments, prefix_ordering, remove_zeros=False,
                 emit_return_accumulate=True):
     """Compiles GEM to Impero.
