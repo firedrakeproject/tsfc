@@ -233,7 +233,10 @@ class KernelBuilderMixin(object):
                 if index is not None:
                     # MixedElement
                     enabled[number].append(index)
-        # 
+        # Compression of list of coefficients/external_data works, but
+        # sometimes gives core dump error when testing on Firedrake.
+        # Until this issue is sorted out, we use trivial (not compressed)
+        # lists.
         for _, (_, number, index) in rmap.items():
             if index is not None and index not in enabled[number]:
                 enabled[number].append(index)

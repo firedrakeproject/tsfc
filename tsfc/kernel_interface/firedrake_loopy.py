@@ -325,7 +325,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         provided by the kernel interface."""
         return check_requirements(ir)
 
-    def construct_kernel(self, name, ctx, external_data_numbers=(), external_data_parts=(), lgmap_temp=()):
+    def construct_kernel(self, name, ctx, external_data_numbers=()):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument
@@ -347,13 +347,12 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         if needs_cell_sizes:
             args.append(self.cell_sizes_arg)
         args.extend(self.coefficient_args)
-        args.extend([self.external_data_args[i] for i in lgmap_temp])
-        #ii = []
-        #for _, (i, number, index) in self.external_data_reverse_map.items():
-        #    if index is None or index in self.external_data_enabled_parts[number]:
-        #        ii.append(i)
-        #args.extend([self.external_data_args[i] for i in sorted(ii)])
-        #print("ii::", sorted(ii))
+        ii = []
+        for _, (i, number, index) in self.external_data_reverse_map.items():
+            if index is None or index in self.external_data_enabled_parts[number]:
+                ii.append(i)
+        args.extend([self.external_data_args[i] for i in sorted(ii)])
+        print("ii::", sorted(ii))
         if info.integral_type in ["exterior_facet", "exterior_facet_vert"]:
             args.append(lp.GlobalArg("facet", dtype=numpy.uint32, shape=(1,)))
         elif info.integral_type in ["interior_facet", "interior_facet_vert"]:
@@ -369,8 +368,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
                       domain_number=info.domain_number,
                       coefficient_numbers=info.coefficient_numbers,
                       external_data_numbers=external_data_numbers,
-                      #external_data_parts=self.external_data_enabled_parts,
-                      external_data_parts=external_data_parts,
+                      external_data_parts=self.external_data_enabled_parts,
                       oriented=oriented,
                       needs_cell_sizes=needs_cell_sizes,
                       tabulations=tabulations,
