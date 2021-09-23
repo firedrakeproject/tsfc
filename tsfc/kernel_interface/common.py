@@ -197,6 +197,7 @@ class KernelBuilderMixin(object):
         options = dict(reduce(operator.and_,
                               [mode.finalise_options.items()
                                for mode in mode_irs.keys()]))
+        #print("expressions::", expressions)
         expressions = impero_utils.preprocess_gem(expressions, **options)
 
         # Let the kernel interface inspect the optimised IR to register
@@ -209,6 +210,7 @@ class KernelBuilderMixin(object):
         index_ordering = get_index_ordering(ctx['quadrature_indices'], return_variables)
         # Collect gem variables actually enabled.
         variable_set = impero_utils.collect_variables(assignments)
+        print("variable_set", variable_set)
         self.compute_enabled_parts(variable_set, "external_data")
         try:
             impero_c = impero_utils.compile_gem(assignments, index_ordering, remove_zeros=True)
@@ -231,6 +233,10 @@ class KernelBuilderMixin(object):
                 if index is not None:
                     # MixedElement
                     enabled[number].append(index)
+        # 
+        for _, (_, number, index) in rmap.items():
+            if index is not None and index not in enabled[number]:
+                enabled[number].append(index)
         setattr(self, object_type + "_enabled_parts", tuple(map(lambda a: sorted(a) if a is not None else None, enabled)))
 
     @cached_property
