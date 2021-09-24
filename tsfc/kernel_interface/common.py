@@ -197,7 +197,6 @@ class KernelBuilderMixin(object):
         options = dict(reduce(operator.and_,
                               [mode.finalise_options.items()
                                for mode in mode_irs.keys()]))
-        #print("expressions::", expressions)
         expressions = impero_utils.preprocess_gem(expressions, **options)
 
         # Let the kernel interface inspect the optimised IR to register
