@@ -30,7 +30,7 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'MathFunction', 'MinValue', 'MaxValue', 'Comparison',
            'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
-           'IndexSum', 'ListTensor', 'Concatenate', 'Delta',
+           'IndexSum', 'ListTensor', 'Concatenate', 'TensorConcat', 'Delta',
            'index_sum', 'partial_indexed', 'reshape', 'view',
            'indices', 'as_gem', 'FlexiblyIndexed',
            'Inverse', 'Solve']
@@ -782,6 +782,26 @@ class Concatenate(Node):
     @property
     def shape(self):
         return (int(sum(numpy.prod(child.shape, dtype=int) for child in self.children)),)
+
+
+class TensorConcat(Node):
+    __slots__ = ('splits', 'children', 'shape')
+    __front__ = ('splits',)
+    def __new__(cls, splits, *children):
+        splits = tuple(splits)
+        assert len(splits) == len(children)
+        self = super().__new__(cls)
+        self.children = tuple(children)
+        flat_shapes = []
+        for split, child in zip(splits, children):
+            assert split < len(child.shape)
+            a, b = child.shape[:split], child.shape[split:]
+            a = int(numpy.prod(a, dtype=int))
+            b = int(numpy.prod(b, dtype=int))
+            flat_shapes.append((a, b))
+        self.shape = tuple(map(sum, zip(*flat_shapes)))
+        self.splits = splits
+        return self
 
 
 class Delta(Scalar, Terminal):

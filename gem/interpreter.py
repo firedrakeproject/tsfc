@@ -344,6 +344,30 @@ def _evaluate_concatenate(e, self):
     return Result(arrs, fids)
 
 
+@_evaluate.register(gem.TensorConcat)
+def _evaluate_tensor_concat(e, self):
+    ops = [self(o) for o in e.children]
+    fids = tuple(OrderedDict.fromkeys(itertools.chain(*(o.fids for o  in ops))))
+    fshape = tuple(i.extent for i in fids)
+    arrs = []
+    for split, o in zip(e.splits, ops):
+        arr = numpy.empty(fshape + o.shape)
+        arr[:] = o.broadcast(fids)
+        a, b = o.shape[:split], o.shape[split:]
+        a = int(numpy.prod(a, dtype=int))
+        b = int(numpy.prod(b, dtype=int))
+        arr = arr.reshape(arr.shape[:arr.ndim-len(o.shape)] + (a, b))
+        arrs.append(arr)
+    shapes = numpy.array([a.shape for a in arrs])
+    out = numpy.zeros(numpy.sum(shapes, axis=0), dtype=arrs[0].dtype)
+    r, c = 0, 0
+    for arr, (rr, cc) in zip(arrs, shapes):
+        out[r:r+rr, c:c+cc] = arr
+        r += rr
+        c += cc
+    return Result(out, fids)
+
+
 def evaluate(expressions, bindings=None):
     """Evaluate some GEM expressions given variable bindings.
 
