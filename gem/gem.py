@@ -787,6 +787,7 @@ class Concatenate(Node):
 class TensorConcat(Node):
     __slots__ = ('splits', 'children', 'shape')
     __front__ = ('splits',)
+
     def __new__(cls, splits, *children):
         splits = tuple(splits)
         assert len(splits) == len(children)
@@ -794,7 +795,7 @@ class TensorConcat(Node):
         self.children = tuple(children)
         flat_shapes = []
         for split, child in zip(splits, children):
-            assert split < len(child.shape)
+            assert split <= len(child.shape)
             a, b = child.shape[:split], child.shape[split:]
             a = int(numpy.prod(a, dtype=int))
             b = int(numpy.prod(b, dtype=int))

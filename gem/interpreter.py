@@ -361,6 +361,7 @@ def _evaluate_tensor_concat(e, self):
     shapes = numpy.array([a.shape for a in arrs])
     out = numpy.zeros(numpy.sum(shapes, axis=0), dtype=arrs[0].dtype)
     r, c = 0, 0
+    # TODO: not general
     for arr, (rr, cc) in zip(arrs, shapes):
         out[r:r+rr, c:c+cc] = arr
         r += rr
