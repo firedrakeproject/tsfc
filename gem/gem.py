@@ -249,9 +249,15 @@ class Variable(Terminal):
 
     __slots__ = ('name', 'shape')
     __front__ = ('name', 'shape')
+    id = 0
 
     def __init__(self, name, shape):
         self.name = name
+        Variable.id += 1
+        if not name:
+            self.name = "T%d" % Variable.id
+        else:
+            self.name = name
         self.shape = shape
 
 
@@ -834,10 +840,11 @@ class Solve(Node):
 
     Represents the X obtained by solving AX = B.
     """
-    __slots__ = ('children', 'shape', 'name', 'matfree', '_Aonp', '_Aonx')
-    __back__ = ('name', 'matfree', '_Aonp', '_Aonx')
+    __slots__ = ('children', 'shape', 'matfree', 'Aonp', 'Aonx', 'name', )
+    __back__ = ('matfree', 'Aonp', 'Aonx', 'name', )
+    id = 0
 
-    def __init__(self, A, B, name = None, matfree=False, Aonp=None, Aonx=None):
+    def __init__(self, A, B, matfree=False, Aonp=None, Aonx=None, name=""):
         # Shape requirements
         assert B.shape
         assert len(A.shape) == 2
@@ -847,16 +854,21 @@ class Solve(Node):
         self.children = (A, B)
         self.shape = A.shape[1:] + B.shape[1:]
         self.matfree = matfree
-        self._Aonp = Aonp
-        self._Aonx = Aonx
-        self.name = name
+        self.Aonp = Aonp
+        self.Aonx = Aonx
+        if not name:
+            Solve.id += 1
+            self.name = "S%d" % Solve.id
+        else:
+            self.name = name
 
 
 class Action(Node):
-    __slots__ = ('children', 'shape', 'name', 'pick_op')
-    __back__ = ('name', 'pick_op')
+    __slots__ = ('children', 'shape', 'pick_op', 'name')
+    __back__ = ('pick_op', 'name')
+    id = 0
 
-    def __new__(cls, A, B, name, pick_op):
+    def __new__(cls, A, B, pick_op, name=""):
         # Shape requirements
         assert B.shape
         assert len(A.shape) == 2
@@ -868,7 +880,11 @@ class Action(Node):
             self.shape = A.shape[:1] + B.shape[1:]
         else:
             self.shape = A.shape[1:] + B.shape[1:]
-        self.name = name
+        if not name:
+            Action.id += 1
+            self.name = "A%d" % Action.id
+        else:
+            self.name = name
         self.pick_op = pick_op
         return self
 
