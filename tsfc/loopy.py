@@ -23,7 +23,6 @@ from contextlib import contextmanager
 
 global matfree_solve_knl
 matfree_solve_knl = None
-maxtype = partial(numpy.find_common_type, [])
 
 
 @singledispatch
@@ -215,14 +214,16 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     # Create arguments
     data = list(args)
     for i, (temp, dtype) in enumerate(assign_dtypes(impero_c.temporaries, scalar_type)):
-        if not isinstance(temp, gem.Action) and not (isinstance(temp, gem.Solve) and temp.matfree):
-            name = ctx.name_gen("t_"+kernel_name)
-            if isinstance(temp, gem.Constant):
-                data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=dtype, initializer=temp.array, address_space=lp.AddressSpace.LOCAL, read_only=True))
-            else:
-                shape = tuple([i.extent for i in ctx.indices[temp]]) + temp.shape
-                data.append(lp.TemporaryVariable(name, shape=shape, dtype=dtype, initializer=None, address_space=lp.AddressSpace.LOCAL, read_only=False, target=lp.CTarget()))
-            ctx.gem_to_pymbolic[temp] = p.Variable(name)
+        if isinstance(temp, gem.Action) or (isinstance(temp, gem.Solve) and temp.matfree):
+            name = temp.name
+        else:
+            name = "t%d" % i 
+        if isinstance(temp, gem.Constant):
+            data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=dtype, initializer=temp.array, address_space=lp.AddressSpace.LOCAL, read_only=True))
+        else:
+            shape = tuple([i.extent for i in ctx.indices[temp]]) + temp.shape
+            data.append(lp.TemporaryVariable(name, shape=shape, dtype=dtype, initializer=None, address_space=lp.AddressSpace.LOCAL, read_only=False, target=lp.CTarget()))
+        ctx.gem_to_pymbolic[temp] = p.Variable(name)
 
     # Create instructions
     instructions = statement(impero_c.tree, ctx)
