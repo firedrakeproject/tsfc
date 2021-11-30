@@ -887,6 +887,10 @@ class Action(Node):
             self.name = name
         self.pick_op = pick_op
         return self
+    
+    def get_hash(self):
+        return hash((type(self), self.children, self.shape, self.pick_op, self.name))
+
 
 
 def unique(indices):
