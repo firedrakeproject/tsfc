@@ -240,7 +240,7 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
 
     # Create loopy kernel
     prg = lp.make_function(domains, scheduled_instructions, data, name=kernel_name, target=lp.CTarget(),
-                           seq_dependencies=True, silenced_warnings=["summing_if_branches_ops"],
+                           seq_dependencies=True, silenced_warnings=["summing_if_branches_ops", "single_writer_after_creation", "unused_inames"],
                            lang_version=(2018, 2))
 
     # Prevent loopy interchange by loopy
