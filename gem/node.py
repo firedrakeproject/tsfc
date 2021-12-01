@@ -130,10 +130,7 @@ def post_traversal(expression_dags, reverse=False):
     for root in expression_dags:
         if root not in seen:
             seen.add(root)
-            if reverse:
-                lifo.append((root, list(reversed(root.children))))
-            else:
-                lifo.append((root, list(root.children)))
+            lifo.append((root, list(root.children)))
 
     while lifo:
         node, deps = lifo[-1]

@@ -253,10 +253,7 @@ class Variable(Terminal):
 
     def __init__(self, name, shape):
         Variable.id += 1
-        if not name:
-            self.name = "T%d" % Variable.id
-        else:
-            self.name = name
+        self.name = "T%d" % Variable.id if not name else name
         self.shape = shape
 
 
