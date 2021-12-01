@@ -97,13 +97,14 @@ def assign_dtypes(expressions, scalar_type):
 
 
 class LoopyContext(object):
-    def __init__(self, target=None):
+    def __init__(self, kernel_name,  target=None):
         self.indices = {}  # indices for declarations and referencing values, from ImperoC
         self.active_indices = {}  # gem index -> pymbolic variable
         self.index_extent = OrderedDict()  # pymbolic variable for indices -> extent
         self.gem_to_pymbolic = {}  # gem node -> pymbolic variable
         self.name_gen = UniqueNameGenerator()
         self.target = target
+        self.kernel_name = kernel_name
 
     def fetch_multiindex(self, multiindex):
         indices = []
@@ -183,7 +184,7 @@ def active_indices(mapping, ctx):
 
 
 def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_names=[],
-             return_increments=True):
+             return_increments=True, return_ctx=False):
     """Generates loopy code.
 
     :arg impero_c: ImperoC tuple with Impero AST and other data
@@ -192,9 +193,10 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     :arg kernel_name: function name of the kernel
     :arg index_names: pre-assigned index names
     :arg return_increments: Does codegen for Return nodes increment the lvalue, or assign?
+    :arg return_ctx: Is the ctx returned alongside the generated kernel?
     :returns: loopy kernel
     """
-    ctx = LoopyContext(target=target)
+    ctx = LoopyContext(kernel_name, target=target)
     ctx.indices = impero_c.indices
     ctx.index_names = defaultdict(lambda: "i", index_names)
     ctx.epsilon = numpy.finfo(scalar_type).resolution
@@ -204,7 +206,7 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     # Create arguments
     data = list(args)
     for i, (temp, dtype) in enumerate(assign_dtypes(impero_c.temporaries, scalar_type)):
-        name = "t%d" % i
+        name = temp.name if hasattr(temp, "name") and temp.shape else "t%d" % i
         if isinstance(temp, gem.Constant):
             data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=dtype, initializer=temp.array, address_space=lp.AddressSpace.LOCAL, read_only=True))
         else:
@@ -219,14 +221,14 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     domains = create_domains(ctx.index_extent.items())
 
     # Create loopy kernel
-    knl = lp.make_function(domains, instructions, data, name=kernel_name, target=target,
-                           seq_dependencies=True, silenced_warnings=["summing_if_branches_ops"],
+    knl = lp.make_function(domains, instructions, data, name=kernel_name, target=lp.CTarget(),
+                           seq_dependencies=True, silenced_warnings=["summing_if_branches_ops", "single_writer_after_creation", "unused_inames"],
                            lang_version=(2018, 2))
 
     # Prevent loopy interchange by loopy
     knl = lp.prioritize_loops(knl, ",".join(ctx.index_extent.keys()))
 
-    return knl
+    return (knl, ctx) if return_ctx else knl
 
 
 def create_domains(indices):
@@ -238,7 +240,8 @@ def create_domains(indices):
     domains = []
     for idx, extent in indices:
         inames = isl.make_zero_and_vars([idx])
-        domains.append(((inames[0].le_set(inames[idx])) & (inames[idx].lt_set(inames[0] + extent))))
+        domains.append(isl.BasicSet(str(((inames[0].le_set(inames[idx])) &
+                                         (inames[idx].lt_set(inames[0] + extent))))))
 
     if not domains:
         domains = [isl.BasicSet("[] -> {[]}")]
