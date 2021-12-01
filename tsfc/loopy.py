@@ -330,6 +330,7 @@ def statement_evaluate(leaf, ctx):
 
         return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
     elif isinstance(expr, gem.Solve):
+        name = "mtf_solve" if expr.matfree else "solve"
         idx = ctx.pymbolic_multiindex(expr.shape)
         var = ctx.pymbolic_variable(expr)
         lhs = (SubArrayRef(idx, p.Subscript(var, idx)),)
@@ -339,7 +340,20 @@ def statement_evaluate(leaf, ctx):
             idx_reads = ctx.pymbolic_multiindex(child.shape)
             var_reads = ctx.pymbolic_variable(child)
             reads.append(SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)))
-        rhs = p.Call(p.Variable("solve"), tuple(reads))
+        rhs = p.Call(p.Variable(name), tuple(reads))
+
+        return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
+    elif isinstance(expr, gem.Action):
+        idx = ctx.pymbolic_multiindex(expr.shape)
+        var = ctx.pymbolic_variable(expr)
+        lhs = (SubArrayRef(idx, p.Subscript(var, idx)),)
+
+        reads = []
+        for child in expr.children:
+            idx_reads = ctx.pymbolic_multiindex(child.shape)
+            var_reads = ctx.pymbolic_variable(child)
+            reads.append(SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)))
+        rhs = p.Call(p.Variable("action"), tuple(reads))
 
         return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
     else:
