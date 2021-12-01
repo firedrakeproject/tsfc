@@ -21,9 +21,6 @@ from tsfc.parameters import is_complex
 
 from contextlib import contextmanager
 
-global matfree_solve_knl
-matfree_solve_knl = None
-
 
 @singledispatch
 def _assign_dtype(expression, self):
@@ -150,15 +147,15 @@ class LoopyContext(object):
             return pym, ()
 
     # Generate pym variable or subscript
-    def pymbolic_variable(self, node, name=None):
-        pym = self._gem_to_pym_var(node, name)
+    def pymbolic_variable(self, node):
+        pym = self._gem_to_pym_var(node)
         if node in self.indices:
             indices = self.fetch_multiindex(self.indices[node])
             if indices:
                 return p.Subscript(pym, indices)
         return pym
 
-    def _gem_to_pym_var(self, node, name):
+    def _gem_to_pym_var(self, node):
         try:
             pym = self.gem_to_pymbolic[node]
         except KeyError:
@@ -194,9 +191,9 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     :arg kernel_name: function name of the kernel
     :arg index_names: pre-assigned index names
     :arg return_increments: Does codegen for Return nodes increment the lvalue, or assign?
+    :arg return_ctx: Is the ctx returned alongside the generated kernel?
     :returns: loopy kernel
     """
-    from pytools import UniqueNameGenerator
     ctx = LoopyContext(kernel_name)
     ctx.indices = impero_c.indices
     ctx.index_names = defaultdict(lambda: "i", index_names)
@@ -207,7 +204,7 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     # Create arguments
     data = list(args)
     for i, (temp, dtype) in enumerate(assign_dtypes(impero_c.temporaries, scalar_type)):
-        name = temp.name if hasattr(temp, "name") and temp.shape else "t%d" % i 
+        name = temp.name if hasattr(temp, "name") and temp.shape else "t%d" % i
         if isinstance(temp, gem.Constant):
             data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=dtype, initializer=temp.array, address_space=lp.AddressSpace.LOCAL, read_only=True))
         else:
@@ -338,23 +335,27 @@ def statement_evaluate(leaf, ctx):
         idx = ctx.pymbolic_multiindex(expr.shape)
         var = ctx.pymbolic_variable(expr)
         lhs = (SubArrayRef(idx, p.Subscript(var, idx)),)
+
         reads = []
         for child in expr.children:
             idx_reads = ctx.pymbolic_multiindex(child.shape)
             var_reads = ctx.pymbolic_variable(child)
             reads.append(SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)))
         rhs = p.Call(p.Variable(name), tuple(reads))
+
         return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
     elif isinstance(expr, gem.Action):
         idx = ctx.pymbolic_multiindex(expr.shape)
         var = ctx.pymbolic_variable(expr)
         lhs = (SubArrayRef(idx, p.Subscript(var, idx)),)
+
         reads = []
         for child in expr.children:
             idx_reads = ctx.pymbolic_multiindex(child.shape)
             var_reads = ctx.pymbolic_variable(child)
             reads.append(SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)))
         rhs = p.Call(p.Variable("action"), tuple(reads))
+
         return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
     else:
         return [lp.Assignment(ctx.pymbolic_variable(expr), expression(expr, ctx, top=True), within_inames=ctx.active_inames())]

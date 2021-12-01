@@ -836,8 +836,8 @@ class Solve(Node):
 
     Represents the X obtained by solving AX = B.
     """
-    __slots__ = ('children', 'shape', 'matfree', 'Aonp', 'Aonx', 'name', )
-    __back__ = ('matfree', 'Aonp', 'Aonx', 'name', )
+    __slots__ = ('children', 'shape', 'matfree', 'Aonp', 'Aonx', 'name')
+    __back__ = ('matfree', 'Aonp', 'Aonx', 'name')
     id = 0
 
     def __new__(cls, A, B, matfree=False, Aonp=None, Aonx=None, name=""):
@@ -853,6 +853,10 @@ class Solve(Node):
         self.matfree = matfree
         self.Aonp = Aonp
         self.Aonx = Aonx
+
+        # When nodes are reconstructed in the GEM optimiser,
+        # we want them to keep their names which is why
+        # there is an optional name keyword in this constructor
         self.name = name if name else "S%d" % Solve.id
         Solve.id += 1
         return self
@@ -873,8 +877,12 @@ class Action(Node):
         self = super(Action, cls).__new__(cls)
         self.children = A, B
         self.shape = (A.shape[pick_op^1],)
-        self.name = name if name else "A%d" % Action.id
         self.pick_op = pick_op
+
+        # When nodes are reconstructed in the GEM optimiser,
+        # we want them to keep their names which is why
+        # there is an optional name keyword in this constructor
+        self.name = name if name else "A%d" % Action.id
         Action.id += 1
         return self
 
