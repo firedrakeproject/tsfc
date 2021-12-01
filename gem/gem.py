@@ -33,7 +33,7 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'IndexSum', 'ListTensor', 'Concatenate', 'Delta',
            'index_sum', 'partial_indexed', 'reshape', 'view',
            'indices', 'as_gem', 'FlexiblyIndexed',
-           'Inverse', 'Solve']
+           'Inverse', 'Solve', 'Action']
 
 
 class NodeMeta(type):
@@ -249,9 +249,11 @@ class Variable(Terminal):
 
     __slots__ = ('name', 'shape')
     __front__ = ('name', 'shape')
+    id = 0
 
     def __init__(self, name, shape):
-        self.name = name
+        Variable.id += 1
+        self.name = "T%d" % Variable.id if not name else name
         self.shape = shape
 
 
@@ -834,17 +836,54 @@ class Solve(Node):
 
     Represents the X obtained by solving AX = B.
     """
-    __slots__ = ('children', 'shape')
+    __slots__ = ('children', 'shape', 'matfree', 'Aonp', 'Aonx', 'name')
+    __back__ = ('matfree', 'Aonp', 'Aonx', 'name')
+    id = 0
 
-    def __init__(self, A, B):
+    def __new__(cls, A, B, matfree=False, Aonp=None, Aonx=None, name=""):
         # Shape requirements
         assert B.shape
         assert len(A.shape) == 2
         assert A.shape[0] == A.shape[1]
         assert A.shape[0] == B.shape[0]
 
+        self = super(Solve, cls).__new__(cls)
         self.children = (A, B)
         self.shape = A.shape[1:] + B.shape[1:]
+        self.matfree = matfree
+        self.Aonp = Aonp
+        self.Aonx = Aonx
+
+        # When nodes are reconstructed in the GEM optimiser,
+        # we want them to keep their names which is why
+        # there is an optional name keyword in this constructor
+        self.name = name if name else "S%d" % Solve.id
+        Solve.id += 1
+        return self
+
+
+class Action(Node):
+    __slots__ = ('children', 'shape', 'pick_op', 'name')
+    __back__ = ('pick_op', 'name')
+    id = 0
+
+    def __new__(cls, A, B, pick_op, name=""):
+        assert B.shape
+        assert len(A.shape) == 2
+        assert A.shape[pick_op] == B.shape[0]
+        assert pick_op < 2
+
+        self = super(Action, cls).__new__(cls)
+        self.children = A, B
+        self.shape = (A.shape[pick_op ^ 1],)
+        self.pick_op = pick_op
+
+        # When nodes are reconstructed in the GEM optimiser,
+        # we want them to keep their names which is why
+        # there is an optional name keyword in this constructor
+        self.name = name if name else "A%d" % Action.id
+        Action.id += 1
+        return self
 
 
 def unique(indices):
@@ -903,7 +942,7 @@ def strides_of(shape):
 def decompose_variable_view(expression):
     """Extract information from a shaped node.
        Decompose ComponentTensor + FlexiblyIndexed."""
-    if (isinstance(expression, (Variable, Inverse, Solve))):
+    if (isinstance(expression, (Variable, Inverse, Solve, Action))):
         variable = expression
         indexes = tuple(Index(extent=extent) for extent in expression.shape)
         dim2idxs = tuple((0, ((index, 1),)) for index in indexes)
