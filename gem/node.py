@@ -120,7 +120,7 @@ def pre_traversal(expression_dags):
                 lifo.append(child)
 
 
-def post_traversal(expression_dags, reverse=False):
+def post_traversal(expression_dags):
     """Post-order traversal of the nodes of expression DAGs."""
     seen = set()
     lifo = []
