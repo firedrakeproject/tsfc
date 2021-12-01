@@ -105,7 +105,6 @@ class LoopyContext(object):
         self.index_extent = OrderedDict()  # pymbolic variable for indices -> extent
         self.gem_to_pymbolic = {}  # gem node -> pymbolic variable
         self.name_gen = UniqueNameGenerator()
-        self.new_variables = OrderedDict() # pymbolic variale -> shape
         self.kernel_name = kernel_name
 
     def fetch_multiindex(self, multiindex):
@@ -163,11 +162,7 @@ class LoopyContext(object):
         try:
             pym = self.gem_to_pymbolic[node]
         except KeyError:
-            if not name:
-                try:
-                    name = self.name_gen(node.name)
-                except:
-                    name = self.name_gen("node_"+self.kernel_name)
+            name = self.name_gen(node.name)
             pym = p.Variable(name)
             self.gem_to_pymbolic[node] = pym
         return pym
@@ -190,7 +185,7 @@ def active_indices(mapping, ctx):
 
 
 def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_names=[],
-             return_increments=True, return_ctx=False, iname_prefix="i"):
+             return_increments=True, return_ctx=False):
     """Generates loopy code.
 
     :arg impero_c: ImperoC tuple with Impero AST and other data
@@ -204,52 +199,37 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     from pytools import UniqueNameGenerator
     ctx = LoopyContext(kernel_name)
     ctx.indices = impero_c.indices
-    ctx.namer = UniqueNameGenerator(forced_prefix=iname_prefix)
-    ctx.index_names = defaultdict(ctx.namer, index_names)
+    ctx.index_names = defaultdict(lambda: "i", index_names)
     ctx.epsilon = numpy.finfo(scalar_type).resolution
     ctx.scalar_type = scalar_type
     ctx.return_increments = return_increments
-    ctx.knl_name = kernel_name
 
     # Create arguments
     data = list(args)
     for i, (temp, dtype) in enumerate(assign_dtypes(impero_c.temporaries, scalar_type)):
-        if isinstance(temp, gem.Action) or (isinstance(temp, gem.Solve) and temp.matfree):
-            name = temp.name
-        else:
-            name = "t%d" % i 
+        name = temp.name if hasattr(temp, "name") and temp.shape else "t%d" % i 
         if isinstance(temp, gem.Constant):
             data.append(lp.TemporaryVariable(name, shape=temp.shape, dtype=dtype, initializer=temp.array, address_space=lp.AddressSpace.LOCAL, read_only=True))
         else:
             shape = tuple([i.extent for i in ctx.indices[temp]]) + temp.shape
-            data.append(lp.TemporaryVariable(name, shape=shape, dtype=dtype, initializer=None, address_space=lp.AddressSpace.LOCAL, read_only=False, target=lp.CTarget()))
+            data.append(lp.TemporaryVariable(name, shape=shape, dtype=dtype, initializer=None, address_space=lp.AddressSpace.LOCAL, read_only=False))
         ctx.gem_to_pymbolic[temp] = p.Variable(name)
 
     # Create instructions
     instructions = statement(impero_c.tree, ctx)
-    for c, insn in enumerate(instructions):
-        insn.id = kernel_name + "_" + str(c)
 
     # Create domains
     domains = create_domains(ctx.index_extent.items())
 
-    # Help loopy in scheduling by assigning priority to instructions
-    scheduled_instructions = []
-    for i, insn in enumerate(instructions):
-        scheduled_instructions.append(insn.copy(priority=len(instructions) - i))
-
     # Create loopy kernel
-    prg = lp.make_function(domains, scheduled_instructions, data, name=kernel_name, target=lp.CTarget(),
+    knl = lp.make_function(domains, instructions, data, name=kernel_name, target=lp.CTarget(),
                            seq_dependencies=True, silenced_warnings=["summing_if_branches_ops", "single_writer_after_creation", "unused_inames"],
                            lang_version=(2018, 2))
 
     # Prevent loopy interchange by loopy
-    prg = lp.prioritize_loops(prg, ",".join(ctx.index_extent.keys()))
+    knl = lp.prioritize_loops(knl, ",".join(ctx.index_extent.keys()))
 
-    if return_ctx:
-        return prg, ctx
-    else:
-        return prg
+    return (knl, ctx) if return_ctx else knl
 
 
 def create_domains(indices):
@@ -261,16 +241,12 @@ def create_domains(indices):
     domains = []
     for idx, extent in indices:
         inames = isl.make_zero_and_vars([idx])
-        domains.append(((inames[0].le_set(inames[idx])) & (inames[idx].lt_set(inames[0] + extent))))
+        domains.append(isl.BasicSet(str(((inames[0].le_set(inames[idx]))
+                                         & (inames[idx].lt_set(inames[0] + extent))))))
 
     if not domains:
         domains = [isl.BasicSet("[] -> {[]}")]
-
-    domains_bs = []
-    for d in domains:
-        domains_bs += [isl.BasicSet(str(d))]
-
-    return domains_bs
+    return domains
 
 
 @singledispatch
@@ -357,6 +333,18 @@ def statement_evaluate(leaf, ctx):
         rhs = p.Call(p.Variable("inverse"), reads)
 
         return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
+    elif isinstance(expr, gem.Solve):
+        name = "mtf_solve" if expr.matfree else "solve"
+        idx = ctx.pymbolic_multiindex(expr.shape)
+        var = ctx.pymbolic_variable(expr)
+        lhs = (SubArrayRef(idx, p.Subscript(var, idx)),)
+        reads = []
+        for child in expr.children:
+            idx_reads = ctx.pymbolic_multiindex(child.shape)
+            var_reads = ctx.pymbolic_variable(child)
+            reads.append(SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)))
+        rhs = p.Call(p.Variable(name), tuple(reads))
+        return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
     elif isinstance(expr, gem.Action):
         idx = ctx.pymbolic_multiindex(expr.shape)
         var = ctx.pymbolic_variable(expr)
@@ -367,23 +355,6 @@ def statement_evaluate(leaf, ctx):
             var_reads = ctx.pymbolic_variable(child)
             reads.append(SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)))
         rhs = p.Call(p.Variable("action"), tuple(reads))
-        return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
-
-    elif isinstance(expr, gem.Solve):
-
-        if expr.matfree:
-            name = "mtf_solve"
-        else:
-            name = "solve"
-        idx = ctx.pymbolic_multiindex(expr.shape)
-        var = ctx.pymbolic_variable(expr)
-        lhs = (SubArrayRef(idx, p.Subscript(var, idx)),)
-        reads = []
-        for child in expr.children:
-            idx_reads = ctx.pymbolic_multiindex(child.shape)
-            var_reads = ctx.pymbolic_variable(child)
-            reads.append(SubArrayRef(idx_reads, p.Subscript(var_reads, idx_reads)))
-        rhs = p.Call(p.Variable(name), tuple(reads))
         return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
     else:
         return [lp.Assignment(ctx.pymbolic_variable(expr), expression(expr, ctx, top=True), within_inames=ctx.active_inames())]

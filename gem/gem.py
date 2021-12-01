@@ -252,7 +252,6 @@ class Variable(Terminal):
     id = 0
 
     def __init__(self, name, shape):
-        self.name = name
         Variable.id += 1
         if not name:
             self.name = "T%d" % Variable.id
@@ -844,23 +843,22 @@ class Solve(Node):
     __back__ = ('matfree', 'Aonp', 'Aonx', 'name', )
     id = 0
 
-    def __init__(self, A, B, matfree=False, Aonp=None, Aonx=None, name=""):
+    def __new__(cls, A, B, matfree=False, Aonp=None, Aonx=None, name=""):
         # Shape requirements
         assert B.shape
         assert len(A.shape) == 2
         assert A.shape[0] == A.shape[1]
         assert A.shape[0] == B.shape[0]
 
+        self = super(Solve, cls).__new__(cls)
         self.children = (A, B)
         self.shape = A.shape[1:] + B.shape[1:]
         self.matfree = matfree
         self.Aonp = Aonp
         self.Aonx = Aonx
-        if not name:
-            Solve.id += 1
-            self.name = "S%d" % Solve.id
-        else:
-            self.name = name
+        self.name = name if name else "S%d" % Solve.id
+        Solve.id += 1
+        return self
 
 
 class Action(Node):
@@ -873,24 +871,15 @@ class Action(Node):
         assert B.shape
         assert len(A.shape) == 2
         assert A.shape[pick_op] == B.shape[0]
+        assert pick_op < 2
 
         self = super(Action, cls).__new__(cls)
         self.children = A, B
-        if pick_op == 1:
-            self.shape = A.shape[:1] + B.shape[1:]
-        else:
-            self.shape = A.shape[1:] + B.shape[1:]
-        if not name:
-            Action.id += 1
-            self.name = "A%d" % Action.id
-        else:
-            self.name = name
+        self.shape = (A.shape[pick_op^1],)
+        self.name = name if name else "A%d" % Action.id
         self.pick_op = pick_op
+        Action.id += 1
         return self
-    
-    def get_hash(self):
-        return hash((type(self), self.children, self.shape, self.pick_op, self.name))
-
 
 
 def unique(indices):
