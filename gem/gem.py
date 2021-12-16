@@ -836,11 +836,11 @@ class Solve(Node):
 
     Represents the X obtained by solving AX = B.
     """
-    __slots__ = ('children', 'shape', 'matfree', 'Aonp', 'Aonx', 'name', 'preconditioner')
-    __back__ = ('matfree', 'Aonp', 'Aonx', 'name', 'preconditioner')
+    __slots__ = ('children', 'shape', 'matfree', 'Aonp', 'Aonx', 'name', 'preconditioner', 'Ponr')
+    __back__ = ('matfree', 'Aonp', 'Aonx', 'name', 'preconditioner', 'Ponr')
     id = 0
 
-    def __new__(cls, A, B, matfree=False, Aonp=None, Aonx=None, name="", preconditioner=None):
+    def __new__(cls, A, B, matfree=False, Aonp=None, Aonx=None, name="", preconditioner=None, Ponr=None):
         # Shape requirements
         assert B.shape
         assert len(A.shape) == 2
@@ -854,6 +854,7 @@ class Solve(Node):
         self.Aonp = Aonp
         self.Aonx = Aonx
         self.preconditioner = preconditioner
+        self.Ponr = Ponr
 
         # When nodes are reconstructed in the GEM optimiser,
         # we want them to keep their names which is why
