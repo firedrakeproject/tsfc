@@ -2,6 +2,7 @@ import time
 import sys
 from functools import partial
 from itertools import chain
+from finat.physically_mapped import DirectlyDefinedElement, PhysicallyMappedElement
 
 import ufl
 from ufl.algorithms import extract_arguments, extract_coefficients
@@ -310,7 +311,7 @@ def preprocess_parameters(parameters):
     return parameters
 
 
-def compile_expression_dual_evaluation(expression, to_element, *,
+def compile_expression_dual_evaluation(expression, to_element, ufl_element, *,
                                        domain=None, interface=None,
                                        parameters=None):
     """Compile a UFL expression to be evaluated against a compile-time known reference element's dual basis.
@@ -319,6 +320,7 @@ def compile_expression_dual_evaluation(expression, to_element, *,
 
     :arg expression: UFL expression
     :arg to_element: A FInAT element for the target space
+    :arg ufl_element: The UFL element of the target space.
     :arg domain: optional UFL domain the expression is defined on (required when expression contains no domain).
     :arg interface: backend module for the kernel interface
     :arg parameters: parameters object
@@ -334,12 +336,10 @@ def compile_expression_dual_evaluation(expression, to_element, *,
     # Determine whether in complex mode
     complex_mode = is_complex(parameters["scalar_type"])
 
-    # Find out which mapping to apply
-    try:
-        mapping, = set((to_element.mapping,))
-    except ValueError:
+    if isinstance(to_element, (PhysicallyMappedElement, DirectlyDefinedElement)):
         raise NotImplementedError("Don't know how to interpolate onto zany spaces, sorry")
-    expression = apply_mapping(expression, mapping, domain)
+    # Map into reference space
+    expression = apply_mapping(expression, ufl_element, domain)
 
     # Apply UFL preprocessing
     expression = ufl_utils.preprocess_expression(expression,
