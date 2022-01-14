@@ -44,6 +44,7 @@ class Kernel(object):
         structure that the kernel needs.
     :kwarg tabulations: The runtime tabulations this kernel requires
     :kwarg needs_cell_sizes: Does the kernel require cell sizes.
+    :kwarg name: The name of this kernel.
     :kwarg flop_count: Estimated total flops for this kernel.
     """
     def __init__(self, ast=None, integral_type=None, oriented=False,
@@ -235,13 +236,24 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         gem expressions and actual data by setting correct values in
         `external_data_numbers` and `external_data_parts` in the kernel.
         """
-        if any(type(element) == ufl_MixedElement for element in elements):
-            raise ValueError("Unable to handle `MixedElement`s.")
-        expressions = []
+        _reverse_map = []
+        _elements = []
         for i, element in enumerate(elements):
+            if type(element) == ufl_MixedElement:
+                sub_elements = element.sub_elements()
+                _elements.extend(sub_elements)
+                _reverse_map.extend([[i, j] for j in range(len(sub_elements))])
+            else:
+                _elements.append(element)
+                _reverse_map.append([i, None])
+        expressions = []
+        external_data_reverse_map = {}
+        for i, element in enumerate(_elements):
             funarg, expression = prepare_coefficient(element, "e_%d" % i, self.scalar_type, interior_facet=self.interior_facet)
             self.external_data_args.append(funarg)
             expressions.append(expression)
+            external_data_reverse_map[expression.children[0].children[0]] = (i, _reverse_map[i][0], _reverse_map[i][1])
+        self.external_data_reverse_map = external_data_reverse_map
         return tuple(expressions)
 
     def register_requirements(self, ir):
@@ -270,7 +282,13 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
             args.append(cell_orientations_coffee_arg)
         if needs_cell_sizes:
             args.append(self.cell_sizes_arg)
-        args.extend(self.coefficient_args + self.external_data_args)
+        args.extend(self.coefficient_args)
+        ii = []
+        for _, (i, number, index) in self.external_data_reverse_map.items():
+            if index is None or index in self.external_data_enabled_parts[number]:
+                ii.append(i)
+        args.extend([self.external_data_args[i] for i in sorted(ii)])
+        print("ii::", sorted(ii))
         if info.integral_type in ["exterior_facet", "exterior_facet_vert"]:
             args.append(coffee.Decl("unsigned int",
                                     coffee.Symbol("facet", rank=(1,)),

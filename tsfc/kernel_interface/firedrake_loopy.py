@@ -300,6 +300,17 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
             self.coefficient_args.append(self._coefficient(c, "w_%d" % i))
 
     def set_external_data(self, elements):
+        """Prepare external data structures.
+
+        :arg elements: a tuple of `ufl.FiniteElement`s.
+        :returns: gem expressions for the data represented by elements.
+
+        The retuned gem expressions are to be used in the operations
+        applied to the gem expressions obtained by compiling UFL before
+        compiling gem. The users are responsible for bridging these
+        gem expressions and actual data by setting correct values in
+        `external_data_numbers` and `external_data_parts` in the kernel.
+        """
         _reverse_map = []
         _elements = []
         for i, element in enumerate(elements):
