@@ -122,18 +122,28 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         gem expressions and actual data by setting correct values in
         `external_data_numbers` and `external_data_parts` in the kernel.
         """
-        name = "e"
-        self.external_data_args = [
-            coffee.Decl(self.scalar_type, coffee.Symbol(name),
-                        pointers=[("const",), ()],
-                        qualifiers=["const"])
-        ]
-        if any(type(element) == ufl_MixedElement for element in elements):
-            raise ValueError("Unable to handle `MixedElement`s.")
-        expressions = []
+        _reverse_map = []
+        _elements = []
         for i, element in enumerate(elements):
-            expression = prepare_coefficient(element, i, name, self.interior_facet)
+            if type(element) == ufl_MixedElement:
+                sub_elements = element.sub_elements()
+                _elements.extend(sub_elements)
+                _reverse_map.extend([[i, j] for j in range(len(sub_elements))])
+            else:
+                _elements.append(element)
+                _reverse_map.append([i, None])
+        self.external_data_args = []
+        expressions = []
+        external_data_reverse_map = {}
+        for i, element in enumerate(_elements):
+            expression = prepare_coefficient(element, i, "e_%d" % i, self.interior_facet)
+            self.external_data_args.append(
+                coffee.Decl(self.scalar_type, coffee.Symbol("e_%d" % i),
+                            pointers=[("const",), ()],
+                            qualifiers=["const"]))
             expressions.append(expression)
+            external_data_reverse_map[expression.children[0].children[0]] = (i, _reverse_map[i][0], _reverse_map[i][1])
+        self.external_data_reverse_map = external_data_reverse_map
         return tuple(expressions)
 
     def register_requirements(self, ir):

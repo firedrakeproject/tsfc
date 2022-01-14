@@ -145,6 +145,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         self.coefficient_args = []
         self.coefficient_split = {}
         self.external_data_args = []
+        self.external_data_reverse_map = {}
         # Map functions to raw coefficients here.
         self.dont_split = frozenset(function_replace_map[f] for f in dont_split if f in function_replace_map)
 
@@ -247,13 +248,11 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
                 _elements.append(element)
                 _reverse_map.append([i, None])
         expressions = []
-        external_data_reverse_map = {}
         for i, element in enumerate(_elements):
             funarg, expression = prepare_coefficient(element, "e_%d" % i, self.scalar_type, interior_facet=self.interior_facet)
             self.external_data_args.append(funarg)
             expressions.append(expression)
-            external_data_reverse_map[expression.children[0].children[0]] = (i, _reverse_map[i][0], _reverse_map[i][1])
-        self.external_data_reverse_map = external_data_reverse_map
+            self.external_data_reverse_map[expression.children[0].children[0]] = (i, _reverse_map[i][0], _reverse_map[i][1])
         return tuple(expressions)
 
     def register_requirements(self, ir):
