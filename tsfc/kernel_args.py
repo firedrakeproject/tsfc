@@ -56,6 +56,10 @@ class CoefficientKernelArg(KernelArg):
     ...
 
 
+class ExternalDataKernelArg(KernelArg):
+    ...
+
+
 class CellOrientationsKernelArg(KernelArg):
     ...
 
