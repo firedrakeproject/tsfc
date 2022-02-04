@@ -239,7 +239,7 @@ class KernelBuilderMixin(object):
         for _, (_, number, index) in rmap.items():
             if index is not None and index not in enabled[number]:
                 enabled[number].append(index)
-        setattr(self, object_type + "_enabled_parts", tuple(map(lambda a: sorted(a) if a is not None else None, enabled)))
+        setattr(self, object_type + "_enabled_parts", tuple(map(lambda a: tuple(sorted(a)) if a is not None else None, enabled)))
 
     @cached_property
     def argument_multiindices_dummy(self):
