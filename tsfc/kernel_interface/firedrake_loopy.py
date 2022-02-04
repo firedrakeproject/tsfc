@@ -384,7 +384,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
                              self.scalar_type, name, index_names)
         flop_count = count_flops(impero_c)  # Estimated total flops for this kernel.
         return Kernel(ast=ast,
-                      arguments=tuple(args)
+                      arguments=tuple(args),
                       integral_type=info.integral_type,
                       subdomain_id=info.subdomain_id,
                       domain_number=info.domain_number,
