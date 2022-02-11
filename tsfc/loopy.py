@@ -15,11 +15,41 @@ import loopy as lp
 import pymbolic.primitives as p
 from loopy.symbolic import SubArrayRef
 
-from pytools import UniqueNameGenerator
+from pytools import UniqueNameGenerator, ImmutableRecord
 
 from tsfc.parameters import is_complex
 
 from contextlib import contextmanager
+from petsc4py import PETSc
+
+
+def profile_insns(kernel_name, instructions):
+    if PETSc.Log.getActive():
+        # Petsc functions
+        start_event = "PetscLogEventBegin"
+        end_event = "PetscLogEventEnd"
+        register_event = "PetscLogEventRegister"
+        # The variables
+        event_id_var_name = "event_id_" + kernel_name
+        event_name = "Log_Event_" + kernel_name
+        # Logging registration # TODO offport this so we don't register every single time
+        prepend = [lp.CInstruction("", "PetscLogEvent "+event_id_var_name+";"),
+                   lp.CInstruction("", register_event+"(\""+event_name+"\", PETSC_OBJECT_CLASSID, &"+event_id_var_name+");")]
+        # Profiling
+        prepend += [lp.CInstruction("", start_event+"("+event_id_var_name+",0,0,0,0);")]
+        append = [lp.CInstruction("", end_event+"("+event_id_var_name+",0,0,0,0);")]
+        instructions = prepend + instructions + append
+    return instructions
+
+
+class _PreambleGen(ImmutableRecord):
+    fields = set(("preamble", ))
+
+    def __init__(self, preamble):
+        self.preamble = preamble
+
+    def __call__(self, preamble_info):
+        yield ("0_tsfc", self.preamble)
 
 
 @singledispatch
@@ -213,6 +243,9 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     # Create instructions
     instructions = statement(impero_c.tree, ctx)
 
+    # Profile the instructions
+    instructions = profile_insns(kernel_name, instructions)
+
     # Create domains
     domains = create_domains(ctx.index_extent.items())
 
@@ -220,6 +253,9 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     knl = lp.make_function(domains, instructions, data, name=kernel_name, target=lp.CTarget(),
                            seq_dependencies=True, silenced_warnings=["summing_if_branches_ops"],
                            lang_version=(2018, 2))
+
+    if PETSc.Log.getActive():
+        knl = lp.register_preamble_generators(knl, [_PreambleGen("#include <petsclog.h>")])
 
     # Prevent loopy interchange by loopy
     knl = lp.prioritize_loops(knl, ",".join(ctx.index_extent.keys()))
