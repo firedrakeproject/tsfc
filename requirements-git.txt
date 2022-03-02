@@ -1,5 +1,5 @@
 git+https://github.com/coneoproject/COFFEE.git#egg=coffee
-git+https://github.com/firedrakeproject/ufl.git#egg=fenics-ufl
+git+https://github.com/firedrakeproject/ufl.git@test-group-integrals#egg=fenics-ufl
 git+https://github.com/firedrakeproject/fiat.git#egg=fenics-fiat
 git+https://github.com/FInAT/FInAT.git#egg=finat
 git+https://github.com/firedrakeproject/loopy.git#egg=loopy
