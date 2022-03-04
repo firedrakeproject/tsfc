@@ -1,5 +1,4 @@
 import numpy
-from loopy.target.c import CWithGNULibcTarget
 
 
 PARAMETERS = {
@@ -21,9 +20,6 @@ PARAMETERS = {
     # So that tests pass (needs to match scalar_type)
     "scalar_type_c": "double",
 }
-
-
-target = CWithGNULibcTarget()
 
 
 def default_parameters():
