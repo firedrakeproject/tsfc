@@ -4,12 +4,31 @@ import FIAT
 from FIAT.discontinuous_lagrange import HigherOrderDiscontinuousLagrange as FIAT_DiscontinuousLagrange
 
 import ufl
-from tsfc.fiatinterface import create_element, supported_elements
+from tsfc.finatinterface import create_element as _create_element
+
+
+supported_elements = {
+    # These all map directly to FIAT elements
+    "Brezzi-Douglas-Marini": FIAT.BrezziDouglasMarini,
+    "Brezzi-Douglas-Fortin-Marini": FIAT.BrezziDouglasFortinMarini,
+    "Lagrange": FIAT.Lagrange,
+    "Nedelec 1st kind H(curl)": FIAT.Nedelec,
+    "Nedelec 2nd kind H(curl)": FIAT.NedelecSecondKind,
+    "Raviart-Thomas": FIAT.RaviartThomas,
+    "Regge": FIAT.Regge,
+}
+"""A :class:`.dict` mapping UFL element family names to their
+FIAT-equivalent constructors."""
+
+
+def create_element(ufl_element):
+    """Create a FIAT element given a UFL element."""
+    finat_element = _create_element(ufl_element)
+    return finat_element.fiat_equivalent
 
 
 @pytest.fixture(params=["BDM",
                         "BDFM",
-                        "DRT",
                         "Lagrange",
                         "N1curl",
                         "N2curl",
@@ -29,7 +48,7 @@ def test_triangle_basic(ufl_element):
     assert isinstance(element, supported_elements[ufl_element.family()])
 
 
-@pytest.fixture(params=["CG", "DG"], scope="module")
+@pytest.fixture(params=["CG", "DG", "DG L2"], scope="module")
 def tensor_name(request):
     return request.param
 
@@ -61,8 +80,9 @@ def test_tensor_prod_simple(ufl_A, ufl_B):
 
 
 @pytest.mark.parametrize(('family', 'expected_cls'),
-                         [('P', FIAT.Lagrange),
-                          ('DP', FIAT_DiscontinuousLagrange)])
+                         [('P', FIAT.GaussLobattoLegendre),
+                          ('DP', FIAT.GaussLegendre),
+                          ('DP L2', FIAT.GaussLegendre)])
 def test_interval_variant_default(family, expected_cls):
     ufl_element = ufl.FiniteElement(family, ufl.interval, 3)
     assert isinstance(create_element(ufl_element), expected_cls)
@@ -72,7 +92,9 @@ def test_interval_variant_default(family, expected_cls):
                          [('P', 'equispaced', FIAT.Lagrange),
                           ('P', 'spectral', FIAT.GaussLobattoLegendre),
                           ('DP', 'equispaced', FIAT_DiscontinuousLagrange),
-                          ('DP', 'spectral', FIAT.GaussLegendre)])
+                          ('DP', 'spectral', FIAT.GaussLegendre),
+                          ('DP L2', 'equispaced', FIAT_DiscontinuousLagrange),
+                          ('DP L2', 'spectral', FIAT.GaussLegendre)])
 def test_interval_variant(family, variant, expected_cls):
     ufl_element = ufl.FiniteElement(family, ufl.interval, 3, variant=variant)
     assert isinstance(create_element(ufl_element), expected_cls)
@@ -80,6 +102,12 @@ def test_interval_variant(family, variant, expected_cls):
 
 def test_triangle_variant_spectral_fail():
     ufl_element = ufl.FiniteElement('DP', ufl.triangle, 2, variant='spectral')
+    with pytest.raises(ValueError):
+        create_element(ufl_element)
+
+
+def test_triangle_variant_spectral_fail_l2():
+    ufl_element = ufl.FiniteElement('DP L2', ufl.triangle, 2, variant='spectral')
     with pytest.raises(ValueError):
         create_element(ufl_element)
 
@@ -92,6 +120,12 @@ def test_quadrilateral_variant_spectral_q():
 
 def test_quadrilateral_variant_spectral_dq():
     element = create_element(ufl.FiniteElement('DQ', ufl.quadrilateral, 1, variant='spectral'))
+    assert isinstance(element.element.A, FIAT.GaussLegendre)
+    assert isinstance(element.element.B, FIAT.GaussLegendre)
+
+
+def test_quadrilateral_variant_spectral_dq_l2():
+    element = create_element(ufl.FiniteElement('DQ L2', ufl.quadrilateral, 1, variant='spectral'))
     assert isinstance(element.element.A, FIAT.GaussLegendre)
     assert isinstance(element.element.B, FIAT.GaussLegendre)
 

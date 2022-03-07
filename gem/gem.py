@@ -32,7 +32,8 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
            'IndexSum', 'ListTensor', 'Concatenate', 'Delta',
            'index_sum', 'partial_indexed', 'reshape', 'view',
-           'indices', 'as_gem']
+           'indices', 'as_gem', 'FlexiblyIndexed',
+           'Inverse', 'Solve']
 
 
 class NodeMeta(type):
@@ -79,25 +80,52 @@ class Node(NodeBase, metaclass=NodeMeta):
         return Indexed(self, indices)
 
     def __add__(self, other):
-        return Sum(self, as_gem(other))
+        return componentwise(Sum, self, as_gem(other))
 
     def __radd__(self, other):
         return as_gem(other).__add__(self)
 
     def __sub__(self, other):
-        return Sum(self, Product(Literal(-1), as_gem(other)))
+        return componentwise(
+            Sum, self,
+            componentwise(Product, Literal(-1), as_gem(other)))
 
     def __rsub__(self, other):
         return as_gem(other).__sub__(self)
 
     def __mul__(self, other):
-        return Product(self, as_gem(other))
+        return componentwise(Product, self, as_gem(other))
 
     def __rmul__(self, other):
         return as_gem(other).__mul__(self)
 
+    def __matmul__(self, other):
+        other = as_gem(other)
+        if not self.shape and not other.shape:
+            return Product(self, other)
+        elif not (self.shape and other.shape):
+            raise ValueError("Both objects must have shape for matmul")
+        elif self.shape[-1] != other.shape[0]:
+            raise ValueError(f"Mismatching shapes {self.shape} and {other.shape} in matmul")
+        *i, k = indices(len(self.shape))
+        _, *j = indices(len(other.shape))
+        expr = Product(Indexed(self, tuple(i) + (k, )),
+                       Indexed(other, (k, ) + tuple(j)))
+        return ComponentTensor(IndexSum(expr, (k, )), tuple(i) + tuple(j))
+
+    def __rmatmul__(self, other):
+        return as_gem(other).__matmul__(self)
+
+    @property
+    def T(self):
+        i = indices(len(self.shape))
+        return ComponentTensor(Indexed(self, i), tuple(reversed(i)))
+
     def __truediv__(self, other):
-        return Division(self, as_gem(other))
+        other = as_gem(other)
+        if other.shape:
+            raise ValueError("Denominator must be scalar")
+        return componentwise(Division, self, other)
 
     def __rtruediv__(self, other):
         return as_gem(other).__truediv__(self)
@@ -190,10 +218,11 @@ class Literal(Constant):
             return super(Literal, cls).__new__(cls)
 
     def __init__(self, array):
+        array = asarray(array)
         try:
-            self.array = asarray(array, dtype=float)
+            self.array = array.astype(float, casting="safe")
         except TypeError:
-            self.array = asarray(array, dtype=complex)
+            self.array = array.astype(complex)
 
     def is_equal(self, other):
         if type(self) != type(other):
@@ -207,10 +236,8 @@ class Literal(Constant):
 
     @property
     def value(self):
-        try:
-            return float(self.array)
-        except TypeError:
-            return complex(self.array)
+        assert self.shape == ()
+        return self.array.dtype.type(self.array)
 
     @property
     def shape(self):
@@ -561,7 +588,7 @@ class FlexiblyIndexed(Scalar):
     def __init__(self, variable, dim2idxs):
         """Construct a flexibly indexed node.
 
-        :arg variable: a :py:class:`Variable`
+        :arg variable: a node that has a shape
         :arg dim2idxs: describes the mapping of indices
 
         For example, if ``variable`` is rank two, and ``dim2idxs`` is
@@ -573,7 +600,7 @@ class FlexiblyIndexed(Scalar):
             variable[1 + i*12 + j*4 + k][0]
 
         """
-        assert isinstance(variable, Variable)
+        assert variable.shape
         assert len(variable.shape) == len(dim2idxs)
 
         dim2idxs_ = []
@@ -624,7 +651,7 @@ class ComponentTensor(Node):
 
         # Collect shape
         shape = tuple(index.extent for index in multiindex)
-        assert all(shape)
+        assert all(s >= 0 for s in shape)
 
         # Zero folding
         if isinstance(expression, Zero):
@@ -782,6 +809,44 @@ class Delta(Scalar, Terminal):
         return self
 
 
+class Inverse(Node):
+    """The inverse of a square matrix."""
+    __slots__ = ('children', 'shape')
+
+    def __new__(cls, tensor):
+        assert len(tensor.shape) == 2
+        assert tensor.shape[0] == tensor.shape[1]
+
+        # Invert 1x1 matrix
+        if tensor.shape == (1, 1):
+            multiindex = (Index(), Index())
+            return ComponentTensor(Division(one, Indexed(tensor, multiindex)), multiindex)
+
+        self = super(Inverse, cls).__new__(cls)
+        self.children = (tensor,)
+        self.shape = tensor.shape
+
+        return self
+
+
+class Solve(Node):
+    """Solution of a square matrix equation with (potentially) multiple right hand sides.
+
+    Represents the X obtained by solving AX = B.
+    """
+    __slots__ = ('children', 'shape')
+
+    def __init__(self, A, B):
+        # Shape requirements
+        assert B.shape
+        assert len(A.shape) == 2
+        assert A.shape[0] == A.shape[1]
+        assert A.shape[0] == B.shape[0]
+
+        self.children = (A, B)
+        self.shape = A.shape[1:] + B.shape[1:]
+
+
 def unique(indices):
     """Sorts free indices and eliminates duplicates.
 
@@ -801,9 +866,9 @@ def index_sum(expression, indices):
 
 
 def partial_indexed(tensor, indices):
-    """Generalised indexing into a tensor.  The number of indices may
-    be less than or equal to the rank of the tensor, so the result may
-    have a non-empty shape.
+    """Generalised indexing into a tensor by eating shape off the front.
+    The number of indices may be less than or equal to the rank of the tensor,
+    so the result may have a non-empty shape.
 
     :arg tensor: tensor-valued GEM expression
     :arg indices: indices, at most as many as the rank of the tensor
@@ -836,10 +901,16 @@ def strides_of(shape):
 
 
 def decompose_variable_view(expression):
-    """Extract ComponentTensor + FlexiblyIndexed view onto a variable."""
-    if isinstance(expression, Variable):
+    """Extract information from a shaped node.
+       Decompose ComponentTensor + FlexiblyIndexed."""
+    if (isinstance(expression, (Variable, Inverse, Solve))):
         variable = expression
         indexes = tuple(Index(extent=extent) for extent in expression.shape)
+        dim2idxs = tuple((0, ((index, 1),)) for index in indexes)
+    elif (isinstance(expression, ComponentTensor) and
+          not isinstance(expression.children[0], FlexiblyIndexed)):
+        variable = expression
+        indexes = expression.multiindex
         dim2idxs = tuple((0, ((index, 1),)) for index in indexes)
     elif isinstance(expression, ComponentTensor) and isinstance(expression.children[0], FlexiblyIndexed):
         variable = expression.children[0].children[0]
@@ -884,10 +955,10 @@ def reshape(expression, *shapes):
 
 
 def view(expression, *slices):
-    """View a part of a variable.
+    """View a part of a shaped object.
 
-    :arg expression: view of a :py:class:`Variable`
-    :arg slices: one slice object for each dimension of the variable.
+    :arg expression: a node that has a shape
+    :arg slices: one slice object for each dimension of the expression.
     """
     variable, dim2idxs, indexes = decompose_variable_view(expression)
     assert len(indexes) == len(slices)
@@ -933,6 +1004,28 @@ def indices(n):
     :returns: A tuple of `n` :class:`Index` objects.
     """
     return tuple(Index() for _ in range(n))
+
+
+def componentwise(op, *exprs):
+    """Apply gem op to exprs component-wise and wrap up in a ComponentTensor.
+
+    :arg op: function that returns a gem Node.
+    :arg exprs: expressions to apply op to.
+    :raises ValueError: if the expressions have mismatching shapes.
+    :returns: New gem Node constructed from op.
+
+    Each expression must either have the same shape, or else be
+    scalar. Shaped expressions are indexed, the op is applied to the
+    scalar expressions and the result is wrapped up in a ComponentTensor.
+
+    """
+    shapes = set(e.shape for e in exprs)
+    if len(shapes - {()}) > 1:
+        raise ValueError("expressions must have matching shape (or else be scalar)")
+    shape = max(shapes)
+    i = indices(len(shape))
+    exprs = tuple(Indexed(e, i) if e.shape else e for e in exprs)
+    return ComponentTensor(op(*exprs), i)
 
 
 def as_gem(expr):

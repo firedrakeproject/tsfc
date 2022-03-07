@@ -14,7 +14,7 @@ from ufl.classes import (Argument, CellCoordinate, CellEdgeVectors,
                          CellFacetJacobian, CellOrientation,
                          CellOrigin, CellVertices, CellVolume,
                          Coefficient, FacetArea, FacetCoordinate,
-                         GeometricQuantity, Jacobian,
+                         GeometricQuantity, Jacobian, JacobianDeterminant,
                          NegativeRestricted, QuadratureWeight,
                          PositiveRestricted, ReferenceCellVolume,
                          ReferenceCellEdgeVectors,
@@ -23,6 +23,7 @@ from ufl.classes import (Argument, CellCoordinate, CellEdgeVectors,
 
 
 from FIAT.reference_element import make_affine_mapping
+from FIAT.reference_element import UFCSimplex
 
 import gem
 from gem.node import traversal
@@ -30,7 +31,7 @@ from gem.optimise import ffc_rounding
 from gem.unconcatenate import unconcatenate
 from gem.utils import cached_property
 
-from finat.physically_mapped import PhysicalGeometry, PhysicallyMappedElement
+from finat.physically_mapped import PhysicalGeometry, NeedsCoordinateMappingElement
 from finat.point_set import PointSet, PointSingleton
 from finat.quadrature import make_quadrature
 
@@ -39,7 +40,7 @@ from tsfc.finatinterface import as_fiat_cell, create_element
 from tsfc.kernel_interface import ProxyKernelInterface
 from tsfc.modified_terminals import (analyse_modified_terminal,
                                      construct_modified_terminal)
-from tsfc.parameters import PARAMETERS
+from tsfc.parameters import is_complex
 from tsfc.ufl_utils import (ModifiedTerminalMixin, PickRestriction,
                             entity_avg, one_times, simplify_abs,
                             preprocess_expression)
@@ -53,10 +54,10 @@ class ContextBase(ProxyKernelInterface):
                 'integral_type',
                 'integration_dim',
                 'entity_ids',
-                'precision',
                 'argument_multiindices',
                 'facetarea',
-                'index_cache')
+                'index_cache',
+                'scalar_type')
 
     def __init__(self, interface, **kwargs):
         ProxyKernelInterface.__init__(self, interface)
@@ -76,12 +77,13 @@ class ContextBase(ProxyKernelInterface):
 
     entity_ids = [0]
 
-    precision = PARAMETERS["precision"]
-
     @cached_property
     def epsilon(self):
-        # Rounding tolerance mimicking FFC
-        return 10.0 * eval("1e-%d" % self.precision)
+        return numpy.finfo(self.scalar_type).resolution
+
+    @cached_property
+    def complex_mode(self):
+        return is_complex(self.scalar_type)
 
     def entity_selector(self, callback, restriction):
         """Selects code for the correct entity at run-time.  Callback
@@ -127,10 +129,21 @@ class CoordinateMapping(PhysicalGeometry):
         self.mt = mt
         self.interface = interface
 
+    def preprocess(self, expr, context):
+        """Preprocess a UFL expression for translation.
+
+        :arg expr: A UFL expression
+        :arg context: The translation context.
+        :returns: A new UFL expression
+        """
+        ifacet = self.interface.integral_type.startswith("interior_facet")
+        return preprocess_expression(expr, complex_mode=context.complex_mode,
+                                     do_apply_restrictions=ifacet)
+
     @property
     def config(self):
         config = {name: getattr(self.interface, name)
-                  for name in ["ufl_cell", "precision", "index_cache"]}
+                  for name in ["ufl_cell", "index_cache", "scalar_type"]}
         config["interface"] = self.interface
         return config
 
@@ -138,22 +151,45 @@ class CoordinateMapping(PhysicalGeometry):
         return self.interface.cell_size(self.mt.restriction)
 
     def jacobian_at(self, point):
+        ps = PointSingleton(point)
         expr = Jacobian(self.mt.terminal.ufl_domain())
+        assert ps.expression.shape == (expr.ufl_domain().topological_dimension(), )
         if self.mt.restriction == '+':
             expr = PositiveRestricted(expr)
         elif self.mt.restriction == '-':
             expr = NegativeRestricted(expr)
-        expr = preprocess_expression(expr)
-
         config = {"point_set": PointSingleton(point)}
         config.update(self.config)
         context = PointSetContext(**config)
+        expr = self.preprocess(expr, context)
+        return map_expr_dag(context.translator, expr)
+
+    def detJ_at(self, point):
+        expr = JacobianDeterminant(self.mt.terminal.ufl_domain())
+        if self.mt.restriction == '+':
+            expr = PositiveRestricted(expr)
+        elif self.mt.restriction == '-':
+            expr = NegativeRestricted(expr)
+        config = {"point_set": PointSingleton(point)}
+        config.update(self.config)
+        context = PointSetContext(**config)
+        expr = self.preprocess(expr, context)
         return map_expr_dag(context.translator, expr)
 
     def reference_normals(self):
+        if not (isinstance(self.interface.fiat_cell, UFCSimplex) and
+                self.interface.fiat_cell.get_spatial_dimension() == 2):
+            raise NotImplementedError("Only works for triangles for now")
         return gem.Literal(numpy.asarray([self.interface.fiat_cell.compute_normal(i) for i in range(3)]))
 
+    def reference_edge_tangents(self):
+        return gem.Literal(numpy.asarray([self.interface.fiat_cell.compute_edge_tangent(i) for i in range(3)]))
+
     def physical_tangents(self):
+        if not (isinstance(self.interface.fiat_cell, UFCSimplex) and
+                self.interface.fiat_cell.get_spatial_dimension() == 2):
+            raise NotImplementedError("Only works for triangles for now")
+
         rts = [self.interface.fiat_cell.compute_tangents(1, f)[0] for f in range(3)]
         jac = self.jacobian_at([1/3, 1/3])
 
@@ -175,11 +211,39 @@ class CoordinateMapping(PhysicalGeometry):
             expr = NegativeRestricted(expr)
 
         expr = ufl.as_vector([ufl.sqrt(ufl.dot(expr[i, :], expr[i, :])) for i in range(3)])
-        expr = preprocess_expression(expr)
         config = {"point_set": PointSingleton([1/3, 1/3])}
         config.update(self.config)
         context = PointSetContext(**config)
+        expr = self.preprocess(expr, context)
         return map_expr_dag(context.translator, expr)
+
+    def physical_points(self, point_set, entity=None):
+        """Converts point_set from reference to physical space"""
+        expr = SpatialCoordinate(self.mt.terminal.ufl_domain())
+        point_shape, = point_set.expression.shape
+        if entity is not None:
+            e, _ = entity
+            assert point_shape == e
+        else:
+            assert point_shape == expr.ufl_domain().topological_dimension()
+        if self.mt.restriction == '+':
+            expr = PositiveRestricted(expr)
+        elif self.mt.restriction == '-':
+            expr = NegativeRestricted(expr)
+        config = {"point_set": point_set}
+        config.update(self.config)
+        if entity is not None:
+            config.update({name: getattr(self.interface, name)
+                           for name in ["integration_dim", "entity_ids"]})
+        context = PointSetContext(**config)
+        expr = self.preprocess(expr, context)
+        mapped = map_expr_dag(context.translator, expr)
+        indices = tuple(gem.Index() for _ in mapped.shape)
+        return gem.ComponentTensor(gem.Indexed(mapped, indices), point_set.indices + indices)
+
+    def physical_vertices(self):
+        vs = PointSet(self.interface.fiat_cell.vertices)
+        return self.physical_points(vs)
 
 
 def needs_coordinate_mapping(element):
@@ -187,7 +251,7 @@ def needs_coordinate_mapping(element):
     if element.family() == 'Real':
         return False
     else:
-        return isinstance(create_element(element), PhysicallyMappedElement)
+        return isinstance(create_element(element), NeedsCoordinateMappingElement)
 
 
 class PointSetContext(ContextBase):
@@ -273,10 +337,10 @@ class Translator(MultiFunction, ModifiedTerminalMixin, ufl2gem.Mixin):
         integrand, degree, argument_multiindices = entity_avg(integrand / CellVolume(domain), measure, self.context.argument_multiindices)
 
         config = {name: getattr(self.context, name)
-                  for name in ["ufl_cell", "precision", "index_cache"]}
+                  for name in ["ufl_cell", "index_cache", "scalar_type"]}
         config.update(quadrature_degree=degree, interface=self.context,
                       argument_multiindices=argument_multiindices)
-        expr, = compile_ufl(integrand, point_sum=True, **config)
+        expr, = compile_ufl(integrand, PointSetContext(**config), point_sum=True)
         return expr
 
     def facet_avg(self, o):
@@ -288,12 +352,12 @@ class Translator(MultiFunction, ModifiedTerminalMixin, ufl2gem.Mixin):
         integrand, degree, argument_multiindices = entity_avg(integrand / FacetArea(domain), measure, self.context.argument_multiindices)
 
         config = {name: getattr(self.context, name)
-                  for name in ["ufl_cell", "precision", "index_cache",
+                  for name in ["ufl_cell", "index_cache", "scalar_type",
                                "integration_dim", "entity_ids",
                                "integral_type"]}
         config.update(quadrature_degree=degree, interface=self.context,
                       argument_multiindices=argument_multiindices)
-        expr, = compile_ufl(integrand, point_sum=True, **config)
+        expr, = compile_ufl(integrand, PointSetContext(**config), point_sum=True)
         return expr
 
     def modified_terminal(self, o):
@@ -423,7 +487,7 @@ def translate_spatialcoordinate(terminal, mt, ctx):
     # Replace terminal with a Coefficient
     terminal = ctx.coordinate(terminal.ufl_domain())
     # Get back to reference space
-    terminal = preprocess_expression(terminal)
+    terminal = preprocess_expression(terminal, complex_mode=ctx.complex_mode)
     # Rebuild modified terminal
     expr = construct_modified_terminal(mt, terminal)
     # Translate replaced UFL snippet
@@ -451,9 +515,9 @@ def translate_cellvolume(terminal, mt, ctx):
     interface = CellVolumeKernelInterface(ctx, mt.restriction)
 
     config = {name: getattr(ctx, name)
-              for name in ["ufl_cell", "precision", "index_cache"]}
+              for name in ["ufl_cell", "index_cache", "scalar_type"]}
     config.update(interface=interface, quadrature_degree=degree)
-    expr, = compile_ufl(integrand, point_sum=True, **config)
+    expr, = compile_ufl(integrand, PointSetContext(**config), point_sum=True)
     return expr
 
 
@@ -464,10 +528,10 @@ def translate_facetarea(terminal, mt, ctx):
     integrand, degree = one_times(ufl.Measure(ctx.integral_type, domain=domain))
 
     config = {name: getattr(ctx, name)
-              for name in ["ufl_cell", "integration_dim",
-                           "entity_ids", "precision", "index_cache"]}
+              for name in ["ufl_cell", "integration_dim", "scalar_type",
+                           "entity_ids", "index_cache"]}
     config.update(interface=ctx, quadrature_degree=degree)
-    expr, = compile_ufl(integrand, point_sum=True, **config)
+    expr, = compile_ufl(integrand, PointSetContext(**config), point_sum=True)
     return expr
 
 
@@ -479,7 +543,7 @@ def translate_cellorigin(terminal, mt, ctx):
     point_set = PointSingleton((0.0,) * domain.topological_dimension())
 
     config = {name: getattr(ctx, name)
-              for name in ["ufl_cell", "precision", "index_cache"]}
+              for name in ["ufl_cell", "index_cache", "scalar_type"]}
     config.update(interface=ctx, point_set=point_set)
     context = PointSetContext(**config)
     return context.translator(expression)
@@ -492,7 +556,7 @@ def translate_cell_vertices(terminal, mt, ctx):
     ps = PointSet(numpy.array(ctx.fiat_cell.get_vertices()))
 
     config = {name: getattr(ctx, name)
-              for name in ["ufl_cell", "precision", "index_cache"]}
+              for name in ["ufl_cell", "index_cache", "scalar_type"]}
     config.update(interface=ctx, point_set=ps)
     context = PointSetContext(**config)
     expr = context.translator(ufl_expr)
@@ -546,7 +610,7 @@ def fiat_to_ufl(fiat_dict, order):
 def translate_argument(terminal, mt, ctx):
     argument_multiindex = ctx.argument_multiindices[terminal.number()]
     sigma = tuple(gem.Index(extent=d) for d in mt.expr.ufl_shape)
-    element = ctx.create_element(terminal.ufl_element())
+    element = ctx.create_element(terminal.ufl_element(), restriction=mt.restriction)
 
     def callback(entity_id):
         finat_dict = ctx.basis_evaluation(element, mt, entity_id)
@@ -573,7 +637,7 @@ def translate_coefficient(terminal, mt, ctx):
         assert mt.local_derivatives == 0
         return vec
 
-    element = ctx.create_element(terminal.ufl_element())
+    element = ctx.create_element(terminal.ufl_element(), restriction=mt.restriction)
 
     # Collect FInAT tabulation for all entities
     per_derivative = collections.defaultdict(list)
@@ -629,11 +693,20 @@ def translate_coefficient(terminal, mt, ctx):
     return result
 
 
-def compile_ufl(expression, interior_facet=False, point_sum=False, **kwargs):
-    context = PointSetContext(**kwargs)
+def compile_ufl(expression, context, interior_facet=False, point_sum=False):
+    """Translate a UFL expression to GEM.
+
+    :arg expression: The UFL expression to compile.
+    :arg context: translation context - either a :class:`GemPointContext`
+        or :class:`PointSetContext`
+    :arg interior_facet: If ``true``, treat expression as an interior
+        facet integral (default ``False``)
+    :arg point_sum: If ``true``, return a `gem.IndexSum` of the final
+        gem expression along the ``context.point_indices`` (if present).
+   """
 
     # Abs-simplification
-    expression = simplify_abs(expression)
+    expression = simplify_abs(expression, context.complex_mode)
     if interior_facet:
         expressions = []
         for rs in itertools.product(("+", "-"), repeat=len(context.argument_multiindices)):
