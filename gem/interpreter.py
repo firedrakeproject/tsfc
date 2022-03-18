@@ -344,7 +344,7 @@ def _evaluate_concatenate(e, self):
     return Result(arrs, fids)
 
 
-@_evaluate.register(gem.TensorConcat)
+@_evaluate.register(gem.TensorConcatenate)
 def _evaluate_tensor_concat(e, self):
     ops = [self(o) for o in e.children]
     fids = tuple(OrderedDict.fromkeys(itertools.chain(*(o.fids for o  in ops))))

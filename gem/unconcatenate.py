@@ -56,7 +56,7 @@ from itertools import chain
 import numpy
 
 from gem.node import Memoizer, reuse_if_untouched
-from gem.gem import (ComponentTensor, Concatenate, TensorConcat,
+from gem.gem import (ComponentTensor, Concatenate, TensorConcatenate,
                      FlexiblyIndexed, Index, Indexed, Literal,
                      Node, partial_indexed,
                      reshape, view)
@@ -257,7 +257,7 @@ _flatten.register(Node)(reuse_if_untouched)
 
 
 @_flatten.register(Concatenate)
-@_flatten.register(TensorConcat)
+@_flatten.register(TensorConcatenate)
 def _flatten_concatenate(node, self):
     result, = evaluate([node])
     return partial_indexed(Literal(result.arr), result.fids)

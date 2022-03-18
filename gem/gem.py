@@ -15,7 +15,7 @@ indices.
 """
 
 from abc import ABCMeta
-from itertools import chain
+from itertools import chain, repeat
 from operator import attrgetter
 from numbers import Integral, Number
 
@@ -30,7 +30,7 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'MathFunction', 'MinValue', 'MaxValue', 'Comparison',
            'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
-           'IndexSum', 'ListTensor', 'Concatenate', 'TensorConcat', 'Delta',
+           'IndexSum', 'ListTensor', 'Concatenate', 'TensorConcatenate', 'Delta',
            'index_sum', 'partial_indexed', 'reshape', 'view',
            'indices', 'as_gem', 'FlexiblyIndexed',
            'Inverse', 'Solve']
@@ -784,7 +784,20 @@ class Concatenate(Node):
         return (int(sum(numpy.prod(child.shape, dtype=int) for child in self.children)),)
 
 
-class TensorConcat(Node):
+class TensorConcatenate(Node):
+    """Generalisation of :class:`Concatenate`.
+
+    Reshape and concatenate expressions by shape.
+
+    :arg splits: For each child, along which axes to split the shape
+         (shape in the same split component is flattened).
+    :arg children: GEM nodes to concatenate (may be different shapes)
+
+    :returns: The concatenation of the gem nodes.
+
+    Let the maximum length of a split be N, then the number of shape axes is N+1.
+
+    """
     __slots__ = ('splits', 'children', 'shape')
     __front__ = ('splits',)
 
@@ -793,13 +806,15 @@ class TensorConcat(Node):
         assert len(splits) == len(children)
         self = super().__new__(cls)
         self.children = tuple(children)
+        rank = max(map(len, splits)) + 1
         flat_shapes = []
         for split, child in zip(splits, children):
-            assert split <= len(child.shape)
-            a, b = child.shape[:split], child.shape[split:]
-            a = int(numpy.prod(a, dtype=int))
-            b = int(numpy.prod(b, dtype=int))
-            flat_shapes.append((a, b))
+            slices = tuple(slice(start, stop)
+                           for start, stop in zip((0, *split), (*split, None)))
+
+            concat_shapes = tuple(int(numpy.prod(child.shape[s], dtype=int))
+                                  for s in slices)
+            flat_shapes.append(concat_shapes + tuple(repeat(1, len(concat_shapes) - rank)))
         self.shape = tuple(map(sum, zip(*flat_shapes)))
         self.splits = splits
         return self
