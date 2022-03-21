@@ -68,9 +68,8 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
     kernels = []
     for integral_data in fd.integral_data:
         start = time.time()
-        kernel = compile_integral(integral_data, fd, prefix, parameters, interface=interface, coffee=coffee, diagonal=diagonal)
-        if kernel is not None:
-            kernels.append(kernel)
+        kernels.extend(compile_integral(integral_data, fd, prefix, parameters,
+                                        interface=interface, coffee=coffee, diagonal=diagonal))
         logger.info(GREEN % "compile_integral finished in %g seconds.", time.time() - start)
 
     logger.info(GREEN % "TSFC finished in %g seconds.", time.time() - cpu_time)
@@ -103,42 +102,51 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
         raise NotImplementedError("Sorry, we can't assemble the diagonal of a form for interior facet integrals")
     mesh = integral_data.domain
     arguments = form_data.preprocessed_form.arguments()
-    kernel_name = "%s_%s_integral_%s" % (prefix, integral_type, integral_data.subdomain_id)
-    # Handle negative subdomain_id
-    kernel_name = kernel_name.replace("-", "_")
-    # Dict mapping domains to index in original_form.ufl_domains()
-    domain_numbering = form_data.original_form.domain_numbering()
-    domain_number = domain_numbering[integral_data.domain]
-    coefficients = [form_data.function_replace_map[c] for c in integral_data.integral_coefficients]
-    # This is which coefficient in the original form the
-    # current coefficient is.
-    # Consider f*v*dx + g*v*ds, the full form contains two
-    # coefficients, but each integral only requires one.
-    coefficient_numbers = tuple(form_data.original_coefficient_positions[i]
-                                for i, (_, enabled) in enumerate(zip(form_data.reduced_coefficients, integral_data.enabled_coefficients))
-                                if enabled)
-    integral_data_info = TSFCIntegralDataInfo(domain=integral_data.domain,
-                                              integral_type=integral_data.integral_type,
-                                              subdomain_id=integral_data.subdomain_id,
-                                              domain_number=domain_number,
-                                              arguments=arguments,
-                                              coefficients=coefficients,
-                                              coefficient_numbers=coefficient_numbers)
-    builder = interface(integral_data_info,
-                        scalar_type,
-                        diagonal=diagonal)
-    builder.set_coordinates(mesh)
-    builder.set_cell_sizes(mesh)
-    builder.set_coefficients(integral_data, form_data)
-    ctx = builder.create_context()
-    for integral in integral_data.integrals:
-        params = parameters.copy()
-        params.update(integral.metadata())  # integral metadata overrides
-        integrand = ufl.replace(integral.integrand(), form_data.function_replace_map)
-        integrand_exprs = builder.compile_integrand(integrand, params, ctx)
-        integral_exprs = builder.construct_integrals(integrand_exprs, params)
-        builder.stash_integrals(integral_exprs, params, ctx)
-    return builder.construct_kernel(kernel_name, ctx)
+
+    # TODO Integrals with the same integrand but different subdomain_ids now share
+    # the same integral_data. We should refactor this pipeline to avoid generating
+    # code for each subdomain independently.
+    kernels = []
+    for subdomain_id in integral_data.subdomain_id:
+        kernel_name = f"{prefix}_{integral_type}_integral_{subdomain_id}"
+        # Handle negative subdomain_id
+        kernel_name = kernel_name.replace("-", "_")
+        # Dict mapping domains to index in original_form.ufl_domains()
+        domain_numbering = form_data.original_form.domain_numbering()
+        domain_number = domain_numbering[integral_data.domain]
+        coefficients = [form_data.function_replace_map[c] for c in integral_data.integral_coefficients]
+        # This is which coefficient in the original form the
+        # current coefficient is.
+        # Consider f*v*dx + g*v*ds, the full form contains two
+        # coefficients, but each integral only requires one.
+        coefficient_numbers = tuple(form_data.original_coefficient_positions[i]
+                                    for i, (_, enabled) in enumerate(zip(form_data.reduced_coefficients, integral_data.enabled_coefficients))
+                                    if enabled)
+        integral_data_info = TSFCIntegralDataInfo(domain=integral_data.domain,
+                                                  integral_type=integral_data.integral_type,
+                                                  subdomain_id=subdomain_id,
+                                                  domain_number=domain_number,
+                                                  arguments=arguments,
+                                                  coefficients=coefficients,
+                                                  coefficient_numbers=coefficient_numbers)
+        builder = interface(integral_data_info,
+                            scalar_type,
+                            diagonal=diagonal)
+        builder.set_coordinates(mesh)
+        builder.set_cell_sizes(mesh)
+        builder.set_coefficients(integral_data, form_data)
+        ctx = builder.create_context()
+        for integral in integral_data.integrals:
+            params = parameters.copy()
+            params.update(integral.metadata())  # integral metadata overrides
+            integrand = ufl.replace(integral.integrand(), form_data.function_replace_map)
+            integrand_exprs = builder.compile_integrand(integrand, params, ctx)
+            integral_exprs = builder.construct_integrals(integrand_exprs, params)
+            builder.stash_integrals(integral_exprs, params, ctx)
+        kernel = builder.construct_kernel(kernel_name, ctx)
+        if kernel:
+            kernels.append(kernel)
+    return tuple(kernels)
 
 
 def preprocess_parameters(parameters):
