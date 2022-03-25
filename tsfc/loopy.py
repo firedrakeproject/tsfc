@@ -200,7 +200,7 @@ def active_indices(mapping, ctx):
 
 
 def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_names=[],
-             return_increments=True, log=False, return_ctx=False):
+             return_increments=True, return_ctx=False, log=False):
     """Generates loopy code.
 
     :arg impero_c: ImperoC tuple with Impero AST and other data
@@ -248,7 +248,7 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     # Prevent loopy interchange by loopy
     knl = lp.prioritize_loops(knl, ",".join(ctx.index_extent.keys()))
 
-    return (knl, ctx), event_name if return_ctx else knl, event_name
+    return (knl, ctx, event_name) if return_ctx else (knl, event_name)
 
 
 def create_domains(indices):
