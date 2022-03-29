@@ -353,7 +353,7 @@ def statement_evaluate(leaf, ctx):
 
         return [lp.CallInstruction(lhs, rhs, within_inames=ctx.active_inames())]
     elif isinstance(expr, gem.Solve):
-        name = "mtf_solve" if expr.matfree else "solve"
+        name = "mtf_solve" if getattr(expr.ctx, "matfree") else "solve"
         idx = ctx.pymbolic_multiindex(expr.shape)
         var = ctx.pymbolic_variable(expr)
         lhs = (SubArrayRef(idx, p.Subscript(var, idx)),)
