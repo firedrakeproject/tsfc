@@ -18,6 +18,7 @@ from abc import ABCMeta
 from itertools import chain
 from operator import attrgetter
 from numbers import Integral, Number
+import collections
 
 import numpy
 from numpy import asarray
@@ -33,7 +34,15 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'IndexSum', 'ListTensor', 'Concatenate', 'Delta',
            'index_sum', 'partial_indexed', 'reshape', 'view',
            'indices', 'as_gem', 'FlexiblyIndexed',
-           'Inverse', 'Solve', 'Action']
+           'Inverse', 'Solve', 'Action', 'MatfreeSolveContext']
+
+
+MatfreeSolveContext = collections.namedtuple("MatfreeSolveContext",
+                                             ["matfree",
+                                             "Aonx",
+                                             "Aonp",
+                                             "rtol",
+                                             "atol"])
 
 
 class NodeMeta(type):
@@ -836,11 +845,14 @@ class Solve(Node):
 
     Represents the X obtained by solving AX = B.
     """
-    __slots__ = ('children', 'shape', 'matfree', 'Aonp', 'Aonx', 'name', 'rtol', 'atol')
-    __back__ = ('matfree', 'Aonp', 'Aonx', 'name', 'rtol', 'atol')
-    id = 0
+    __slots__ = ('children', 'shape', 'name', 'ctx')
+    __back__ = ('name', 'ctx')
 
-    def __new__(cls, A, B, matfree=False, Aonp=None, Aonx=None, name="", rtol=None, atol=None):
+    id = 0
+    defaults = {"matfree": False, "Aonx": None, "Aonp": None,
+                "rtol": None, "atol": None}
+
+    def __new__(cls, A, B, name="", ctx=MatfreeSolveContext(**defaults)):
         # Shape requirements
         assert B.shape
         assert len(A.shape) == 2
@@ -850,11 +862,15 @@ class Solve(Node):
         self = super(Solve, cls).__new__(cls)
         self.children = (A, B)
         self.shape = A.shape[1:] + B.shape[1:]
-        self.matfree = matfree
-        self.Aonp = Aonp
-        self.Aonx = Aonx
-        self.rtol = rtol
-        self.atol = atol
+
+        # Values in default args are overwritten if there is a corresponding kwarg
+        assert (all(k in Solve.defaults for k in ctx),
+                (f"A key in the optional dict ctx is not valid."
+                 f"All keys have to be one of {Solve.defaults}."))
+        # It's not save to make defaults a nested dict
+        updated_ctx = cls.defaults.copy()
+        updated_ctx.update(ctx._asdict())
+        self.ctx = MatfreeSolveContext(**updated_ctx)
         
 
         # When nodes are reconstructed in the GEM optimiser,
