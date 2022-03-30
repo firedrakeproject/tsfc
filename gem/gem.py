@@ -37,13 +37,14 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'Inverse', 'Solve', 'Action', 'MatfreeSolveContext']
 
 
+# Defaults are in the order of items in MatfreeSolveContext
 MatfreeSolveContext = collections.namedtuple("MatfreeSolveContext",
                                              ["matfree",
-                                             "Aonx",
-                                             "Aonp",
-                                             "rtol",
-                                             "atol"])
-
+                                              "Aonx",
+                                              "Aonp",
+                                              "rtol",
+                                              "atol"])
+DEFAULT_MSC = MatfreeSolveContext(*(False, None, None, "1.e-8", "1.e-50"))
 
 class NodeMeta(type):
     """Metaclass of GEM nodes.
@@ -849,10 +850,8 @@ class Solve(Node):
     __back__ = ('name', 'ctx')
 
     id = 0
-    defaults = {"matfree": False, "Aonx": None, "Aonp": None,
-                "rtol": None, "atol": None}
 
-    def __new__(cls, A, B, name="", ctx=MatfreeSolveContext(**defaults)):
+    def __new__(cls, A, B, name="", ctx=DEFAULT_MSC):
         # Shape requirements
         assert B.shape
         assert len(A.shape) == 2
@@ -863,12 +862,11 @@ class Solve(Node):
         self.children = (A, B)
         self.shape = A.shape[1:] + B.shape[1:]
 
+        # We use a ctx rather than kwargs because then __slots__ and __back__ are independent
+        # of the extra arguments passed for the matrix-free, iterative solver
         # Values in default args are overwritten if there is a corresponding kwarg
-        assert (all(k in Solve.defaults for k in ctx),
-                (f"A key in the optional dict ctx is not valid."
-                 f"All keys have to be one of {Solve.defaults}."))
         # It's not save to make defaults a nested dict
-        updated_ctx = cls.defaults.copy()
+        updated_ctx = DEFAULT_MSC._asdict().copy()
         updated_ctx.update(ctx._asdict())
         self.ctx = MatfreeSolveContext(**updated_ctx)
         
