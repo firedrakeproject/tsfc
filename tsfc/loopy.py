@@ -359,7 +359,8 @@ def statement_evaluate(leaf, ctx):
         lhs = (SubArrayRef(idx, p.Subscript(var, idx)),)
 
         reads = []
-        childs = expr.children+(expr.preconditioner,) if expr.preconditioner else expr.children
+        prec = getattr(expr.ctx, "preconditioner")
+        childs = expr.children+(prec,) if prec else expr.children
         for child in childs:
             idx_reads = ctx.pymbolic_multiindex(child.shape)
             var_reads = ctx.pymbolic_variable(child)
