@@ -47,7 +47,7 @@ MatfreeSolveContext = collections.namedtuple("MatfreeSolveContext",
                                               "diag_prec",
                                               "rtol",
                                               "atol"])
-DEFAULT_MSC = MatfreeSolveContext(*(False, None, None, None, None, False, "1.e-8", "1.e-50"))
+DEFAULT_MSC = MatfreeSolveContext(*(False, None, None, None, None, False, "1.e-12", "1.e-70"))
 
 class NodeMeta(type):
     """Metaclass of GEM nodes.
