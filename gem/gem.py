@@ -548,6 +548,8 @@ class Indexed(Scalar):
             assert isinstance(index, IndexBase)
             if isinstance(index, Index):
                 index.set_extent(extent)
+            elif isinstance(index, int) and not (0 <= index < extent):
+                raise IndexError("Invalid literal index")
 
         # Empty multiindex
         if not multiindex:
