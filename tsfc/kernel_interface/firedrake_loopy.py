@@ -19,8 +19,11 @@ from tsfc.loopy import generate as generate_loopy
 
 
 # Expression kernel description type
-ExpressionKernel = namedtuple('ExpressionKernel', ['ast', 'oriented', 'needs_cell_sizes', 'coefficients',
-                                                   'first_coefficient_fake_coords', 'tabulations', 'name', 'arguments', 'flop_count'])
+ExpressionKernel = namedtuple('ExpressionKernel', ['ast', 'oriented', 'needs_cell_sizes',
+                                                   'coefficient_numbers',
+                                                   'needs_external_coords',
+                                                   'tabulations', 'name', 'arguments',
+                                                   'flop_count', 'event'])
 
 
 def make_builder(*args, **kwargs):
@@ -30,7 +33,7 @@ def make_builder(*args, **kwargs):
 class Kernel:
     __slots__ = ("ast", "arguments", "integral_type", "oriented", "subdomain_id",
                  "domain_number", "needs_cell_sizes", "tabulations",
-                 "coefficient_numbers", "name", "flop_count",
+                 "coefficient_numbers", "name", "flop_count", "event",
                  "__weakref__")
     """A compiled Kernel object.
 
@@ -47,6 +50,7 @@ class Kernel:
     :kwarg needs_cell_sizes: Does the kernel require cell sizes.
     :kwarg name: The name of this kernel.
     :kwarg flop_count: Estimated total flops for this kernel.
+    :kwarg event: name for logging event
     """
     def __init__(self, ast=None, arguments=None, integral_type=None, oriented=False,
                  subdomain_id=None, domain_number=None,
@@ -54,7 +58,8 @@ class Kernel:
                  needs_cell_sizes=False,
                  tabulations=None,
                  flop_count=0,
-                 name=None):
+                 name=None,
+                 event=None):
         # Defaults
         self.ast = ast
         self.arguments = arguments
@@ -67,6 +72,7 @@ class Kernel:
         self.tabulations = tabulations
         self.flop_count = flop_count
         self.name = name
+        self.event = event
 
 
 class KernelBuilderBase(_KernelBuilderBase):
@@ -144,23 +150,28 @@ class ExpressionKernelBuilder(KernelBuilderBase):
 
         :arg coefficients: UFL coefficients from Firedrake
         """
-        self.coefficients = []  # Firedrake coefficients for calling the kernel
         self.coefficient_split = {}
         self.kernel_args = []
 
         for i, coefficient in enumerate(coefficients):
             if type(coefficient.ufl_element()) == ufl_MixedElement:
                 subcoeffs = coefficient.split()  # Firedrake-specific
-                self.coefficients.extend(subcoeffs)
                 self.coefficient_split[coefficient] = subcoeffs
                 coeff_loopy_args = [self._coefficient(subcoeff, f"w_{i}_{j}")
                                     for j, subcoeff in enumerate(subcoeffs)]
                 self.kernel_args += [kernel_args.CoefficientKernelArg(a)
                                      for a in coeff_loopy_args]
             else:
-                self.coefficients.append(coefficient)
                 coeff_loopy_arg = self._coefficient(coefficient, f"w_{i}")
                 self.kernel_args.append(kernel_args.CoefficientKernelArg(coeff_loopy_arg))
+
+    def set_coefficient_numbers(self, coefficient_numbers):
+        """Store the coefficient indices of the original form.
+
+        :arg coefficient_numbers: Iterable of indices describing which coefficients
+            from the input expression need to be passed in to the kernel.
+        """
+        self.coefficient_numbers = coefficient_numbers
 
     def register_requirements(self, ir):
         """Inspect what is referenced by the IR that needs to be
@@ -172,13 +183,15 @@ class ExpressionKernelBuilder(KernelBuilderBase):
         loopy_arg = lp.GlobalArg(o.name, dtype=self.scalar_type, shape=o.shape)
         self.output_arg = kernel_args.OutputKernelArg(loopy_arg)
 
-    def construct_kernel(self, impero_c, index_names, first_coefficient_fake_coords):
+    def construct_kernel(self, impero_c, index_names, needs_external_coords, log=False):
         """Constructs an :class:`ExpressionKernel`.
 
         :arg impero_c: gem.ImperoC object that represents the kernel
         :arg index_names: pre-assigned index names
-        :arg first_coefficient_fake_coords: If true, the kernel's first
-            coefficient is a constructed UFL coordinate field
+        :arg needs_external_coords: If ``True``, the first argument to
+            the kernel is an externally provided coordinate field.
+        :arg log: bool if the Kernel should be profiled with Log events
+
         :returns: :class:`ExpressionKernel` object
         """
         args = [self.output_arg]
@@ -194,11 +207,11 @@ class ExpressionKernelBuilder(KernelBuilderBase):
         loopy_args = [arg.loopy_arg for arg in args]
 
         name = "expression_kernel"
-        loopy_kernel = generate_loopy(impero_c, loopy_args, self.scalar_type,
-                                      name, index_names)
+        loopy_kernel, event = generate_loopy(impero_c, loopy_args, self.scalar_type,
+                                             name, index_names, log=log)
         return ExpressionKernel(loopy_kernel, self.oriented, self.cell_sizes,
-                                self.coefficients, first_coefficient_fake_coords,
-                                self.tabulations, name, args, count_flops(impero_c))
+                                self.coefficient_numbers, needs_external_coords,
+                                self.tabulations, name, args, count_flops(impero_c), event)
 
 
 class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
@@ -301,7 +314,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         provided by the kernel interface."""
         return check_requirements(ir)
 
-    def construct_kernel(self, name, ctx):
+    def construct_kernel(self, name, ctx, log=False):
         """Construct a fully built :class:`Kernel`.
 
         This function contains the logic for building the argument
@@ -309,6 +322,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
 
         :arg name: kernel name
         :arg ctx: kernel builder context to get impero_c from
+        :arg log: bool if the Kernel should be profiled with Log events
         :returns: :class:`Kernel` object
         """
         impero_c, oriented, needs_cell_sizes, tabulations = self.compile_gem(ctx)
@@ -331,8 +345,8 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
             tab_loopy_arg = lp.GlobalArg(name_, dtype=self.scalar_type, shape=shape)
             args.append(kernel_args.TabulationKernelArg(tab_loopy_arg))
         index_names = get_index_names(ctx['quadrature_indices'], self.argument_multiindices, ctx['index_cache'])
-        ast = generate_loopy(impero_c, [arg.loopy_arg for arg in args],
-                             self.scalar_type, name, index_names)
+        ast, event_name = generate_loopy(impero_c, [arg.loopy_arg for arg in args],
+                                         self.scalar_type, name, index_names, log=log)
         flop_count = count_flops(impero_c)  # Estimated total flops for this kernel.
         return Kernel(ast=ast,
                       arguments=tuple(args),
@@ -344,7 +358,8 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
                       needs_cell_sizes=needs_cell_sizes,
                       tabulations=tabulations,
                       flop_count=flop_count,
-                      name=name)
+                      name=name,
+                      event=event_name)
 
     def construct_empty_kernel(self, name):
         """Return None, since Firedrake needs no empty kernels.
