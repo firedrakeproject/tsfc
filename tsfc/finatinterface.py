@@ -68,6 +68,8 @@ supported_elements = {
     "RTCF": None,
     "NCE": None,
     "NCF": None,
+    "RTCF Trace": None,
+    "NCF Trace": None,
     "Real": finat.Real,
     "DPC": finat.DPC,
     "S": finat.Serendipity,
