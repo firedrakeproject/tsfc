@@ -144,10 +144,10 @@ def convert_finiteelement(element, **kwargs):
             lmbda = finat.Lagrange
         elif kind == 'spectral' and element.cell().cellname() == 'interval':
             lmbda = finat.GaussLobattoLegendre
-        elif kind in ['fdm', 'fdm_facet', 'fdm_h1'] and element.cell().cellname() == 'interval':
+        elif kind in ['fdm', 'fdm_feec', 'fdm_facet'] and element.cell().cellname() == 'interval':
             lmbda = finat.FDMLagrange
         elif kind == 'fdm_broken' and element.cell().cellname() == 'interval':
-            lmbda = finat.FDMDiscontinuousH1
+            lmbda = finat.FDMBrokenH1
         elif kind == 'fdm_hermite' and element.cell().cellname() == 'interval':
             lmbda = finat.FDMHermite
         elif kind in ['mgd', 'feec', 'qb', 'mse']:
@@ -168,10 +168,10 @@ def convert_finiteelement(element, **kwargs):
             lmbda = finat.GaussLegendre
         elif kind == 'fdm' and element.cell().cellname() == 'interval':
             lmbda = lambda *args: finat.DiscontinuousElement(finat.FDMLagrange(*args))
+        elif kind == 'fdm_feec' and element.cell().cellname() == 'interval':
+            lmbda = finat.FDMDiscontinuousLagrange
         elif kind in ['fdm_broken', 'fdm_facet'] and element.cell().cellname() == 'interval':
-            lmbda = finat.FDMDiscontinuousL2
-        elif kind == 'fdm_h1' and element.cell().cellname() == 'interval':
-            lmbda = lambda *args: finat.DiscontinuousElement(finat.FDMDiscontinuousH1(*args))
+            lmbda = finat.FDMBrokenL2
         elif kind in ['mgd', 'feec', 'qb', 'mse']:
             degree = element.degree()
             shift_axes = kwargs["shift_axes"]
