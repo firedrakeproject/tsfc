@@ -22,7 +22,7 @@ from numbers import Integral, Number
 import numpy
 from numpy import asarray
 
-from gem.node import Node as NodeBase
+from gem.node import Node as NodeBase, traversal
 
 
 __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
@@ -33,7 +33,7 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'IndexSum', 'ListTensor', 'Concatenate', 'Delta',
            'index_sum', 'partial_indexed', 'reshape', 'view',
            'indices', 'as_gem', 'FlexiblyIndexed',
-           'Inverse', 'Solve']
+           'Inverse', 'Solve', 'extract_type']
 
 
 class NodeMeta(type):
@@ -1041,3 +1041,8 @@ def as_gem(expr):
         return Literal(expr)
     else:
         raise ValueError("Do not know how to convert %r to GEM" % expr)
+
+
+def extract_type(expressions, klass):
+    """Collects objects of type klass in expressions."""
+    return tuple(node for node in traversal(expressions) if isinstance(node, klass))
