@@ -148,6 +148,8 @@ def convert_finiteelement(element, **kwargs):
             lmbda = finat.GaussLobattoLegendre
         elif kind in ['fdm', 'fdm_feec', 'fdm_facet'] and element.cell().cellname() == 'interval':
             lmbda = finat.FDMLagrange
+        elif kind == 'fdm_quadrature' and element.cell().cellname() == 'interval':
+            lmbda = finat.FDMQuadrature
         elif kind == 'fdm_broken' and element.cell().cellname() == 'interval':
             lmbda = finat.FDMBrokenH1
         elif kind == 'fdm_hermite' and element.cell().cellname() == 'interval':
@@ -170,7 +172,7 @@ def convert_finiteelement(element, **kwargs):
             lmbda = finat.GaussLegendre
         elif kind == 'fdm' and element.cell().cellname() == 'interval':
             lmbda = lambda *args: finat.DiscontinuousElement(finat.FDMLagrange(*args))
-        elif kind == 'fdm_feec' and element.cell().cellname() == 'interval':
+        elif kind in ['fdm_feec', 'fdm_quadrature'] and element.cell().cellname() == 'interval':
             lmbda = finat.FDMDiscontinuousLagrange
         elif kind in ['fdm_broken', 'fdm_facet'] and element.cell().cellname() == 'interval':
             lmbda = finat.FDMBrokenL2
