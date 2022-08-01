@@ -656,13 +656,21 @@ class ComponentTensor(Node):
             return Zero(shape)
 
         self = super(ComponentTensor, cls).__new__(cls)
-        self.children = (expression,)
         self.multiindex = multiindex
         self.shape = shape
 
         # Collect free indices
-        assert set(multiindex) <= set(expression.free_indices)
-        self.free_indices = unique(set(expression.free_indices) - set(multiindex))
+        if set(multiindex) <= set(expression.free_indices):
+            self.children = (expression,)
+            self.free_indices = unique(set(expression.free_indices) - set(multiindex))
+        elif set(expression.free_indices) < set(multiindex):
+            # Broadcast for missing indices
+            missing = unique(set(multiindex) - set(expression.free_indices))
+            a = numpy.ones(tuple(index.extent for index in missing))
+            self.children = (Product(Indexed(Literal(a), missing), expression), )
+            self.free_indices = ()
+        else:
+            raise ValueError(f"Unable to make ComponentTensor from expression = {expression} and multiindex = {multiindex}.")
 
         return self
 
