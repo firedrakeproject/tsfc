@@ -155,6 +155,35 @@ def remove_componenttensors(expressions):
     return [mapper(expression, ()) for expression in expressions]
 
 
+@singledispatch
+def _constant_fold_zero(node, self):
+    raise AssertionError("cannot handle type %s" % type(node))
+
+
+_constant_fold_zero.register(Node)(reuse_if_untouched)
+
+
+@_constant_fold_zero.register(Literal)
+def _constant_fold_zero_literal(node, self):
+    if (node.array == 0).all():
+        # All zeros, make symbolic zero
+        return Zero(node.shape)
+    else:
+        return node
+
+
+def constant_fold_zero(exprs):
+    """Produce symbolic zeros from Literals
+
+    :arg exprs: An iterable of gem expressions.
+    :returns: A list of gem expressions where any Literal containing
+        only zeros is replaced by symbolic Zero of the appropriate
+        shape.
+    """
+    mapper = Memoizer(_constant_fold_zero)
+    return [mapper(e) for e in exprs]
+
+
 def _select_expression(expressions, index):
     """Helper function to select an expression from a list of
     expressions with an index.  This function expect sanitised input,
