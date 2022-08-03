@@ -172,6 +172,17 @@ def _constant_fold_zero_literal(node, self):
         return node
 
 
+@_constant_fold_zero.register(ListTensor)
+def _constant_fold_zero_listtensor(node, self):
+    new_children = list(map(self, node.children))
+    if all(isinstance(nc, Zero) for nc in new_children):
+        return Zero(node.shape)
+    elif all(nc == c for nc, c in zip(new_children, node.children)):
+        return node
+    else:
+        return node.reconstruct(*new_children)
+
+
 def constant_fold_zero(exprs):
     """Produce symbolic zeros from Literals
 
