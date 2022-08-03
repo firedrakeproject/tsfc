@@ -211,11 +211,7 @@ class Literal(Constant):
 
     def __new__(cls, array):
         array = asarray(array)
-        if (array == 0).all():
-            # All zeros, make symbolic zero
-            return Zero(array.shape)
-        else:
-            return super(Literal, cls).__new__(cls)
+        return super(Literal, cls).__new__(cls)
 
     def __init__(self, array):
         array = asarray(array)
