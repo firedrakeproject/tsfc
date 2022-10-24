@@ -146,6 +146,8 @@ def convert_finiteelement(element, **kwargs):
             lmbda = finat.Lagrange
         elif kind == 'spectral' and element.cell().cellname() == 'interval':
             lmbda = finat.GaussLobattoLegendre
+        elif kind == 'hierarchical' and element.cell().cellname() == 'interval':
+            lmbda = finat.IntegratedLegendre
         elif kind in ['fdm', 'fdm_feec', 'fdm_facet'] and element.cell().cellname() == 'interval':
             lmbda = finat.FDMLagrange
         elif kind == 'fdm_quadrature' and element.cell().cellname() == 'interval':
@@ -170,6 +172,8 @@ def convert_finiteelement(element, **kwargs):
             lmbda = finat.DiscontinuousLagrange
         elif kind == 'spectral' and element.cell().cellname() == 'interval':
             lmbda = finat.GaussLegendre
+        elif kind == 'hierarchical' and element.cell().cellname() == 'interval':
+            lmbda = finat.Legendre
         elif kind == 'fdm' and element.cell().cellname() == 'interval':
             lmbda = lambda *args: finat.DiscontinuousElement(finat.FDMLagrange(*args))
         elif kind in ['fdm_feec', 'fdm_quadrature'] and element.cell().cellname() == 'interval':
