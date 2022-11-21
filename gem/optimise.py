@@ -190,6 +190,10 @@ def constant_fold_zero(exprs):
     :returns: A list of gem expressions where any Literal containing
         only zeros is replaced by symbolic Zero of the appropriate
         shape.
+
+    We need a separate path for ListTensor so that its `reconstruct`
+    method will not be called when the new children are `Zero()`s;
+    otherwise Literal `0`s would be reintroduced.
     """
     mapper = Memoizer(_constant_fold_zero)
     return [mapper(e) for e in exprs]
