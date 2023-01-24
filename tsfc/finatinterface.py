@@ -78,6 +78,7 @@ supported_elements = {
     "Gauss-Legendre L2": finat.GaussLegendre,
     "DQ L2": None,
     "Direct Serendipity": finat.DirectSerendipity,
+    "Provide Basis": finat.Provide_Basis,
 }
 """A :class:`.dict` mapping UFL element family names to their
 FInAT-equivalent constructors.  If the value is ``None``, the UFL
@@ -184,6 +185,8 @@ def convert_finiteelement(element, **kwargs):
             element = element.reconstruct(cell=ufl.cell.hypercube(2))
         elif element.cell().geometric_dimension() == 3:
             element = element.reconstruct(cell=ufl.cell.hypercube(3))
+    elif element.family() == "Provide Basis":
+        lmbda = partial(lmbda, basis=element.basis())
 
     return lmbda(cell, element.degree()), set()
 
