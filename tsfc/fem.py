@@ -31,6 +31,8 @@ from gem.optimise import ffc_rounding, constant_fold_zero
 from gem.unconcatenate import unconcatenate
 from gem.utils import cached_property
 
+import finat
+from finat.finiteelementbase import FiniteElementBase
 from finat.physically_mapped import PhysicalGeometry, NeedsCoordinateMappingElement
 from finat.point_set import PointSet, PointSingleton
 from finat.quadrature import make_quadrature
@@ -246,12 +248,64 @@ class CoordinateMapping(PhysicalGeometry):
         return self.physical_points(vs)
 
 
+@singledispatch
 def needs_coordinate_mapping(element):
+    raise AssertionError(f"Don't know how to handle {type(element)}")
+
+
+@needs_coordinate_mapping.register(ufl.FiniteElementBase)
+def _needs_coordinate_mapping_ufl(element):
     """Does this UFL element require a CoordinateMapping for translation?"""
     if element.family() == 'Real':
         return False
     else:
-        return isinstance(create_element(element), NeedsCoordinateMappingElement)
+        return needs_coordinate_mapping(create_element(element))
+
+
+@needs_coordinate_mapping.register(NeedsCoordinateMappingElement)
+def _needs_coordinate_mapping_finat_needs_coordinate_mapping(element):
+    return True
+
+
+@needs_coordinate_mapping.register(FiniteElementBase)
+def _needs_coordinate_mapping_finat_base(element):
+    return False
+
+
+@needs_coordinate_mapping.register(finat.DiscontinuousElement)
+def _needs_coordinate_mapping_finat_discontinuous(element):
+    return needs_coordinate_mapping(element.element)
+
+
+@needs_coordinate_mapping.register(finat.FlattenedDimensions)
+def _needs_coordinate_mapping_finat_cube(element):
+    return needs_coordinate_mapping(element.product)
+
+
+@needs_coordinate_mapping.register(finat.TensorProductElement)
+def _needs_coordinate_mapping_finat_tpe(element):
+    return any(map(needs_coordinate_mapping, element.factors))
+
+
+@needs_coordinate_mapping.register(finat.TensorFiniteElement)
+def _needs_coordinate_mapping_finat_tfe(element):
+    return needs_coordinate_mapping(element.base_element)
+
+
+@needs_coordinate_mapping.register(finat.EnrichedElement)
+def _needs_coordinate_mapping_finat_enriched(element):
+    return any(map(needs_coordinate_mapping, element.elements))
+
+
+@needs_coordinate_mapping.register(finat.mixed.MixedSubElement)
+def _needs_coordinate_mapping_finat_mixed(element):
+    return needs_coordinate_mapping(element.element)
+
+
+@needs_coordinate_mapping.register(finat.HDivElement)
+@needs_coordinate_mapping.register(finat.HCurlElement)
+def _needs_coordinate_mapping_finat_hdivcurl(element):
+    return needs_coordinate_mapping(element.wrappee)
 
 
 class PointSetContext(ContextBase):
