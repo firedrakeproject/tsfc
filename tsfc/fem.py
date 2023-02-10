@@ -10,16 +10,15 @@ import numpy
 import ufl
 from ufl.corealg.map_dag import map_expr_dag, map_expr_dags
 from ufl.corealg.multifunction import MultiFunction
-from ufl.classes import (Argument, CellCoordinate, CellEdgeVectors,
-                         CellFacetJacobian, CellOrientation,
-                         CellOrigin, CellVertices, CellVolume,
-                         Coefficient, FacetArea, FacetCoordinate,
-                         GeometricQuantity, Jacobian, JacobianDeterminant,
-                         NegativeRestricted, QuadratureWeight,
-                         PositiveRestricted, ReferenceCellVolume,
-                         ReferenceCellEdgeVectors,
-                         ReferenceFacetVolume, ReferenceNormal,
-                         SpatialCoordinate)
+from ufl.classes import (
+    Argument, CellCoordinate, CellEdgeVectors, CellFacetJacobian,
+    CellOrientation, CellOrigin, CellVertices, CellVolume, Coefficient,
+    ConstantValue, FacetArea, FacetCoordinate, GeometricQuantity,
+    Jacobian, JacobianDeterminant, NegativeRestricted,
+    QuadratureWeight, PositiveRestricted, ReferenceCellVolume,
+    ReferenceCellEdgeVectors, ReferenceFacetVolume, ReferenceNormal,
+    SpatialCoordinate
+)
 from ufl.domain import extract_unique_domain
 
 from FIAT.reference_element import make_affine_mapping
@@ -628,6 +627,14 @@ def translate_argument(terminal, mt, ctx):
     table = ctx.entity_selector(callback, mt.restriction)
     return gem.ComponentTensor(gem.Indexed(table, argument_multiindex + sigma), sigma)
 
+
+@translate.register(ConstantValue)
+def translate_constant_value(terminal, mt, ctx):
+    # ~ import pytest; pytest.set_trace()
+    if terminal.ufl_shape:
+        return gem.Literal(terminal.dat.data_ro)
+    else:
+        return gem.Literal(terminal.dat.data_ro[0])
 
 @translate.register(Coefficient)
 def translate_coefficient(terminal, mt, ctx):
