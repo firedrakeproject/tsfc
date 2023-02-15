@@ -8,7 +8,6 @@ import ufl
 from ufl.algorithms import extract_arguments, extract_coefficients
 from ufl.algorithms.analysis import has_type
 from ufl.classes import Form, GeometricQuantity
-from ufl.log import GREEN
 
 import gem
 import gem.impero_utils as impero_utils
@@ -61,6 +60,8 @@ def compile_form(form, prefix="form", parameters=None, interface=None, coffee=Tr
 
     assert isinstance(form, Form)
 
+    GREEN = "\033[1;37;32m%s\033[0m"
+
     # Determine whether in complex mode:
     complex_mode = parameters and is_complex(parameters.get("scalar_type"))
     fd = ufl_utils.compute_form_data(form, complex_mode=complex_mode)
@@ -90,6 +91,9 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, co
     :arg log: bool if the Kernel should be profiled with Log events
     :returns: a kernel constructed by the kernel interface
     """
+    if integral_data.domain.ufl_cell().cellname() == "hexahedron" and \
+       integral_data.integral_type == "interior_facet":
+        raise NotImplementedError("interior facet integration in hex meshes not currently supported")
     parameters = preprocess_parameters(parameters)
     if interface is None:
         if coffee:
