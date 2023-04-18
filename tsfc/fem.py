@@ -45,6 +45,16 @@ from tsfc.ufl_utils import (ModifiedTerminalMixin, PickRestriction,
                             preprocess_expression)
 
 
+"""TODO: write an explanation of why and how to fix properly"""
+# try:
+#     from firedrake.constant import Constant
+# except ImportError:
+#     assert False  # when debugging shouldn't hit
+#     class Constant:
+#         # dummy class
+#         pass
+
+
 class ContextBase(ProxyKernelInterface):
     """Common UFL -> GEM translation context."""
 
@@ -629,12 +639,23 @@ def translate_argument(terminal, mt, ctx):
 
 
 @translate.register(ConstantValue)
+# @translate.register
 def translate_constant_value(terminal, mt, ctx):
-    # ~ import pytest; pytest.set_trace()
-    if terminal.ufl_shape:
-        return gem.Literal(terminal.dat.data_ro)
-    else:
-        return gem.Literal(terminal.dat.data_ro[0])
+    from firedrake import Constant
+
+    if not isinstance(terminal, Constant):
+        raise TypeError
+
+    # import pytest; pytest.set_trace()
+    value_size = numpy.prod(terminal.ufl_shape, dtype=int)
+    expression = gem.reshape(gem.Variable(terminal.name, (value_size,)),
+                             terminal.ufl_shape)
+    return expression
+    # return gem.Variable(terminal.name, terminal.ufl_shape)
+    # if terminal.ufl_shape:
+    #     return gem.Variable(terminal.name, terminal.ufl_shape)
+    # else:
+    #     return gem.Literal(terminal.dat.data_ro[0])
 
 @translate.register(Coefficient)
 def translate_coefficient(terminal, mt, ctx):

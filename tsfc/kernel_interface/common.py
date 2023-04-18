@@ -47,6 +47,9 @@ class KernelBuilderBase(KernelInterface):
         # Coefficients
         self.coefficient_map = collections.OrderedDict()
 
+        # not coefficients
+        self.constant_map = collections.OrderedDict()
+
     @cached_property
     def unsummed_coefficient_indices(self):
         return frozenset()
@@ -430,6 +433,24 @@ def check_requirements(ir):
             elif node.name.startswith("rt_"):
                 rt_tabs[node.name] = node.shape
     return cell_orientations, cell_sizes, tuple(sorted(rt_tabs.items()))
+
+
+def prepare_constant(constant):
+    """Bridges the kernel interface and the GEM abstraction for
+    CONSTANTS.
+
+    FIXME
+
+    :arg coefficient: UFL Coefficient
+    :arg name: unique name to refer to the Coefficient in the kernel
+    :arg interior_facet: interior facet integral?
+    :returns: (funarg, expression)
+         expression - GEM expression referring to the Coefficient
+                      values
+    """
+    value_size = numpy.prod(constant.ufl_shape, dtype=int)
+    return gem.reshape(gem.Variable(constant.name, (value_size,)),
+                       constant.ufl_shape)
 
 
 def prepare_coefficient(coefficient, name, interior_facet=False):
