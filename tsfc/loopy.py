@@ -233,7 +233,7 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     instructions = statement(impero_c.tree, ctx)
 
     # add no-ops to make sure arguments are not silently dropped
-    noop = lp.CInstruction((), "", read_variables=frozenset({a.name for a in args}))
+    noop = lp.CInstruction((), "", read_variables=frozenset({a.name for a in args}), within_inames=frozenset(), within_inames_is_final=True)
     # class loopy.CInstruction(iname_exprs, code, read_variables=frozenset({}), assignees=()
     instructions.append(noop)
 
