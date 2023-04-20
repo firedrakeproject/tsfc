@@ -199,7 +199,7 @@ def active_indices(mapping, ctx):
 
 
 def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_names=[],
-             return_increments=True, log=False):
+             return_increments=True, log=False, stop_early=False):
     """Generates loopy code.
 
     :arg impero_c: ImperoC tuple with Impero AST and other data
@@ -232,6 +232,11 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     # Create instructions
     instructions = statement(impero_c.tree, ctx)
 
+    # add no-ops to make sure arguments are not silently dropped
+    noop = lp.CInstruction((), "", read_variables=frozenset({a.name for a in args}))
+    # class loopy.CInstruction(iname_exprs, code, read_variables=frozenset({}), assignees=()
+    instructions.append(noop)
+
     # Profile the instructions
     instructions, event_name, preamble = profile_insns(kernel_name, instructions, log)
 
@@ -239,6 +244,8 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     domains = create_domains(ctx.index_extent.items())
 
     # Create loopy kernel
+    if stop_early:
+        return domains, instructions, data, kernel_name, target, preamble
     knl = lp.make_function(domains, instructions, data, name=kernel_name, target=target,
                            seq_dependencies=True, silenced_warnings=["summing_if_branches_ops"],
                            lang_version=(2018, 2), preambles=preamble)
