@@ -99,6 +99,7 @@ class KernelBuilderBase(_KernelBuilderBase):
         """
         expr = prepare_coefficient(coefficient, name, interior_facet=self.interior_facet)
         self.coefficient_map[coefficient] = expr
+        return expr
 
     def set_cell_sizes(self, domain):
         """Setup a fake coefficient for "cell sizes".
