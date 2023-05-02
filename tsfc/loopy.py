@@ -214,7 +214,9 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     ctx = LoopyContext(target=target)
     ctx.indices = impero_c.indices
     ctx.index_names = defaultdict(lambda: "i", index_names)
-    ctx.epsilon = numpy.finfo(scalar_type).resolution
+    finfo = numpy.finfo(scalar_type)
+    ctx.precision = finfo.precision
+    ctx.epsilon = finfo.resolution
     ctx.scalar_type = scalar_type
     ctx.return_increments = return_increments
 
@@ -506,8 +508,10 @@ def _expression_scalar(expr, ctx):
         return p.Variable("NAN")
     r = numpy.round(v, 1)
     if r and numpy.abs(v - r) < ctx.epsilon:
-        return r
-    return v
+        return float(("%%.%dg" % ctx.precision) % r)
+        # return r
+    return float(("%%.%dg" % ctx.precision) % v)
+    # return v
 
 
 @_expression.register(gem.Variable)
