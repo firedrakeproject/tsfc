@@ -18,6 +18,7 @@ from tsfc import fem, ufl_utils
 from tsfc.logging import logger
 from tsfc.parameters import default_parameters, is_complex
 from tsfc.ufl_utils import apply_mapping
+import tsfc.kernel_interface.firedrake_loopy as firedrake_interface_loopy
 
 # To handle big forms. The various transformations might need a deeper stack
 sys.setrecursionlimit(3000)
@@ -107,7 +108,6 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, *,
         raise NotImplementedError("interior facet integration in hex meshes not currently supported")
     parameters = preprocess_parameters(parameters)
     if interface is None:
-        import tsfc.kernel_interface.firedrake_loopy as firedrake_interface_loopy
         interface = firedrake_interface_loopy.KernelBuilder
     scalar_type = parameters["scalar_type"]
     integral_type = integral_data.integral_type
