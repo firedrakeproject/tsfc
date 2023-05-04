@@ -95,9 +95,6 @@ def test_functional(cell, order):
     flops = [count_flops(form(cell, int(degree)))
              for degree in degrees]
     rates = numpy.diff(numpy.log(flops)) / numpy.diff(numpy.log(degrees + 1))
-    # FIXME This is failing without this change because the value is 3.16
-    # which is greater than 3. I don't know the best fix.
-    # assert (rates < order+.5).all()
     assert (rates < order).all()
 
 
