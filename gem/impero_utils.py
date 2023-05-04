@@ -2,8 +2,7 @@
 terminal Impero operations, and for building any additional data
 required for straightforward C code generation.
 
-What this module does is independent of whether we eventually generate
-C code or a COFFEE AST.
+What this module does is independent of the generated code target.
 """
 
 import collections
