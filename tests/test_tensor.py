@@ -91,13 +91,10 @@ def test_functional(cell, order):
         return div(f)*dx
 
     dim = cell.topological_dimension()
-    degrees = numpy.arange(1, 7 - dim) + (3 - dim)
+    degrees = numpy.arange(2, 8 - dim) + (3 - dim)
     flops = [count_flops(form(cell, int(degree)))
              for degree in degrees]
     rates = numpy.diff(numpy.log(flops)) / numpy.diff(numpy.log(degrees + 1))
-    # FIXME This is failing without this change because the value is 3.16
-    # which is greater than 3. I don't know the best fix.
-    # assert (rates < order+.5).all()
     assert (rates < order).all()
 
 
