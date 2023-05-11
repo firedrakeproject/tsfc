@@ -646,16 +646,11 @@ def translate_constant_value(terminal, mt, ctx):
     if not isinstance(terminal, Constant):
         raise TypeError
 
-    # import pytest; pytest.set_trace()
     value_size = numpy.prod(terminal.ufl_shape, dtype=int)
     expression = gem.reshape(gem.Variable(terminal.name, (value_size,)),
                              terminal.ufl_shape)
     return expression
-    # return gem.Variable(terminal.name, terminal.ufl_shape)
-    # if terminal.ufl_shape:
-    #     return gem.Variable(terminal.name, terminal.ufl_shape)
-    # else:
-    #     return gem.Literal(terminal.dat.data_ro[0])
+
 
 @translate.register(Coefficient)
 def translate_coefficient(terminal, mt, ctx):
