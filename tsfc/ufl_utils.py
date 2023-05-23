@@ -476,3 +476,11 @@ def apply_mapping(expression, element, domain):
     if rexpression.ufl_shape != element.reference_value_shape():
         raise ValueError(f"Mismatching reference shapes, got {rexpression.ufl_shape} expected {element.reference_value_shape()}")
     return rexpression
+
+
+class TSFCConstantMixin:
+    """ Mixin class to identify Constants """
+
+    def __init__(self):
+        """ Set boolean """
+        self.TSFCConstant = True

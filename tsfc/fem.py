@@ -42,17 +42,7 @@ from tsfc.modified_terminals import (analyse_modified_terminal,
 from tsfc.parameters import is_complex
 from tsfc.ufl_utils import (ModifiedTerminalMixin, PickRestriction,
                             entity_avg, one_times, simplify_abs,
-                            preprocess_expression)
-
-
-"""TODO: write an explanation of why and how to fix properly"""
-# try:
-#     from firedrake.constant import Constant
-# except ImportError:
-#     assert False  # when debugging shouldn't hit
-#     class Constant:
-#         # dummy class
-#         pass
+                            preprocess_expression, TSFCConstantMixin)
 
 
 class ContextBase(ProxyKernelInterface):
@@ -639,11 +629,8 @@ def translate_argument(terminal, mt, ctx):
 
 
 @translate.register(ConstantValue)
-# @translate.register
 def translate_constant_value(terminal, mt, ctx):
-    from firedrake import Constant
-
-    if not isinstance(terminal, Constant):
+    if not isinstance(terminal, TSFCConstantMixin):
         raise TypeError
 
     value_size = numpy.prod(terminal.ufl_shape, dtype=int)
