@@ -69,8 +69,7 @@ def compute_form_data(form,
 
 def extract_firedrake_constants(a):
     """Build a sorted list of all constants in a"""
-    from firedrake import Constant
-    return sorted_by_count(extract_type(a, Constant))
+    return sorted_by_count(extract_type(a, TSFCConstantMixin))
 
 
 def one_times(measure):
