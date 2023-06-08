@@ -368,7 +368,6 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
         # in the list of kernel arguments by investigating
         # `Kernel.coefficient_numbers`.
         # Add return arg
-        # import pdb; pdb.set_trace()
         funarg = self.generate_arg_from_expression(self.return_variables)
         args = [kernel_args.OutputKernelArg(funarg)]
         # Add coordinates arg

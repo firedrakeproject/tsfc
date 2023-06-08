@@ -13,11 +13,10 @@ from ufl.corealg.multifunction import MultiFunction
 from ufl.classes import (
     Argument, CellCoordinate, CellEdgeVectors, CellFacetJacobian,
     CellOrientation, CellOrigin, CellVertices, CellVolume, Coefficient,
-    ConstantValue, FacetArea, FacetCoordinate, GeometricQuantity,
-    Jacobian, JacobianDeterminant, NegativeRestricted,
-    QuadratureWeight, PositiveRestricted, ReferenceCellVolume,
-    ReferenceCellEdgeVectors, ReferenceFacetVolume, ReferenceNormal,
-    SpatialCoordinate
+    FacetArea, FacetCoordinate, GeometricQuantity, Jacobian,
+    JacobianDeterminant, NegativeRestricted, QuadratureWeight,
+    PositiveRestricted, ReferenceCellVolume, ReferenceCellEdgeVectors,
+    ReferenceFacetVolume, ReferenceNormal, SpatialCoordinate
 )
 from ufl.domain import extract_unique_domain
 
@@ -628,14 +627,13 @@ def translate_argument(terminal, mt, ctx):
     return gem.ComponentTensor(gem.Indexed(table, argument_multiindex + sigma), sigma)
 
 
-@translate.register(ConstantValue)
+@translate.register(TSFCConstantMixin)
 def translate_constant_value(terminal, mt, ctx):
-    if not isinstance(terminal, TSFCConstantMixin):
-        raise TypeError
-
     value_size = numpy.prod(terminal.ufl_shape, dtype=int)
-    expression = gem.reshape(gem.Variable(terminal.name, (value_size,)),
-                             terminal.ufl_shape)
+    expression = gem.reshape(
+        gem.Variable(terminal.name, (value_size,)),
+        terminal.ufl_shape
+    )
     return expression
 
 

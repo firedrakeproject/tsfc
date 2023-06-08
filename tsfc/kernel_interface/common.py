@@ -437,16 +437,11 @@ def check_requirements(ir):
 
 def prepare_constant(constant):
     """Bridges the kernel interface and the GEM abstraction for
-    CONSTANTS.
+    Constants.
 
-    FIXME
-
-    :arg coefficient: UFL Coefficient
-    :arg name: unique name to refer to the Coefficient in the kernel
-    :arg interior_facet: interior facet integral?
+    :arg constant: Firedrake Constant
     :returns: (funarg, expression)
-         expression - GEM expression referring to the Coefficient
-                      values
+         expression - GEM expression referring to the Constant value(s)
     """
     value_size = numpy.prod(constant.ufl_shape, dtype=int)
     return gem.reshape(gem.Variable(constant.name, (value_size,)),
