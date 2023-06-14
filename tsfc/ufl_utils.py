@@ -481,5 +481,4 @@ class TSFCConstantMixin:
     """ Mixin class to identify Constants """
 
     def __init__(self):
-        """ Set boolean """
-        self.TSFCConstant = True
+        pass

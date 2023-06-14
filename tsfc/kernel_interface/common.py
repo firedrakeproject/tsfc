@@ -47,7 +47,7 @@ class KernelBuilderBase(KernelInterface):
         # Coefficients
         self.coefficient_map = collections.OrderedDict()
 
-        # not coefficients
+        # Constants
         self.constant_map = collections.OrderedDict()
 
     @cached_property

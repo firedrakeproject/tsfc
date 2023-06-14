@@ -142,7 +142,9 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, *,
     builder.set_coordinates(mesh)
     builder.set_cell_sizes(mesh)
     builder.set_coefficients(integral_data, form_data)
-    builder.set_constants(form_data.constants)  # FIXME: should attach constants to integral data instead
+    # TODO: We do not want pass constants to kernels that do not need them
+    # so we should attach the constants to integral data instead
+    builder.set_constants(form_data.constants)
     ctx = builder.create_context()
     for integral in integral_data.integrals:
         params = parameters.copy()
