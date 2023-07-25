@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-#
 # This file was modified from FFC
 # (http://bitbucket.org/fenics-project/ffc), copyright notice
 # reproduced below.
@@ -76,6 +74,16 @@ supported_elements = {
     "RTCF": None,
     "NCE": None,
     "NCF": None,
+    "Real": finat.Real,
+    "DPC": finat.DPC,
+    "S": finat.Serendipity,
+    "SminusF": finat.TrimmedSerendipityFace,
+    "SminusDiv": finat.TrimmedSerendipityDiv,
+    "SminusE": finat.TrimmedSerendipityEdge,
+    "SminusCurl": finat.TrimmedSerendipityCurl,
+    "DPC L2": finat.DPC,
+    "Discontinuous Lagrange L2": finat.DiscontinuousLagrange,
+    "Gauss-Legendre L2": finat.GaussLegendre,
     "DQ L2": None,
     "Direct Serendipity": finat.DirectSerendipity,
 }
@@ -117,8 +125,11 @@ def convert_finiteelement(element, **kwargs):
         if degree is None or scheme is None:
             raise ValueError("Quadrature scheme and degree must be specified!")
 
-        return finat.QuadratureElement(cell, degree, scheme), set()
+        return finat.make_quadrature_element(cell, degree, scheme), set()
     lmbda = supported_elements[element.family()]
+    if element.family() == "Real" and element.cell().cellname() in {"quadrilateral", "hexahedron"}:
+        lmbda = None
+        element = ufl.FiniteElement("DQ", element.cell(), 0)
     if lmbda is None:
         if element.cell().cellname() == "quadrilateral":
             # Handle quadrilateral short names like RTCF and RTCE.
@@ -133,14 +144,25 @@ def convert_finiteelement(element, **kwargs):
         return finat.FlattenedDimensions(finat_elem), deps
 
     kind = element.variant()
+    is_interval = element.cell().cellname() == 'interval'
     if kind is None:
-        kind = 'spectral' if element.cell().cellname() == 'interval' else 'equispaced'  # default variant
+        kind = 'spectral' if is_interval else 'equispaced'  # default variant
 
     if element.family() == "Lagrange":
         if kind == 'equispaced':
             lmbda = finat.Lagrange
-        elif kind == 'spectral' and element.cell().cellname() == 'interval':
+        elif kind == 'spectral' and is_interval:
             lmbda = finat.GaussLobattoLegendre
+        elif kind == 'hierarchical' and is_interval:
+            lmbda = finat.IntegratedLegendre
+        elif kind in ['fdm', 'fdm_ipdg'] and is_interval:
+            lmbda = finat.FDMLagrange
+        elif kind == 'fdm_quadrature' and is_interval:
+            lmbda = finat.FDMQuadrature
+        elif kind == 'fdm_broken' and is_interval:
+            lmbda = finat.FDMBrokenH1
+        elif kind == 'fdm_hermite' and is_interval:
+            lmbda = finat.FDMHermite
         elif kind in ['mgd', 'feec', 'qb', 'mse']:
             degree = element.degree()
             shift_axes = kwargs["shift_axes"]
@@ -155,8 +177,16 @@ def convert_finiteelement(element, **kwargs):
     elif element.family() in ["Discontinuous Lagrange", "Discontinuous Lagrange L2"]:
         if kind == 'equispaced':
             lmbda = finat.DiscontinuousLagrange
-        elif kind == 'spectral' and element.cell().cellname() == 'interval':
+        elif kind == 'spectral' and is_interval:
             lmbda = finat.GaussLegendre
+        elif kind == 'hierarchical' and is_interval:
+            lmbda = finat.Legendre
+        elif kind in ['fdm', 'fdm_quadrature'] and is_interval:
+            lmbda = finat.FDMDiscontinuousLagrange
+        elif kind == 'fdm_ipdg' and is_interval:
+            lmbda = lambda *args: finat.DiscontinuousElement(finat.FDMLagrange(*args))
+        elif kind in 'fdm_broken' and is_interval:
+            lmbda = finat.FDMBrokenL2
         elif kind in ['mgd', 'feec', 'qb', 'mse']:
             degree = element.degree()
             shift_axes = kwargs["shift_axes"]
@@ -197,20 +227,13 @@ def convert_mixedelement(element, **kwargs):
 
 
 @convert.register(ufl.VectorElement)
-def convert_vectorelement(element, **kwargs):
-    scalar_elem, deps = _create_element(element.sub_elements()[0], **kwargs)
-    shape = (element.num_sub_elements(),)
-    shape_innermost = kwargs["shape_innermost"]
-    return (finat.TensorFiniteElement(scalar_elem, shape, not shape_innermost),
-            deps | {"shape_innermost"})
-
-
 @convert.register(ufl.TensorElement)
 def convert_tensorelement(element, **kwargs):
-    scalar_elem, deps = _create_element(element.sub_elements()[0], **kwargs)
+    inner_elem, deps = _create_element(element.sub_elements()[0], **kwargs)
     shape = element.reference_value_shape()
+    shape = shape[:len(shape) - len(inner_elem.value_shape)]
     shape_innermost = kwargs["shape_innermost"]
-    return (finat.TensorFiniteElement(scalar_elem, shape, not shape_innermost),
+    return (finat.TensorFiniteElement(inner_elem, shape, not shape_innermost),
             deps | {"shape_innermost"})
 
 
@@ -244,13 +267,18 @@ def convert_hcurlelement(element, **kwargs):
     return finat.HCurlElement(finat_elem), deps
 
 
+@convert.register(ufl.WithMapping)
+def convert_withmapping(element, **kwargs):
+    return _create_element(element.wrapee, **kwargs)
+
+
 @convert.register(ufl.RestrictedElement)
 def convert_restrictedelement(element, **kwargs):
     finat_elem, deps = _create_element(element._element, **kwargs)
     return finat.RestrictedElement(finat_elem, element.restriction_domain()), deps
 
 
-hexahedron_tpc = ufl.TensorProductCell(ufl.quadrilateral, ufl.interval)
+hexahedron_tpc = ufl.TensorProductCell(ufl.interval, ufl.interval, ufl.interval)
 quadrilateral_tpc = ufl.TensorProductCell(ufl.interval, ufl.interval)
 _cache = weakref.WeakKeyDictionary()
 
@@ -305,7 +333,6 @@ def _create_element(ufl_element, **kwargs):
 
 def create_base_element(ufl_element, **kwargs):
     """Create a "scalar" base FInAT element given a UFL element.
-
     Takes a UFL element and an unspecified set of parameter options,
     and returns the converted element.
     """

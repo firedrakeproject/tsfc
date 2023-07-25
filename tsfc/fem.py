@@ -10,24 +10,22 @@ import numpy
 import ufl
 from ufl.corealg.map_dag import map_expr_dag, map_expr_dags
 from ufl.corealg.multifunction import MultiFunction
-from ufl.classes import (Argument, CellCoordinate, CellEdgeVectors,
-                         CellFacetJacobian, CellOrientation,
-                         CellOrigin, CellVertices, CellVolume,
-                         Coefficient, FacetArea, FacetCoordinate,
-                         GeometricQuantity, Jacobian, JacobianDeterminant,
-                         NegativeRestricted, QuadratureWeight,
-                         PositiveRestricted, ReferenceCellVolume,
-                         ReferenceCellEdgeVectors,
-                         ReferenceFacetVolume, ReferenceNormal,
-                         SpatialCoordinate)
-
+from ufl.classes import (
+    Argument, CellCoordinate, CellEdgeVectors, CellFacetJacobian,
+    CellOrientation, CellOrigin, CellVertices, CellVolume, Coefficient,
+    FacetArea, FacetCoordinate, GeometricQuantity, Jacobian,
+    JacobianDeterminant, NegativeRestricted, QuadratureWeight,
+    PositiveRestricted, ReferenceCellVolume, ReferenceCellEdgeVectors,
+    ReferenceFacetVolume, ReferenceNormal, SpatialCoordinate
+)
+from ufl.domain import extract_unique_domain
 
 from FIAT.reference_element import make_affine_mapping
 from FIAT.reference_element import UFCSimplex
 
 import gem
 from gem.node import traversal
-from gem.optimise import ffc_rounding
+from gem.optimise import ffc_rounding, constant_fold_zero
 from gem.unconcatenate import unconcatenate
 from gem.utils import cached_property
 
@@ -43,7 +41,7 @@ from tsfc.modified_terminals import (analyse_modified_terminal,
 from tsfc.parameters import is_complex
 from tsfc.ufl_utils import (ModifiedTerminalMixin, PickRestriction,
                             entity_avg, one_times, simplify_abs,
-                            preprocess_expression)
+                            preprocess_expression, TSFCConstantMixin)
 
 
 class ContextBase(ProxyKernelInterface):
@@ -129,6 +127,17 @@ class CoordinateMapping(PhysicalGeometry):
         self.mt = mt
         self.interface = interface
 
+    def preprocess(self, expr, context):
+        """Preprocess a UFL expression for translation.
+
+        :arg expr: A UFL expression
+        :arg context: The translation context.
+        :returns: A new UFL expression
+        """
+        ifacet = self.interface.integral_type.startswith("interior_facet")
+        return preprocess_expression(expr, complex_mode=context.complex_mode,
+                                     do_apply_restrictions=ifacet)
+
     @property
     def config(self):
         config = {name: getattr(self.interface, name)
@@ -142,7 +151,7 @@ class CoordinateMapping(PhysicalGeometry):
     def jacobian_at(self, point):
         ps = PointSingleton(point)
         expr = Jacobian(self.mt.terminal.ufl_domain())
-        assert ps.expression.shape == (expr.ufl_domain().topological_dimension(), )
+        assert ps.expression.shape == (extract_unique_domain(expr).topological_dimension(), )
         if self.mt.restriction == '+':
             expr = PositiveRestricted(expr)
         elif self.mt.restriction == '-':
@@ -150,7 +159,7 @@ class CoordinateMapping(PhysicalGeometry):
         config = {"point_set": PointSingleton(point)}
         config.update(self.config)
         context = PointSetContext(**config)
-        expr = preprocess_expression(expr, complex_mode=context.complex_mode)
+        expr = self.preprocess(expr, context)
         return map_expr_dag(context.translator, expr)
 
     def detJ_at(self, point):
@@ -159,11 +168,10 @@ class CoordinateMapping(PhysicalGeometry):
             expr = PositiveRestricted(expr)
         elif self.mt.restriction == '-':
             expr = NegativeRestricted(expr)
-        expr = preprocess_expression(expr)
-
         config = {"point_set": PointSingleton(point)}
         config.update(self.config)
         context = PointSetContext(**config)
+        expr = self.preprocess(expr, context)
         return map_expr_dag(context.translator, expr)
 
     def reference_normals(self):
@@ -204,7 +212,7 @@ class CoordinateMapping(PhysicalGeometry):
         config = {"point_set": PointSingleton([1/3, 1/3])}
         config.update(self.config)
         context = PointSetContext(**config)
-        expr = preprocess_expression(expr, complex_mode=context.complex_mode)
+        expr = self.preprocess(expr, context)
         return map_expr_dag(context.translator, expr)
 
     def physical_points(self, point_set, entity=None):
@@ -220,13 +228,13 @@ class CoordinateMapping(PhysicalGeometry):
             expr = PositiveRestricted(expr)
         elif self.mt.restriction == '-':
             expr = NegativeRestricted(expr)
-        expr = preprocess_expression(expr)
         config = {"point_set": point_set}
         config.update(self.config)
         if entity is not None:
             config.update({name: getattr(self.interface, name)
                            for name in ["integration_dim", "entity_ids"]})
         context = PointSetContext(**config)
+        expr = self.preprocess(expr, context)
         mapped = map_expr_dag(context.translator, expr)
         indices = tuple(gem.Index() for _ in mapped.shape)
         return gem.ComponentTensor(gem.Indexed(mapped, indices), point_set.indices + indices)
@@ -330,7 +338,7 @@ class Translator(MultiFunction, ModifiedTerminalMixin, ufl2gem.Mixin):
                   for name in ["ufl_cell", "index_cache", "scalar_type"]}
         config.update(quadrature_degree=degree, interface=self.context,
                       argument_multiindices=argument_multiindices)
-        expr, = compile_ufl(integrand, point_sum=True, **config)
+        expr, = compile_ufl(integrand, PointSetContext(**config), point_sum=True)
         return expr
 
     def facet_avg(self, o):
@@ -347,7 +355,7 @@ class Translator(MultiFunction, ModifiedTerminalMixin, ufl2gem.Mixin):
                                "integral_type"]}
         config.update(quadrature_degree=degree, interface=self.context,
                       argument_multiindices=argument_multiindices)
-        expr, = compile_ufl(integrand, point_sum=True, **config)
+        expr, = compile_ufl(integrand, PointSetContext(**config), point_sum=True)
         return expr
 
     def modified_terminal(self, o):
@@ -475,7 +483,7 @@ def translate_facet_coordinate(terminal, mt, ctx):
 @translate.register(SpatialCoordinate)
 def translate_spatialcoordinate(terminal, mt, ctx):
     # Replace terminal with a Coefficient
-    terminal = ctx.coordinate(terminal.ufl_domain())
+    terminal = ctx.coordinate(extract_unique_domain(terminal))
     # Get back to reference space
     terminal = preprocess_expression(terminal, complex_mode=ctx.complex_mode)
     # Rebuild modified terminal
@@ -507,7 +515,7 @@ def translate_cellvolume(terminal, mt, ctx):
     config = {name: getattr(ctx, name)
               for name in ["ufl_cell", "index_cache", "scalar_type"]}
     config.update(interface=interface, quadrature_degree=degree)
-    expr, = compile_ufl(integrand, point_sum=True, **config)
+    expr, = compile_ufl(integrand, PointSetContext(**config), point_sum=True)
     return expr
 
 
@@ -521,7 +529,7 @@ def translate_facetarea(terminal, mt, ctx):
               for name in ["ufl_cell", "integration_dim", "scalar_type",
                            "entity_ids", "index_cache"]}
     config.update(interface=ctx, quadrature_degree=degree)
-    expr, = compile_ufl(integrand, point_sum=True, **config)
+    expr, = compile_ufl(integrand, PointSetContext(**config), point_sum=True)
     return expr
 
 
@@ -541,7 +549,7 @@ def translate_cellorigin(terminal, mt, ctx):
 
 @translate.register(CellVertices)
 def translate_cell_vertices(terminal, mt, ctx):
-    coords = SpatialCoordinate(terminal.ufl_domain())
+    coords = SpatialCoordinate(extract_unique_domain(terminal))
     ufl_expr = construct_modified_terminal(mt, coords)
     ps = PointSet(numpy.array(ctx.fiat_cell.get_vertices()))
 
@@ -559,7 +567,7 @@ def translate_cell_vertices(terminal, mt, ctx):
 @translate.register(CellEdgeVectors)
 def translate_cell_edge_vectors(terminal, mt, ctx):
     # WARNING: Assumes straight edges!
-    coords = CellVertices(terminal.ufl_domain())
+    coords = CellVertices(extract_unique_domain(terminal))
     ufl_expr = construct_modified_terminal(mt, coords)
     cell_vertices = ctx.translator(ufl_expr)
 
@@ -617,6 +625,16 @@ def translate_argument(terminal, mt, ctx):
         return ffc_rounding(square, ctx.epsilon)
     table = ctx.entity_selector(callback, mt.restriction)
     return gem.ComponentTensor(gem.Indexed(table, argument_multiindex + sigma), sigma)
+
+
+@translate.register(TSFCConstantMixin)
+def translate_constant_value(terminal, mt, ctx):
+    value_size = numpy.prod(terminal.ufl_shape, dtype=int)
+    expression = gem.reshape(
+        gem.Variable(terminal.name, (value_size,)),
+        terminal.ufl_shape
+    )
+    return expression
 
 
 @translate.register(Coefficient)
@@ -683,8 +701,17 @@ def translate_coefficient(terminal, mt, ctx):
     return result
 
 
-def compile_ufl(expression, interior_facet=False, point_sum=False, **kwargs):
-    context = PointSetContext(**kwargs)
+def compile_ufl(expression, context, interior_facet=False, point_sum=False):
+    """Translate a UFL expression to GEM.
+
+    :arg expression: The UFL expression to compile.
+    :arg context: translation context - either a :class:`GemPointContext`
+        or :class:`PointSetContext`
+    :arg interior_facet: If ``true``, treat expression as an interior
+        facet integral (default ``False``)
+    :arg point_sum: If ``true``, return a `gem.IndexSum` of the final
+        gem expression along the ``context.point_indices`` (if present).
+   """
 
     # Abs-simplification
     expression = simplify_abs(expression, context.complex_mode)
@@ -699,4 +726,4 @@ def compile_ufl(expression, interior_facet=False, point_sum=False, **kwargs):
     result = map_expr_dags(context.translator, expressions)
     if point_sum:
         result = [gem.index_sum(expr, context.point_indices) for expr in result]
-    return result
+    return constant_fold_zero(result)
