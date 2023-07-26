@@ -44,7 +44,6 @@ supported_elements = {
     "Discontinuous Raviart-Thomas": lambda c, d: finat.DiscontinuousElement(finat.RaviartThomas(c, d)),
     "Discontinuous Taylor": finat.DiscontinuousTaylor,
     "Gauss-Legendre": finat.GaussLegendre,
-    "Gauss-Legendre L2": finat.GaussLegendre,
     "Gauss-Lobatto-Legendre": finat.GaussLobattoLegendre,
     "HDiv Trace": finat.HDivTrace,
     "Hellan-Herrmann-Johnson": finat.HellanHerrmannJohnson,
@@ -61,12 +60,8 @@ supported_elements = {
     "Nedelec 2nd kind H(curl)": finat.NedelecSecondKind,
     "Raviart-Thomas": finat.RaviartThomas,
     "Regge": finat.Regge,
-    "DPC": finat.DPC,
-    "DPC L2": finat.DPC,
     "BDMCE": finat.BrezziDouglasMariniCubeEdge,
     "BDMCF": finat.BrezziDouglasMariniCubeFace,
-    "S": finat.Serendipity,
-    "Real": finat.DiscontinuousLagrange,
     # These require special treatment below
     "DQ": None,
     "Q": None,
@@ -74,7 +69,7 @@ supported_elements = {
     "RTCF": None,
     "NCE": None,
     "NCF": None,
-    "Real": finat.Real,
+    "Real": finat.DiscontinuousLagrange,
     "DPC": finat.DPC,
     "S": finat.Serendipity,
     "SminusF": finat.TrimmedSerendipityFace,
@@ -195,6 +190,16 @@ def convert_finiteelement(element, **kwargs):
             return finat.RuntimeTabulated(cell, degree, variant=kind, shift_axes=shift_axes, restriction=restriction, continuous=False), deps
         else:
             raise ValueError("Variant %r not supported on %s" % (kind, element.cell()))
+    elif element.family() == ["DPC", "DPC L2"]:
+        if element.cell().geometric_dimension() == 2:
+            element = element.reconstruct(cell=ufl.cell.hypercube(2))
+        elif element.cell().geometric_dimension() == 3:
+            element = element.reconstruct(cell=ufl.cell.hypercube(3))
+    elif element.family() == "S":
+        if element.cell().geometric_dimension() == 2:
+            element = element.reconstruct(cell=ufl.cell.hypercube(2))
+        elif element.cell().geometric_dimension() == 3:
+            element = element.reconstruct(cell=ufl.cell.hypercube(3))
     return lmbda(cell, element.degree()), set()
 
 
