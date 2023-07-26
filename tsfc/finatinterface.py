@@ -40,7 +40,6 @@ supported_elements = {
     "FacetBubble": finat.FacetBubble,
     "Crouzeix-Raviart": finat.CrouzeixRaviart,
     "Discontinuous Lagrange": finat.DiscontinuousLagrange,
-    "Discontinuous Lagrange L2": finat.DiscontinuousLagrange,
     "Discontinuous Raviart-Thomas": lambda c, d: finat.DiscontinuousElement(finat.RaviartThomas(c, d)),
     "Discontinuous Taylor": finat.DiscontinuousTaylor,
     "Gauss-Legendre": finat.GaussLegendre,
@@ -69,7 +68,7 @@ supported_elements = {
     "RTCF": None,
     "NCE": None,
     "NCF": None,
-    "Real": finat.DiscontinuousLagrange,
+    "Real": finat.Real,
     "DPC": finat.DPC,
     "S": finat.Serendipity,
     "SminusF": finat.TrimmedSerendipityFace,
@@ -200,6 +199,7 @@ def convert_finiteelement(element, **kwargs):
             element = element.reconstruct(cell=ufl.cell.hypercube(2))
         elif element.cell().geometric_dimension() == 3:
             element = element.reconstruct(cell=ufl.cell.hypercube(3))
+
     return lmbda(cell, element.degree()), set()
 
 
