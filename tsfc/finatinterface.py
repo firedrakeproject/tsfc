@@ -143,7 +143,7 @@ def convert_finiteelement(element, **kwargs):
     if element.family() == "Lagrange":
         if kind == 'equispaced':
             lmbda = finat.Lagrange
-        elif kind == 'spectral' and is_interval:
+        elif kind in ['spectral', 'lor'] and is_interval:
             lmbda = finat.GaussLobattoLegendre
         elif kind == 'hierarchical' and is_interval:
             lmbda = finat.IntegratedLegendre
@@ -171,6 +171,8 @@ def convert_finiteelement(element, **kwargs):
             lmbda = finat.DiscontinuousLagrange
         elif kind == 'spectral' and is_interval:
             lmbda = finat.GaussLegendre
+        elif kind == 'lor' and is_interval:
+            lmbda = finat.Histopolation
         elif kind == 'hierarchical' and is_interval:
             lmbda = finat.Legendre
         elif kind in ['fdm', 'fdm_quadrature'] and is_interval:
