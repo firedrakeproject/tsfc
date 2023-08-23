@@ -84,7 +84,7 @@ class Node(object):
         This is the method to potentially override in derived classes,
         not :meth:`__eq__` or :meth:`__ne__`.
         """
-        if type(self) != type(other):
+        if type(self) is not type(other):
             return False
         self_consargs = self._cons_args(self.children)
         other_consargs = other._cons_args(other.children)
