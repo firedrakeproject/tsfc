@@ -443,7 +443,7 @@ def prepare_constant(constant, number):
     Constants.
 
     :arg constant: Firedrake Constant
-    :arg number: Value to uniquily identify the constant
+    :arg number: Value to uniquely identify the constant
     :returns: (funarg, expression)
          expression - GEM expression referring to the Constant value(s)
     """
