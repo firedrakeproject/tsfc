@@ -122,20 +122,38 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, *,
     domain_numbering = form_data.original_form.domain_numbering()
     domain_number = domain_numbering[integral_data.domain]
     coefficients = [form_data.function_replace_map[c] for c in integral_data.integral_coefficients]
+
     # This is which coefficient in the original form the
     # current coefficient is.
     # Consider f*v*dx + g*v*ds, the full form contains two
     # coefficients, but each integral only requires one.
-    coefficient_numbers = tuple(form_data.original_coefficient_positions[i]
-                                for i, (_, enabled) in enumerate(zip(form_data.reduced_coefficients, integral_data.enabled_coefficients))
-                                if enabled)
+    all_coeff_numbers = ufl_utils.coefficient_numbering(form_data)
+    reduced_coeffs = ufl_utils.reduced_coefficients(form_data)
+    enabled_coeffs = ufl_utils.enabled_coefficients(form_data)
+    coeff_numbers = tuple(
+        all_coeff_numbers[c]
+        for c, enabled in zip(reduced_coeffs[integral_data], enabled_coeffs[integral_data])
+        if enabled
+    )
+
+    all_const_numbers = ufl_utils.constant_numbering(form_data)
+    reduced_consts = ufl_utils.reduced_constants(form_data)
+    enabled_consts = ufl_utils.enabled_constants(form_data)
+    const_numbers = tuple(
+        all_const_numbers[c]
+        for c, enabled in zip(reduced_consts[integral_data], enabled_consts[integral_data])
+        if enabled
+    )
+
     integral_data_info = TSFCIntegralDataInfo(domain=integral_data.domain,
                                               integral_type=integral_data.integral_type,
                                               subdomain_id=integral_data.subdomain_id,
                                               domain_number=domain_number,
                                               arguments=arguments,
+                                              # surely this can go?
                                               coefficients=coefficients,
-                                              coefficient_numbers=coefficient_numbers)
+                                              coefficient_numbers=coeff_numbers,
+                                              constant_numbers=const_numbers)
     builder = interface(integral_data_info,
                         scalar_type,
                         diagonal=diagonal)

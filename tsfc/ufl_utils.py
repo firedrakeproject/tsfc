@@ -482,3 +482,110 @@ class TSFCConstantMixin:
 
     def __init__(self):
         pass
+
+
+def cached_on_form_data(fn):
+    """Caching decorator that stashes function results on the form data.
+
+    This function lets us effectively add properties to
+    :class:`ufl.algorithms.FormData` objects without needing to modify UFL.
+    This is useful when we want to add Firedrake-specific functionality (like
+    having a custom :class:`firedrake.Constant` implementation).
+
+    All objects are cached on the form data as opposed to the integral data
+    because :class:`ufl.algorithms.domain_analysis.IntegralData` uses
+    `__slots__` and hence `getattr` will not work.
+
+    """
+    def wrapper(form_data):
+        key = f"_tsfc_{fn.__name__}"
+        try:
+            return getattr(form_data, key)
+        except AttributeError:
+            value = fn(form_data)
+            setattr(form_data, key, value)
+            return value
+    return wrapper
+
+
+@cached_on_form_data
+def coefficient_numbering(form_data):
+    return {
+        c: i for i, c in enumerate(extract_coefficients(form_data.original_form))
+        if c in all_reduced_coefficients(form_data)
+    }
+
+
+@cached_on_form_data
+def constant_numbering(form_data):
+    return {
+        c: i for i, c in enumerate(extract_firedrake_constants(form_data.original_form))
+        if c in all_reduced_constants(form_data)
+    }
+
+
+@cached_on_form_data
+def all_reduced_coefficients(form_data):
+    reduced_coeffs = reduced_coefficients(form_data)
+    return sorted_by_count({
+        c
+        for itg_data in form_data.integral_data
+        for c in reduced_coeffs[itg_data]
+    })
+
+
+@cached_on_form_data
+def all_reduced_constants(form_data):
+    reduced_consts = reduced_constants(form_data)
+    return sorted_by_count({
+        c
+        for itg_data in form_data.integral_data
+        for c in reduced_consts[itg_data]
+    })
+
+
+@cached_on_form_data
+def reduced_coefficients(form_data):
+    return _reduced_args(form_data, extract_coefficients)
+
+
+@cached_on_form_data
+def reduced_constants(form_data):
+    return _reduced_args(form_data, extract_firedrake_constants)
+
+
+@cached_on_form_data
+def enabled_coefficients(form_data):
+    reduced_coeffs = reduced_coefficients(form_data)
+    all_reduced_coeffs = all_reduced_coefficients(form_data)
+    return {
+        itg_data: tuple(
+            bool(c in reduced_coeffs[itg_data])
+            for c in all_reduced_coeffs
+        )
+        for itg_data in form_data.integral_data
+    }
+
+
+@cached_on_form_data
+def enabled_constants(form_data):
+    reduced_consts = reduced_constants(form_data)
+    all_reduced_consts = all_reduced_constants(form_data)
+    return {
+        itg_data: tuple(
+            bool(c in reduced_consts[itg_data])
+            for c in all_reduced_consts
+        )
+        for itg_data in form_data.integral_data
+    }
+
+
+def _reduced_args(form_data, extract_fn):
+    return {
+        itg_data: {
+            item 
+            for itg in itg_data.integrals()
+            for item in extract_fn(itg)
+        }
+        for itg_data in form_data.integral_data:
+    }
