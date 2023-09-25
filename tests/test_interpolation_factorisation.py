@@ -2,9 +2,9 @@ from functools import partial
 import numpy
 import pytest
 
-from ufl import (Mesh, FunctionSpace, FiniteElement, VectorElement,
-                 TensorElement, Coefficient,
+from ufl import (Mesh, FunctionSpace, Coefficient,
                  interval, quadrilateral, hexahedron)
+from ufl.legacy import FiniteElement, VectorElement, TensorElement
 
 from tsfc import compile_expression_dual_evaluation
 from tsfc.finatinterface import create_element

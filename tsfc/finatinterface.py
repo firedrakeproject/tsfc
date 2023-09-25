@@ -25,6 +25,7 @@ import weakref
 import FIAT
 import finat
 import ufl
+import ufl.legacy
 
 
 __all__ = ("as_fiat_cell", "create_base_element",
@@ -110,7 +111,7 @@ def convert(element, **kwargs):
 
 
 # Base finite elements first
-@convert.register(ufl.FiniteElement)
+@convert.register(ufl.legacy.FiniteElement)
 def convert_finiteelement(element, **kwargs):
     cell = as_fiat_cell(element.cell())
     if element.family() == "Quadrature":
@@ -123,7 +124,7 @@ def convert_finiteelement(element, **kwargs):
     lmbda = supported_elements[element.family()]
     if element.family() == "Real" and element.cell().cellname() in {"quadrilateral", "hexahedron"}:
         lmbda = None
-        element = ufl.FiniteElement("DQ", element.cell(), 0)
+        element = ufl.legacy.FiniteElement("DQ", element.cell(), 0)
     if lmbda is None:
         if element.cell().cellname() == "quadrilateral":
             # Handle quadrilateral short names like RTCF and RTCE.
@@ -204,35 +205,35 @@ def convert_finiteelement(element, **kwargs):
 
 
 # Element modifiers and compound element types
-@convert.register(ufl.BrokenElement)
+@convert.register(ufl.legacy.BrokenElement)
 def convert_brokenelement(element, **kwargs):
     finat_elem, deps = _create_element(element._element, **kwargs)
     return finat.DiscontinuousElement(finat_elem), deps
 
 
-@convert.register(ufl.EnrichedElement)
+@convert.register(ufl.legacy.EnrichedElement)
 def convert_enrichedelement(element, **kwargs):
     elements, deps = zip(*[_create_element(elem, **kwargs)
                            for elem in element._elements])
     return finat.EnrichedElement(elements), set.union(*deps)
 
 
-@convert.register(ufl.NodalEnrichedElement)
+@convert.register(ufl.legacy.NodalEnrichedElement)
 def convert_nodalenrichedelement(element, **kwargs):
     elements, deps = zip(*[_create_element(elem, **kwargs)
                            for elem in element._elements])
     return finat.NodalEnrichedElement(elements), set.union(*deps)
 
 
-@convert.register(ufl.MixedElement)
+@convert.register(ufl.legacy.MixedElement)
 def convert_mixedelement(element, **kwargs):
     elements, deps = zip(*[_create_element(elem, **kwargs)
                            for elem in element.sub_elements()])
     return finat.MixedElement(elements), set.union(*deps)
 
 
-@convert.register(ufl.VectorElement)
-@convert.register(ufl.TensorElement)
+@convert.register(ufl.legacy.VectorElement)
+@convert.register(ufl.legacy.TensorElement)
 def convert_tensorelement(element, **kwargs):
     inner_elem, deps = _create_element(element.sub_elements()[0], **kwargs)
     shape = element.reference_value_shape()
@@ -242,7 +243,7 @@ def convert_tensorelement(element, **kwargs):
             deps | {"shape_innermost"})
 
 
-@convert.register(ufl.TensorProductElement)
+@convert.register(ufl.legacy.TensorProductElement)
 def convert_tensorproductelement(element, **kwargs):
     cell = element.cell()
     if type(cell) is not ufl.TensorProductCell:
@@ -260,24 +261,24 @@ def convert_tensorproductelement(element, **kwargs):
     return finat.TensorProductElement(elements), deps
 
 
-@convert.register(ufl.HDivElement)
+@convert.register(ufl.legacy.HDivElement)
 def convert_hdivelement(element, **kwargs):
     finat_elem, deps = _create_element(element._element, **kwargs)
     return finat.HDivElement(finat_elem), deps
 
 
-@convert.register(ufl.HCurlElement)
+@convert.register(ufl.legacy.HCurlElement)
 def convert_hcurlelement(element, **kwargs):
     finat_elem, deps = _create_element(element._element, **kwargs)
     return finat.HCurlElement(finat_elem), deps
 
 
-@convert.register(ufl.WithMapping)
+@convert.register(ufl.legacy.WithMapping)
 def convert_withmapping(element, **kwargs):
     return _create_element(element.wrapee, **kwargs)
 
 
-@convert.register(ufl.RestrictedElement)
+@convert.register(ufl.legacy.RestrictedElement)
 def convert_restrictedelement(element, **kwargs):
     finat_elem, deps = _create_element(element._element, **kwargs)
     return finat.RestrictedElement(finat_elem, element.restriction_domain()), deps

@@ -8,6 +8,7 @@ from functools import singledispatch
 import numpy
 
 import ufl
+import ufl.legacy
 from ufl.corealg.map_dag import map_expr_dag, map_expr_dags
 from ufl.corealg.multifunction import MultiFunction
 from ufl.classes import (

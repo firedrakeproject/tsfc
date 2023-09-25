@@ -22,9 +22,10 @@ from ufl.geometry import QuadratureWeight
 from ufl.geometry import Jacobian, JacobianDeterminant, JacobianInverse
 from ufl.classes import (Abs, Argument, CellOrientation, Coefficient,
                          ComponentTensor, Expr, FloatValue, Division,
-                         MixedElement, MultiIndex, Product,
+                         MultiIndex, Product,
                          ScalarValue, Sqrt, Zero, CellVolume, FacetArea)
 from ufl.domain import extract_unique_domain
+from ufl.legacy import MixedElement
 from ufl.utils.sorting import sorted_by_count
 
 from gem.node import MemoizerArg

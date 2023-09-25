@@ -1,7 +1,7 @@
 import pytest
 
-from ufl import (Coefficient, FiniteElement, MixedElement,
-                 TestFunction, VectorElement, dx, inner, tetrahedron)
+from ufl import Coefficient, TestFunction, dx, inner, tetrahedron
+from ufl.legacy import FiniteElement, MixedElement, VectorElement
 
 from tsfc import compile_form
 
