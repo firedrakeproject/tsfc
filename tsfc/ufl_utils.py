@@ -448,7 +448,7 @@ def apply_mapping(expression, element, domain):
         # We're going to apply the inverse of the physical to
         # reference space mapping.
         fcm = element.flattened_sub_element_mapping()
-        sub_elem = element.sub_elements()[0]
+        sub_elem = element.sub_elements[0]
         shape = expression.ufl_shape
         flat = ufl.as_vector([expression[i] for i in numpy.ndindex(shape)])
         vs = sub_elem.value_shape()

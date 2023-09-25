@@ -58,7 +58,7 @@ def test_sum_factorisation_scalar_tensor(mesh, element):
     if isinstance(target, FiniteElement):
         scalar_flops = tensor_flops
     else:
-        target = target.sub_elements()[0]
-        source = source.sub_elements()[0]
+        target = target.sub_elements[0]
+        source = source.sub_elements[0]
         scalar_flops = flop_count(mesh, source, target)
     assert numpy.allclose(tensor_flops / scalar_flops, expect, rtol=1e-2)

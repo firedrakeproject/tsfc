@@ -228,14 +228,14 @@ def convert_nodalenrichedelement(element, **kwargs):
 @convert.register(ufl.legacy.MixedElement)
 def convert_mixedelement(element, **kwargs):
     elements, deps = zip(*[_create_element(elem, **kwargs)
-                           for elem in element.sub_elements()])
+                           for elem in element.sub_elements])
     return finat.MixedElement(elements), set.union(*deps)
 
 
 @convert.register(ufl.legacy.VectorElement)
 @convert.register(ufl.legacy.TensorElement)
 def convert_tensorelement(element, **kwargs):
-    inner_elem, deps = _create_element(element.sub_elements()[0], **kwargs)
+    inner_elem, deps = _create_element(element.sub_elements[0], **kwargs)
     shape = element.reference_value_shape()
     shape = shape[:len(shape) - len(inner_elem.value_shape)]
     shape_innermost = kwargs["shape_innermost"]
@@ -252,7 +252,7 @@ def convert_tensorproductelement(element, **kwargs):
     dim_offset = 0
     elements = []
     deps = set()
-    for elem in element.sub_elements():
+    for elem in element.sub_elements:
         kwargs["shift_axes"] = shift_axes + dim_offset
         dim_offset += elem.cell.topological_dimension()
         finat_elem, ds = _create_element(elem, **kwargs)

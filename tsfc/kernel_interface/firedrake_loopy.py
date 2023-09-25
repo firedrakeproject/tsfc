@@ -322,7 +322,7 @@ class KernelBuilder(KernelBuilderBase, KernelBuilderMixin):
                         k += 1
                     else:
                         self.coefficient_split[coefficient] = []
-                        for j, element in enumerate(coefficient.ufl_element().sub_elements()):
+                        for j, element in enumerate(coefficient.ufl_element().sub_elements):
                             c = Coefficient(FunctionSpace(coefficient.ufl_domain(), element))
                             self.coefficient_split[coefficient].append(c)
                             self._coefficient(c, f"w_{k}")
