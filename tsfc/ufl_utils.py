@@ -203,7 +203,7 @@ class CoefficientSplitter(MultiFunction, ModifiedTerminalMixin):
             # Apply terminal modifiers onto the subcoefficient
             component = construct_modified_terminal(mt, subcoeff)
             # Collect components of the subcoefficient
-            for alpha in numpy.ndindex(subcoeff.ufl_element().reference_value_shape()):
+            for alpha in numpy.ndindex(subcoeff.ufl_element().reference_value_shape):
                 # New modified terminal: component[alpha + beta]
                 components.append(component[alpha + beta])
         # Repack derivative indices to shape
@@ -364,7 +364,7 @@ def apply_mapping(expression, element, domain):
          advertise the pullback to apply.
     :arg domain: Optional domain to provide in case expression does
          not contain a domain (used for constructing geometric quantities).
-    :returns: A new UFL expression with shape element.reference_value_shape()
+    :returns: A new UFL expression with shape element.reference_value_shape
     :raises NotImplementedError: If we don't know how to apply the
         inverse of the pullback.
     :raises ValueError: If we get shape mismatches.
@@ -412,8 +412,8 @@ def apply_mapping(expression, element, domain):
         mesh = domain
     if domain is not None and mesh != domain:
         raise NotImplementedError("Multiple domains not supported")
-    if expression.ufl_shape != element.value_shape():
-        raise ValueError(f"Mismatching shapes, got {expression.ufl_shape}, expected {element.value_shape()}")
+    if expression.ufl_shape != element.value_shape:
+        raise ValueError(f"Mismatching shapes, got {expression.ufl_shape}, expected {element.value_shape}")
     mapping = element.mapping().lower()
     if mapping == "identity":
         rexpression = expression
@@ -451,8 +451,8 @@ def apply_mapping(expression, element, domain):
         sub_elem = element.sub_elements[0]
         shape = expression.ufl_shape
         flat = ufl.as_vector([expression[i] for i in numpy.ndindex(shape)])
-        vs = sub_elem.value_shape()
-        rvs = sub_elem.reference_value_shape()
+        vs = sub_elem.value_shape
+        rvs = sub_elem.reference_value_shape
         seen = set()
         rpieces = []
         gm = int(numpy.prod(vs, dtype=int))
@@ -470,11 +470,11 @@ def apply_mapping(expression, element, domain):
             # Concatenate with the other pieces
             rpieces.extend([piece[idx] for idx in numpy.ndindex(rvs)])
         # And reshape
-        rexpression = as_tensor(numpy.asarray(rpieces).reshape(element.reference_value_shape()))
+        rexpression = as_tensor(numpy.asarray(rpieces).reshape(element.reference_value_shape))
     else:
-        raise NotImplementedError(f"Don't know how to handle mapping type {mapping} for expression of rank {element.value_shape()}")
-    if rexpression.ufl_shape != element.reference_value_shape():
-        raise ValueError(f"Mismatching reference shapes, got {rexpression.ufl_shape} expected {element.reference_value_shape()}")
+        raise NotImplementedError(f"Don't know how to handle mapping type {mapping} for expression of rank {element.value_shape}")
+    if rexpression.ufl_shape != element.reference_value_shape:
+        raise ValueError(f"Mismatching reference shapes, got {rexpression.ufl_shape} expected {element.reference_value_shape}")
     return rexpression
 
 

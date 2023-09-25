@@ -236,7 +236,7 @@ def convert_mixedelement(element, **kwargs):
 @convert.register(ufl.legacy.TensorElement)
 def convert_tensorelement(element, **kwargs):
     inner_elem, deps = _create_element(element.sub_elements[0], **kwargs)
-    shape = element.reference_value_shape()
+    shape = element.reference_value_shape
     shape = shape[:len(shape) - len(inner_elem.value_shape)]
     shape_innermost = kwargs["shape_innermost"]
     return (finat.TensorFiniteElement(inner_elem, shape, not shape_innermost),
