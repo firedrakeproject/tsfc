@@ -113,7 +113,7 @@ def convert(element, **kwargs):
 # Base finite elements first
 @convert.register(ufl.legacy.FiniteElement)
 def convert_finiteelement(element, **kwargs):
-    cell = as_fiat_cell(element.cell())
+    cell = as_fiat_cell(element.cell)
     if element.family() == "Quadrature":
         degree = element.degree()
         scheme = element.quadrature_scheme()
@@ -122,14 +122,14 @@ def convert_finiteelement(element, **kwargs):
 
         return finat.make_quadrature_element(cell, degree, scheme), set()
     lmbda = supported_elements[element.family()]
-    if element.family() == "Real" and element.cell().cellname() in {"quadrilateral", "hexahedron"}:
+    if element.family() == "Real" and element.cell.cellname() in {"quadrilateral", "hexahedron"}:
         lmbda = None
-        element = ufl.legacy.FiniteElement("DQ", element.cell(), 0)
+        element = ufl.legacy.FiniteElement("DQ", element.cell, 0)
     if lmbda is None:
-        if element.cell().cellname() == "quadrilateral":
+        if element.cell.cellname() == "quadrilateral":
             # Handle quadrilateral short names like RTCF and RTCE.
             element = element.reconstruct(cell=quadrilateral_tpc)
-        elif element.cell().cellname() == "hexahedron":
+        elif element.cell.cellname() == "hexahedron":
             # Handle hexahedron short names like NCF and NCE.
             element = element.reconstruct(cell=hexahedron_tpc)
         else:
@@ -139,7 +139,7 @@ def convert_finiteelement(element, **kwargs):
         return finat.FlattenedDimensions(finat_elem), deps
 
     kind = element.variant()
-    is_interval = element.cell().cellname() == 'interval'
+    is_interval = element.cell.cellname() == 'interval'
     if kind is None:
         kind = 'spectral' if is_interval else 'equispaced'  # default variant
 
@@ -165,7 +165,7 @@ def convert_finiteelement(element, **kwargs):
             deps = {"shift_axes", "restriction"}
             return finat.RuntimeTabulated(cell, degree, variant=kind, shift_axes=shift_axes, restriction=restriction), deps
         else:
-            raise ValueError("Variant %r not supported on %s" % (kind, element.cell()))
+            raise ValueError("Variant %r not supported on %s" % (kind, element.cell))
     elif element.family() in {"Raviart-Thomas", "Nedelec 1st kind H(curl)",
                               "Brezzi-Douglas-Marini", "Nedelec 2nd kind H(curl)"}:
         lmbda = partial(lmbda, variant=element.variant())
@@ -189,16 +189,16 @@ def convert_finiteelement(element, **kwargs):
             deps = {"shift_axes", "restriction"}
             return finat.RuntimeTabulated(cell, degree, variant=kind, shift_axes=shift_axes, restriction=restriction, continuous=False), deps
         else:
-            raise ValueError("Variant %r not supported on %s" % (kind, element.cell()))
+            raise ValueError("Variant %r not supported on %s" % (kind, element.cell))
     elif element.family() == ["DPC", "DPC L2"]:
-        if element.cell().geometric_dimension() == 2:
+        if element.cell.geometric_dimension() == 2:
             element = element.reconstruct(cell=ufl.cell.hypercube(2))
-        elif element.cell().geometric_dimension() == 3:
+        elif element.cell.geometric_dimension() == 3:
             element = element.reconstruct(cell=ufl.cell.hypercube(3))
     elif element.family() == "S":
-        if element.cell().geometric_dimension() == 2:
+        if element.cell.geometric_dimension() == 2:
             element = element.reconstruct(cell=ufl.cell.hypercube(2))
-        elif element.cell().geometric_dimension() == 3:
+        elif element.cell.geometric_dimension() == 3:
             element = element.reconstruct(cell=ufl.cell.hypercube(3))
 
     return lmbda(cell, element.degree()), set()
@@ -245,7 +245,7 @@ def convert_tensorelement(element, **kwargs):
 
 @convert.register(ufl.legacy.TensorProductElement)
 def convert_tensorproductelement(element, **kwargs):
-    cell = element.cell()
+    cell = element.cell
     if type(cell) is not ufl.TensorProductCell:
         raise ValueError("TensorProductElement not on TensorProductCell?")
     shift_axes = kwargs["shift_axes"]
@@ -254,7 +254,7 @@ def convert_tensorproductelement(element, **kwargs):
     deps = set()
     for elem in element.sub_elements():
         kwargs["shift_axes"] = shift_axes + dim_offset
-        dim_offset += elem.cell().topological_dimension()
+        dim_offset += elem.cell.topological_dimension()
         finat_elem, ds = _create_element(elem, **kwargs)
         elements.append(finat_elem)
         deps.update(ds)
@@ -324,7 +324,7 @@ def _create_element(ufl_element, **kwargs):
             return finat_element, set(param for param, value in key)
 
     # Convert if cache miss
-    if ufl_element.cell() is None:
+    if ufl_element.cell is None:
         raise ValueError("Don't know how to build element when cell is not given")
 
     finat_element, deps = convert(ufl_element, **kwargs)
