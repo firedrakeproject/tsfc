@@ -25,7 +25,7 @@ from ufl.classes import (Abs, Argument, CellOrientation, Coefficient,
                          MultiIndex, Product,
                          ScalarValue, Sqrt, Zero, CellVolume, FacetArea)
 from ufl.domain import extract_unique_domain
-from ufl.legacy import MixedElement
+from finat.ufl import MixedElement
 from ufl.utils.sorting import sorted_by_count
 
 from gem.node import MemoizerArg

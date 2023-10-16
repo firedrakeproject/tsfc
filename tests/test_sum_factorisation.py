@@ -4,7 +4,7 @@ import pytest
 from ufl import (Mesh, FunctionSpace, TestFunction, TrialFunction,
                  TensorProductCell, dx, action, interval, triangle,
                  quadrilateral, curl, dot, div, grad)
-from ufl.legacy import (FiniteElement, VectorElement, EnrichedElement,
+from finat.ufl import (FiniteElement, VectorElement, EnrichedElement,
                         TensorProductElement, HCurlElement, HDivElement)
 
 from tsfc import compile_form

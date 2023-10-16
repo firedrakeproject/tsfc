@@ -4,7 +4,7 @@ from finat.point_set import PointSet
 from gem.interpreter import evaluate
 from tsfc.finatinterface import create_element
 from ufl import quadrilateral
-from ufl.legacy import FiniteElement, RestrictedElement
+from finat.ufl import FiniteElement, RestrictedElement
 
 
 def test_issue_274():

@@ -1,5 +1,5 @@
 import ufl
-import ufl.legacy
+import finat.ufl
 from tsfc import compile_form
 import loopy
 import pytest
@@ -22,13 +22,13 @@ def coord_degree(request):
 
 @pytest.fixture
 def mesh(cell, coord_degree):
-    c = ufl.legacy.VectorElement("CG", cell, coord_degree)
+    c = finat.ufl.VectorElement("CG", cell, coord_degree)
     return ufl.Mesh(c)
 
 
-@pytest.fixture(params=[ufl.legacy.FiniteElement,
-                        ufl.legacy.VectorElement,
-                        ufl.legacy.TensorElement],
+@pytest.fixture(params=[finat.ufl.FiniteElement,
+                        finat.ufl.VectorElement,
+                        finat.ufl.TensorElement],
                 ids=["FE", "VE", "TE"])
 def V(request, mesh):
     return ufl.FunctionSpace(mesh, request.param("CG", mesh.ufl_cell(), 2))

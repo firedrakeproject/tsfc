@@ -1,6 +1,6 @@
 from ufl import (triangle, tetrahedron, FunctionSpace, Mesh,
                  TrialFunction, TestFunction, inner, grad, dx, dS)
-from ufl.legacy import FiniteElement, VectorElement
+from finat.ufl import FiniteElement, VectorElement
 from tsfc import compile_form
 from FIAT.hdiv_trace import TraceError
 import pytest

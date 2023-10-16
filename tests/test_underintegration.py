@@ -5,7 +5,7 @@ import pytest
 
 from ufl import (Mesh, FunctionSpace, TestFunction, TrialFunction, TensorProductCell, dx,
                  action, interval, quadrilateral, dot, grad)
-from ufl.legacy import FiniteElement, VectorElement
+from finat.ufl import FiniteElement, VectorElement
 
 from FIAT import ufc_cell
 from FIAT.quadrature import GaussLobattoLegendreQuadratureLineRule, GaussLegendreQuadratureLineRule

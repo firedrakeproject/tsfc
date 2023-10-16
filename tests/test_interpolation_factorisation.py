@@ -4,7 +4,7 @@ import pytest
 
 from ufl import (Mesh, FunctionSpace, Coefficient,
                  interval, quadrilateral, hexahedron)
-from ufl.legacy import FiniteElement, VectorElement, TensorElement
+from finat.ufl import FiniteElement, VectorElement, TensorElement
 
 from tsfc import compile_expression_dual_evaluation
 from tsfc.finatinterface import create_element

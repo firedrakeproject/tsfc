@@ -9,7 +9,7 @@ from ufl import (FunctionSpace, Mesh, TestFunction,
                  TrialFunction, dx, grad, inner,
                  interval, triangle, quadrilateral,
                  TensorProductCell)
-from ufl.legacy import FiniteElement, VectorElement
+from finat.ufl import FiniteElement, VectorElement
 from tsfc.parameters import target
 
 
