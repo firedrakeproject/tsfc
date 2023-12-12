@@ -221,7 +221,7 @@ class Literal(Constant):
             self.array = array.astype(complex)
 
     def is_equal(self, other):
-        if type(self) != type(other):
+        if type(self) is not type(other):
             return False
         if self.shape != other.shape:
             return False
@@ -748,7 +748,7 @@ class ListTensor(Node):
 
     def is_equal(self, other):
         """Common subexpression eliminating equality predicate."""
-        if type(self) != type(other):
+        if type(self) is not type(other):
             return False
         if (self.array == other.array).all():
             self.array = other.array

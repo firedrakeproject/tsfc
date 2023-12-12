@@ -8,6 +8,7 @@ import ufl
 from ufl.algorithms import extract_arguments, extract_coefficients
 from ufl.algorithms.analysis import has_type
 from ufl.classes import Form, GeometricQuantity
+from ufl.domain import extract_unique_domain
 
 import gem
 import gem.impero_utils as impero_utils
@@ -115,9 +116,7 @@ def compile_integral(integral_data, form_data, prefix, parameters, interface, *,
         raise NotImplementedError("Sorry, we can't assemble the diagonal of a form for interior facet integrals")
     mesh = integral_data.domain
     arguments = form_data.preprocessed_form.arguments()
-    kernel_name = "%s_%s_integral_%s" % (prefix, integral_type, integral_data.subdomain_id)
-    # Handle negative subdomain_id
-    kernel_name = kernel_name.replace("-", "_")
+    kernel_name = f"{prefix}_{integral_type}_integral"
     # Dict mapping domains to index in original_form.ufl_domains()
     domain_numbering = form_data.original_form.domain_numbering()
     domain_number = domain_numbering[integral_data.domain]
@@ -221,7 +220,7 @@ def compile_expression_dual_evaluation(expression, to_element, ufl_element, *,
 
     # Replace coordinates (if any) unless otherwise specified by kwarg
     if domain is None:
-        domain = expression.ufl_domain()
+        domain = extract_unique_domain(expression)
     assert domain is not None
 
     # Collect required coefficients and determine numbering

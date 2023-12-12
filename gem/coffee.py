@@ -182,7 +182,7 @@ def optimise_monomials(monomials, linear_indices):
 
     :returns: an iterable of factorised :class:`Monomials`s
     """
-    assert len(set(frozenset(m.sum_indices) for m in monomials)) <= 1,\
+    assert len(set(frozenset(m.sum_indices) for m in monomials)) <= 1, \
         "All monomials required to have same sum indices for factorisation"
 
     result = [m for m in monomials if not m.atomics]  # skipped monomials
