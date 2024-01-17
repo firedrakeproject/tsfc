@@ -308,7 +308,8 @@ def set_quad_rule(params, cell, integral_type, functions):
                            "than tenfold greater than any "
                            "argument/coefficient degree (max %s)",
                            quadrature_degree, max_degree(function_degrees))
-    if params.get("quadrature_rule") == "default":
+    scheme = params.get("quadrature_rule")
+    if isinstance(scheme, str):
         del params["quadrature_rule"]
     try:
         quad_rule = params["quadrature_rule"]
@@ -316,7 +317,7 @@ def set_quad_rule(params, cell, integral_type, functions):
         fiat_cell = as_fiat_cell(cell)
         integration_dim, _ = lower_integral_type(fiat_cell, integral_type)
         integration_cell = fiat_cell.construct_subelement(integration_dim)
-        quad_rule = make_quadrature(integration_cell, quadrature_degree)
+        quad_rule = make_quadrature(integration_cell, quadrature_degree, scheme or "default")
         params["quadrature_rule"] = quad_rule
 
     if not isinstance(quad_rule, AbstractQuadratureRule):
