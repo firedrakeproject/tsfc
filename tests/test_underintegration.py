@@ -13,7 +13,7 @@ def mass_cg(cell, degree):
     V = FunctionSpace(m, FiniteElement('Q', cell, degree, variant='spectral'))
     u = TrialFunction(V)
     v = TestFunction(V)
-    return u*v*dx(scheme="gll", degree=2*degree)
+    return u*v*dx(scheme="gll", degree=2*degree-1)
 
 
 def mass_dg(cell, degree):
@@ -29,7 +29,7 @@ def laplace(cell, degree):
     V = FunctionSpace(m, FiniteElement('Q', cell, degree, variant='spectral'))
     u = TrialFunction(V)
     v = TestFunction(V)
-    return dot(grad(u), grad(v))*dx(scheme="gll", degree=2*degree)
+    return dot(grad(u), grad(v))*dx(scheme="gll", degree=2*degree-1)
 
 
 def count_flops(form):
