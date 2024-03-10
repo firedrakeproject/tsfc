@@ -33,7 +33,7 @@ __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
            'IndexSum', 'ListTensor', 'Concatenate', 'Delta',
            'index_sum', 'partial_indexed', 'reshape', 'view',
            'indices', 'as_gem', 'FlexiblyIndexed',
-           'Inverse', 'Solve', 'extract_type']
+           'Inverse', 'Solve', 'extract_type', 'extract_variables']
 
 
 class NodeMeta(type):
@@ -1044,3 +1044,17 @@ def as_gem(expr):
 def extract_type(expressions, klass):
     """Collects objects of type klass in expressions."""
     return tuple(node for node in traversal(expressions) if isinstance(node, klass))
+
+
+def extract_variables(expressions):
+    """Collects variables in expressions."""
+    variables = set()
+    for node in traversal(expressions):
+        if isinstance(node, Variable):
+            variables.add(node)
+        elif isinstance(node, Indexed):
+            for idx in node.multiindex:
+                if isinstance(idx, VariableIndex):
+                    v, = extract_variables((idx.expression, ))
+                    variables.add(v)
+    return tuple(variables)

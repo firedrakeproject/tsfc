@@ -3,12 +3,12 @@ import string
 import operator
 from functools import reduce
 from itertools import chain, product
-
+import copy
 import numpy
 from numpy import asarray
 
 from ufl.utils.sequences import max_degree
-
+from ufl.domain import extract_unique_domain
 from FIAT.reference_element import TensorProductCell
 
 from finat.quadrature import AbstractQuadratureRule, make_quadrature
@@ -60,10 +60,13 @@ class KernelBuilderBase(KernelInterface):
     def coefficient(self, ufl_coefficient, restriction):
         """A function that maps :class:`ufl.Coefficient`s to GEM
         expressions."""
+        if restriction == '?':
+            raise RuntimeError("Not expecting '?' restriction at this stage")
         kernel_arg = self.coefficient_map[ufl_coefficient]
+        domain = extract_unique_domain(ufl_coefficient)
         if ufl_coefficient.ufl_element().family() == 'Real':
             return kernel_arg
-        elif not self.interior_facet:
+        elif not self._domain_integral_type_map[domain].startswith("interior_facet"):  # '|' is for exterior_facet
             return kernel_arg
         else:
             return kernel_arg[{'+': 0, '-': 1}[restriction]]
@@ -71,29 +74,35 @@ class KernelBuilderBase(KernelInterface):
     def constant(self, const):
         return self.constant_map[const]
 
-    def cell_orientation(self, restriction):
+    def cell_orientation(self, domain, restriction):
         """Cell orientation as a GEM expression."""
-        f = {None: 0, '+': 0, '-': 1}[restriction]
-        # Assume self._cell_orientations tuple is set up at this point.
-        co_int = self._cell_orientations[f]
+        if restriction == '?':
+            raise RuntimeError("Not expecting '?' restriction at this stage")
+        if not hasattr(self, "_cell_orientations"):
+            raise RuntimeError("Haven't called set_cell_orientations")
+        f = {None: 0, '|': 0, '+': 0, '-': 1}[restriction]
+        co_int = self._cell_orientations[domain][f]
         return gem.Conditional(gem.Comparison("==", co_int, gem.Literal(1)),
                                gem.Literal(-1),
                                gem.Conditional(gem.Comparison("==", co_int, gem.Zero()),
                                                gem.Literal(1),
                                                gem.Literal(numpy.nan)))
 
-    def cell_size(self, restriction):
+    def cell_size(self, domain, restriction):
+        if restriction == '?':
+            raise RuntimeError("Not expecting '?' restriction at this stage")
         if not hasattr(self, "_cell_sizes"):
             raise RuntimeError("Haven't called set_cell_sizes")
-        if self.interior_facet:
-            return self._cell_sizes[{'+': 0, '-': 1}[restriction]]
+        if self._domain_integral_type_map[domain].startswith("interior_facet"):
+            return self._cell_sizes[domain][{'+': 0, '-': 1}[restriction]]
         else:
-            return self._cell_sizes
+            return self._cell_sizes[domain]
 
-    def entity_number(self, restriction):
+    def entity_number(self, domain, restriction):
         """Facet or vertex number as a GEM index."""
-        # Assume self._entity_number dict is set up at this point.
-        return self._entity_number[restriction]
+        if not hasattr(self, "_entity_numbers"):
+            raise RuntimeError("Haven't called set_entity_numbers")
+        return self._entity_numbers[domain][restriction]
 
     def apply_glue(self, prepare=None, finalise=None):
         """Append glue code for operations that are not handled in the
@@ -134,12 +143,15 @@ class KernelBuilderMixin(object):
         # Split Coefficients
         if self.coefficient_split:
             integrand = ufl_utils.split_coefficients(integrand, self.coefficient_split)
+        # Remove '?' restrictions
+        integrand = ufl_utils.replace_to_be_restricted_restrictions(integrand, self._domain_integral_type_map)
         # Compile: ufl -> gem
         info = self.integral_data_info
         functions = list(info.arguments) + [self.coordinate(info.domain)] + list(info.coefficients)
         set_quad_rule(params, info.domain.ufl_cell(), info.integral_type, functions)
         quad_rule = params["quadrature_rule"]
         config = self.fem_config()
+        config['domain_integral_type_map'] = self._domain_integral_type_map
         config['argument_multiindices'] = self.argument_multiindices
         config['quadrature_rule'] = quad_rule
         config['index_cache'] = ctx['index_cache']
@@ -218,7 +230,7 @@ class KernelBuilderMixin(object):
         oriented, needs_cell_sizes, tabulations = self.register_requirements(expressions)
 
         # Extract Variables that are actually used
-        active_variables = gem.extract_type(expressions, gem.Variable)
+        active_variables = gem.extract_variables(expressions)
         # Construct ImperoC
         assignments = list(zip(return_variables, expressions))
         index_ordering = get_index_ordering(ctx['quadrature_indices'], return_variables)
@@ -242,7 +254,6 @@ class KernelBuilderMixin(object):
         integration_dim, entity_ids = lower_integral_type(fiat_cell, integral_type)
         return dict(interface=self,
                     ufl_cell=cell,
-                    integral_type=integral_type,
                     integration_dim=integration_dim,
                     entity_ids=entity_ids,
                     scalar_type=self.fem_scalar_type)
@@ -429,9 +440,9 @@ def check_requirements(ir):
     rt_tabs = {}
     for node in traversal(ir):
         if isinstance(node, gem.Variable):
-            if node.name == "cell_orientations":
+            if node.name == "cell_orientations_0":
                 cell_orientations = True
-            elif node.name == "cell_sizes":
+            elif node.name == "cell_sizes_0":
                 cell_sizes = True
             elif node.name.startswith("rt_"):
                 rt_tabs[node.name] = node.shape
@@ -452,7 +463,7 @@ def prepare_constant(constant, number):
                        constant.ufl_shape)
 
 
-def prepare_coefficient(coefficient, name, interior_facet=False):
+def prepare_coefficient(coefficient, name, domain_integral_type_map):
     """Bridges the kernel interface and the GEM abstraction for
     Coefficients.
 
@@ -463,30 +474,32 @@ def prepare_coefficient(coefficient, name, interior_facet=False):
          expression - GEM expression referring to the Coefficient
                       values
     """
-    assert isinstance(interior_facet, bool)
-
     if coefficient.ufl_element().family() == 'Real':
         # Constant
         value_size = coefficient.ufl_element().value_size
         expression = gem.reshape(gem.Variable(name, (value_size,)),
                                  coefficient.ufl_shape)
         return expression
-
     finat_element = create_element(coefficient.ufl_element())
     shape = finat_element.index_shape
     size = numpy.prod(shape, dtype=int)
-
-    if not interior_facet:
-        expression = gem.reshape(gem.Variable(name, (size,)), shape)
-    else:
+    domain = extract_unique_domain(coefficient)
+    integral_type = domain_integral_type_map[domain]
+    if integral_type is None:
+        # This means that this coefficient does not exist in the DAG,
+        # so corresponding gem expression will never be needed.
+        expression = None
+    elif integral_type.startswith("interior_facet"):
         varexp = gem.Variable(name, (2 * size,))
         plus = gem.view(varexp, slice(size))
         minus = gem.view(varexp, slice(size, 2 * size))
         expression = (gem.reshape(plus, shape), gem.reshape(minus, shape))
+    else:
+        expression = gem.reshape(gem.Variable(name, (size,)), shape)
     return expression
 
 
-def prepare_arguments(arguments, multiindices, interior_facet=False, diagonal=False):
+def prepare_arguments(arguments, multiindices, argument_integral_types, diagonal=False):
     """Bridges the kernel interface and the GEM abstraction for
     Arguments.  Vector Arguments are rearranged here for interior
     facet integrals.
@@ -499,8 +512,8 @@ def prepare_arguments(arguments, multiindices, interior_facet=False, diagonal=Fa
          expressions - GEM expressions referring to the argument
                        tensor
     """
-    assert isinstance(interior_facet, bool)
-
+    if len(multiindices) != len(arguments) or len(argument_integral_types) != len(arguments):
+        raise ValueError(f"Got inconsistent lengths of arguments ({len(arguments)}), multiindices ({len(multiindices)}), and argument_integral_types ({len(argument_integral_types)})")
     if len(arguments) == 0:
         # No arguments
         expression = gem.Indexed(gem.Variable("A", (1,)), (0,))
@@ -526,15 +539,17 @@ def prepare_arguments(arguments, multiindices, interior_facet=False, diagonal=Fa
                            tuple(chain(*multiindices)))
 
     u_shape = numpy.array([numpy.prod(shape, dtype=int) for shape in shapes])
-    if interior_facet:
-        c_shape = tuple(2 * u_shape)
-        slicez = [[slice(r * s, (r + 1) * s)
-                   for r, s in zip(restrictions, u_shape)]
-                  for restrictions in product((0, 1), repeat=len(arguments))]
-    else:
-        c_shape = tuple(u_shape)
-        slicez = [[slice(s) for s in u_shape]]
-
-    varexp = gem.Variable("A", c_shape)
+    c_shape = copy.deepcopy(u_shape)
+    rs_tuples = []
+    for arg_num, integral_type in enumerate(argument_integral_types):
+        if integral_type.startswith("interior_facet"):
+            rs_tuples.append((0, 1))
+            c_shape[arg_num] *= 2
+        else:
+            rs_tuples.append((0, ))
+    slicez = [[slice(r * s, (r + 1) * s)
+               for r, s in zip(restrictions, u_shape)]
+              for restrictions in product(*rs_tuples)]
+    varexp = gem.Variable("A", tuple(c_shape))
     expressions = [expression(gem.view(varexp, *slices)) for slices in slicez]
     return tuple(prune(expressions))
