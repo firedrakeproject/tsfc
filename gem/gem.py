@@ -1053,8 +1053,9 @@ def extract_variables(expressions):
         if isinstance(node, Variable):
             variables.add(node)
         elif isinstance(node, Indexed):
+            # Need to go deeper to find variables wrapped in 'VariableIndex's.
             for idx in node.multiindex:
                 if isinstance(idx, VariableIndex):
                     v, = extract_variables((idx.expression, ))
                     variables.add(v)
-    return tuple(variables)
+    return variables
