@@ -81,11 +81,18 @@ def compile_form(form, prefix="form", parameters=None, interface=None, diagonal=
     logger.info(GREEN % "compute_form_data finished in %g seconds.", time.time() - cpu_time)
 
     kernels = []
+    all_meshes = collect_domains_in_form(fd.original_form)
+    have_multiple_domains = len(all_meshes) > 1
     for integral_data in fd.integral_data:
         start = time.time()
         arguments = fd.preprocessed_form.arguments()
-        # Need to make one map per integral_data.
-        domain_integral_type_map, integrand_is_zero = make_domain_integral_type_map(integral_data, fd)
+        if have_multiple_domains:
+            # Need to make one map per integral_data.
+            # TODO: Move this part to UFL.
+            domain_integral_type_map, integrand_is_zero = make_domain_integral_type_map(integral_data, fd)
+        else:
+            domain_integral_type_map = {integral_data.domain: integral_data.integral_type}
+            integrand_is_zero = [False for _ in integral_data.integrals]
         integral_types_integrals_map = collections.defaultdict(list)
         for integral, is_zero in zip(integral_data.integrals, integrand_is_zero, strict=True):
             if is_zero:
@@ -159,11 +166,13 @@ def compile_integral(integral_types, integrals, integral_data, form_data, domain
     # so we should attach the constants to integral data instead
     builder.set_constants(form_data.constants)
     ctx = builder.create_context()
+    # TODO: Move relevant part of the code to UFL and remove this flag.
+    have_multiple_domains = len(all_meshes) > 1
     for integral in integrals:
         params = parameters.copy()
         params.update(integral.metadata())  # integral metadata overrides
         integrand = ufl.replace(integral.integrand(), form_data.function_replace_map)
-        integrand_exprs = builder.compile_integrand(integrand, params, ctx)
+        integrand_exprs = builder.compile_integrand(integrand, params, ctx, have_multiple_domains)
         integral_exprs = builder.construct_integrals(integrand_exprs, params)
         builder.stash_integrals(integral_exprs, params, ctx)
     return builder.construct_kernel(kernel_name, ctx, log)

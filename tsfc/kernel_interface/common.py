@@ -131,7 +131,7 @@ class KernelBuilderBase(KernelInterface):
 class KernelBuilderMixin(object):
     """Mixin for KernelBuilder classes."""
 
-    def compile_integrand(self, integrand, params, ctx):
+    def compile_integrand(self, integrand, params, ctx, have_multiple_domains):
         """Compile UFL integrand.
 
         :arg integrand: UFL integrand.
@@ -144,7 +144,9 @@ class KernelBuilderMixin(object):
         if self.coefficient_split:
             integrand = ufl_utils.split_coefficients(integrand, self.coefficient_split)
         # Remove '?' restrictions
-        integrand = ufl_utils.replace_to_be_restricted_restrictions(integrand, self._domain_integral_type_map)
+        if have_multiple_domains:
+            # TODO: This should happen in UFL.
+            integrand = ufl_utils.replace_to_be_restricted_restrictions(integrand, self._domain_integral_type_map)
         # Compile: ufl -> gem
         info = self.integral_data_info
         functions = list(info.arguments) + [self.coordinate(info.domain)] + list(info.coefficients)
