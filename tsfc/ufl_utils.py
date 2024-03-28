@@ -1,5 +1,6 @@
 """Utilities for preprocessing UFL objects."""
 
+from collections import defaultdict
 from functools import singledispatch
 
 import numpy
@@ -20,17 +21,18 @@ from ufl.corealg.map_dag import map_expr_dag
 from ufl.corealg.multifunction import MultiFunction
 from ufl.geometry import QuadratureWeight
 from ufl.geometry import Jacobian, JacobianDeterminant, JacobianInverse
-from ufl.classes import (Abs, Argument, CellOrientation, Coefficient,
-                         ComponentTensor, Expr, FloatValue, Division,
-                         MultiIndex, Product,
-                         ScalarValue, Sqrt, Zero, CellVolume, FacetArea)
-from ufl.domain import extract_unique_domain
+from ufl.classes import (Abs, Argument, CellOrientation, Coefficient, FunctionSpace,
+                         ComponentTensor, ListTensor, Expr, FloatValue, Division,
+                         Indexed, MultiIndex, FixedIndex, Index, Product,
+                         ScalarValue, Sqrt, Zero, CellVolume, FacetArea, Form)
+from ufl.domain import extract_unique_domain, MixedMesh
 from finat.ufl import MixedElement
 from ufl.utils.sorting import sorted_by_count
 
 from gem.node import MemoizerArg
 
-from tsfc.modified_terminals import (is_modified_terminal,
+from tsfc.modified_terminals import (ModifiedTerminal,
+                                     is_modified_terminal,
                                      analyse_modified_terminal,
                                      construct_modified_terminal)
 
@@ -43,6 +45,7 @@ def compute_form_data(form,
                       do_apply_integral_scaling=True,
                       do_apply_geometry_lowering=True,
                       preserve_geometry_types=preserve_geometry_types,
+                      do_apply_default_restrictions=True,
                       do_apply_restrictions=True,
                       do_estimate_degrees=True,
                       complex_mode=False):
@@ -59,6 +62,7 @@ def compute_form_data(form,
         do_apply_integral_scaling=do_apply_integral_scaling,
         do_apply_geometry_lowering=do_apply_geometry_lowering,
         preserve_geometry_types=preserve_geometry_types,
+        do_apply_default_restrictions=do_apply_default_restrictions,
         do_apply_restrictions=do_apply_restrictions,
         do_estimate_degrees=do_estimate_degrees,
         complex_mode=complex_mode
@@ -166,6 +170,8 @@ class ModifiedTerminalMixin(object):
 
     positive_restricted = _modified_terminal
     negative_restricted = _modified_terminal
+    single_value_restricted = _modified_terminal
+    to_be_restricted = _modified_terminal
 
     reference_grad = _modified_terminal
     reference_value = _modified_terminal
@@ -250,8 +256,13 @@ class PickRestriction(MultiFunction, ModifiedTerminalMixin):
         mt = analyse_modified_terminal(o)
         t = mt.terminal
         r = mt.restriction
-        if isinstance(t, Argument) and r != self.restrictions[t.number()]:
-            return Zero(o.ufl_shape, o.ufl_free_indices, o.ufl_index_dimensions)
+        if r == '?':
+            raise RuntimeError("Not expecting '?' restriction at this stage")
+        if isinstance(t, Argument) and r in ['+', '-']:
+            if r == self.restrictions[t.number()]:
+                return o
+            else:
+                return Zero(o.ufl_shape, o.ufl_free_indices, o.ufl_index_dimensions)
         else:
             return o
 
@@ -483,3 +494,220 @@ class TSFCConstantMixin:
 
     def __init__(self):
         pass
+
+
+class FixedIndexRemover(MultiFunction):
+
+    def __init__(self, fimap):
+        MultiFunction.__init__(self)
+        self.fimap = fimap
+
+    expr = MultiFunction.reuse_if_untouched
+
+    def zero(self, o):
+        free_indices = []
+        index_dimensions = []
+        for i, d in zip(o.ufl_free_indices, o.ufl_index_dimensions):
+            if Index(i) in self.fimap:
+                ind_j = self.fimap[Index(i)]
+                if not isinstance(ind_j, FixedIndex):
+                    free_indices.append(ind_j.count())
+                    index_dimensions.append(d)
+            else:
+                free_indices.append(i)
+                index_dimensions.append(d)
+        return Zero(shape=o.ufl_shape, free_indices=tuple(free_indices), index_dimensions=tuple(index_dimensions))
+
+    def list_tensor(self, o):
+        rule = FixedIndexRemover(self.fimap)
+        cc = []
+        for o1 in o.ufl_operands:
+            comp = map_expr_dag(rule, o1)
+            cc.append(comp)
+        return ListTensor(*cc)
+
+    def multi_index(self, o):
+        return MultiIndex(tuple(self.fimap.get(i, i) for i in o.indices()))
+
+
+class IndexRemover(MultiFunction):
+
+    def __init__(self):
+        MultiFunction.__init__(self)
+
+    expr = MultiFunction.reuse_if_untouched
+
+    def _zero_simplify(self, o):
+        operand, = o.ufl_operands
+        rule = IndexRemover()
+        operand = map_expr_dag(rule, operand)
+        if isinstance(operand, Zero):
+            return Zero()
+        else:
+            return o._ufl_expr_reconstruct_(operand)
+
+    def indexed(self, o):
+        o1, i1 = o.ufl_operands
+        if isinstance(o1, ComponentTensor):
+            o2, i2 = o1.ufl_operands
+            fimap = dict(zip(i2.indices(), i1.indices(), strict=True))
+            rule = FixedIndexRemover(fimap)
+            v = map_expr_dag(rule, o2)
+            rule = IndexRemover()
+            return map_expr_dag(rule, v)
+        elif isinstance(o1, ListTensor):
+            if isinstance(i1[0], FixedIndex):
+                o1 = o1.ufl_operands[i1[0]._value]
+                rule = IndexRemover()
+                if len(i1) > 1:
+                    i1 = MultiIndex(i1[1:])
+                    return map_expr_dag(rule, Indexed(o1, i1))
+                else:
+                    return map_expr_dag(rule, o1)
+        rule = IndexRemover()
+        o1 = map_expr_dag(rule, o1)
+        return Indexed(o1, i1)
+
+    # Do something nicer
+    positive_restricted = _zero_simplify
+    negative_restricted = _zero_simplify
+    single_value_restricted = _zero_simplify
+    to_be_restricted = _zero_simplify
+    reference_grad = _zero_simplify
+    reference_value = _zero_simplify
+
+
+def remove_indices(o):
+    if isinstance(o, Form):
+        integrals = []
+        for integral in o.integrals():
+            integrand = remove_indices(integral.integrand())
+            integrals.append(integral.reconstruct(integrand=integrand))
+        return o._ufl_expr_reconstruct_(integrals)
+    else:
+        rule = IndexRemover()
+        return map_expr_dag(rule, o)
+
+
+class DomainRestrictionTypeCollector(MultiFunction, ModifiedTerminalMixin):
+    def __init__(self, known_map):
+        MultiFunction.__init__(self)
+        self.domain_integral_type_dict = known_map
+
+    expr = MultiFunction.reuse_if_untouched
+
+    def multi_index(self, o):
+        return o
+
+    def modified_terminal(self, o):
+        mt = analyse_modified_terminal(o)
+        t = mt.terminal
+        r = mt.restriction
+        domain = extract_unique_domain(t)
+        if domain is not None:
+            self.domain_integral_type_dict[domain].add(r)
+        return o
+
+
+def make_domain_restrictions_map(integral_data, form_data):
+    domain_restrictions_map = defaultdict(set)
+    rule = DomainRestrictionTypeCollector(domain_restrictions_map)
+    # TODO: Remove this duplication.
+    coefficient_split = {}
+    for i in range(len(integral_data.enabled_coefficients)):
+        if integral_data.enabled_coefficients[i]:
+            original = form_data.reduced_coefficients[i]
+            coefficient = form_data.function_replace_map[original]
+            if type(coefficient.ufl_element()) == MixedElement:
+                mixed_mesh = extract_unique_domain(coefficient, expand_mixed_mesh=False)
+                if not isinstance(mixed_mesh, MixedMesh):
+                    raise RuntimeError("Mixed coefficient not on MixedMesh")
+                coefficient_split[coefficient] = []
+                for mesh, element in zip(mixed_mesh, coefficient.ufl_element().sub_elements, strict=True):
+                    c = Coefficient(FunctionSpace(mesh, element))
+                    coefficient_split[coefficient].append(c)
+    integrand_is_zero = []
+    for integral in integral_data.integrals:
+        integrand = ufl.replace(integral.integrand(), form_data.function_replace_map)
+        integrand = remove_indices(integrand)
+        integrand = split_coefficients(integrand, coefficient_split)
+        integrand = remove_indices(integrand)
+        if isinstance(integrand, Zero):
+            integrand_is_zero.append(True)
+        else:
+            integrand_is_zero.append(False)
+            _ = map_expr_dag(rule, integrand)
+    domain_restrictions_map = {d: rs - {'?', None} for d, rs in domain_restrictions_map.items()}
+    return domain_restrictions_map, integrand_is_zero
+
+
+def make_domain_integral_type_map(integral_data, form_data):
+    integration_domain = integral_data.domain
+    integration_type = integral_data.integral_type
+    # Have no mixed mesh support
+    if integration_type in ["exterior_facet_top", "exterior_facet_bottom", "exterior_facet_vert", "interior_facet_vert", "interior_facet_horiz"]:
+        return {integration_domain: integration_type}, [False for _ in integral_data.integrals]
+    domain_restrictions_map, integrand_is_zero = make_domain_restrictions_map(integral_data, form_data)
+    domain_integral_type_dict = {}
+    for d, rs in domain_restrictions_map.items():
+        if rs in [{'+'}, {'-'}, {'+', '-'}]:
+            domain_integral_type_dict[d] = "interior_facet"
+        elif rs == {'|'}:
+            domain_integral_type_dict[d] = "exterior_facet"
+        elif rs == set():
+            if d.topological_dimension() == integration_domain.topological_dimension():
+                if integration_type == "cell":
+                    domain_integral_type_dict[d] = "cell"
+                elif integration_type in ["exterior_facet", "interior_facet"]:
+                    domain_integral_type_dict[d] = "exterior_facet"
+                else:
+                    raise NotImplementedError
+            else:
+                raise NotImplementedError
+        else:
+            raise RuntimeError(f"Found inconsistent restrictions {rs} for domain {d}")
+    if integration_domain in domain_integral_type_dict:
+        if domain_integral_type_dict[integration_domain] != integration_type:
+            raise RuntimeError(f"domain ({integration_domain}) has inconsistent restrictions : {domain_integral_type_dict[integration_domain]} != {integration_type}")
+    else:
+        domain_integral_type_dict[integration_domain] = integration_type
+    return domain_integral_type_dict, integrand_is_zero
+
+
+# Move this to UFL.
+class ToBeRestrectedReplacer(MultiFunction, ModifiedTerminalMixin):
+
+    def __init__(self, domain_integral_type_map):
+        MultiFunction.__init__(self)
+        self.domain_integral_type_map = domain_integral_type_map
+
+    expr = MultiFunction.reuse_if_untouched
+
+    def modified_terminal(self, o):
+        mt = analyse_modified_terminal(o)
+        t = mt.terminal
+        r = mt.restriction
+        rv = mt.reference_value
+        ld = mt.local_derivatives
+        if r != '?':
+            return o
+        domain = extract_unique_domain(t)
+        if domain not in self.domain_integral_type_map:
+            raise RuntimeError(f"Integral type on {domain} not known")
+        integral_type = self.domain_integral_type_map[domain]
+        if integral_type == "cell":
+            mmt = ModifiedTerminal(o, t, ld, None, rv)
+        elif integral_type == "exterior_facet":
+            mmt = ModifiedTerminal(o, t, ld, '|', rv)
+        elif integral_type == "interial_facet":
+            mmt = ModifiedTerminal(o, t, ld, '+', rv)
+        else:
+            raise RuntimeError(f"Integral type {integral_type} not handled")
+        return construct_modified_terminal(mmt, t)
+
+
+# Move this to UFL.
+def replace_to_be_restricted_restrictions(integrand, domain_integral_type_map):
+    integrand = remove_indices(integrand)
+    rule = ToBeRestrectedReplacer(domain_integral_type_map)
+    return map_expr_dag(rule, integrand)
