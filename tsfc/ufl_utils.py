@@ -24,7 +24,7 @@ from ufl.geometry import Jacobian, JacobianDeterminant, JacobianInverse
 from ufl.classes import (Abs, Argument, CellOrientation, Coefficient, FunctionSpace,
                          ComponentTensor, ListTensor, Expr, FloatValue, Division,
                          Indexed, MultiIndex, FixedIndex, Index, Product,
-                         ScalarValue, Sqrt, Zero, CellVolume, FacetArea)
+                         ScalarValue, Sqrt, Zero, CellVolume, FacetArea, Form)
 from ufl.domain import extract_unique_domain, MixedMesh
 from finat.ufl import MixedElement
 from ufl.utils.sorting import sorted_by_count
@@ -577,9 +577,16 @@ class IndexRemover(MultiFunction):
     reference_value = _zero_simplify
 
 
-def remove_indices(integrand):
-    rule = IndexRemover()
-    return map_expr_dag(rule, integrand)
+def remove_indices(o):
+    if isinstance(o, Form):
+        integrals = []
+        for integral in o.integrals():
+            integrand = remove_indices(integral.integrand())
+            integrals.append(integral.reconstruct(integrand=integrand))
+        return o._ufl_expr_reconstruct_(integrals)
+    else:
+        rule = IndexRemover()
+        return map_expr_dag(rule, o)
 
 
 class DomainRestrictionTypeCollector(MultiFunction, ModifiedTerminalMixin):
