@@ -60,3 +60,16 @@ def test_ufl_only_shape_mismatch():
     assert to_element.value_shape == (2,)
     with pytest.raises(ValueError):
         compile_expression_dual_evaluation(expr, to_element, W.ufl_element())
+
+
+@pytest.mark.parametrize("modifier",
+                         [lambda x: x, ufl.VectorElement, ufl.TensorElement],
+                         ids=["scalar", "vector", "tensor"])
+def test_interpolate_zany_argument(modifier):
+    mesh = ufl.Mesh(ufl.VectorElement("P", ufl.triangle, 2))
+    V = ufl.FunctionSpace(mesh, modifier(ufl.FiniteElement("P", ufl.triangle, 1)))
+    Q = ufl.FunctionSpace(mesh, modifier(ufl.FiniteElement("Argyris", ufl.triangle, 5)))
+    expr = ufl.TestFunction(Q)
+    to_element = create_element(V.ufl_element())
+    kernel = compile_expression_dual_evaluation(expr, to_element, V.ufl_element())
+    assert kernel.needs_external_coords

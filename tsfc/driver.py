@@ -230,7 +230,10 @@ def compile_expression_dual_evaluation(expression, to_element, ufl_element, *,
     builder.set_coefficient_numbers(coefficient_numbers)
 
     needs_external_coords = False
-    if has_type(expression, GeometricQuantity) or any(fem.needs_coordinate_mapping(c.ufl_element()) for c in coefficients):
+    if has_type(expression, GeometricQuantity) or any(
+        fem.needs_coordinate_mapping(c.ufl_element())
+        for c in chain(coefficients, arguments)
+    ):
         # Create a fake coordinate coefficient for a domain.
         coords_coefficient = ufl.Coefficient(ufl.FunctionSpace(domain, domain.ufl_coordinate_element()))
         builder.domain_coordinate[domain] = coords_coefficient
