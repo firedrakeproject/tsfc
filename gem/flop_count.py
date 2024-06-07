@@ -142,7 +142,7 @@ def flops_indexed(expr, temporaries):
     aggregate = sum(expression_flops(child, temporaries)
                     for child in expr.children)
     # Average flops per entry
-    return aggregate / numpy.product(expr.children[0].shape, dtype=int)
+    return aggregate / numpy.prod(expr.children[0].shape, dtype=int)
 
 
 @flops.register(gem.IndexSum)
