@@ -50,7 +50,7 @@ supported_elements = {
     "Nonconforming Arnold-Winther": finat.ArnoldWintherNC,
     "Conforming Arnold-Winther": finat.ArnoldWinther,
     "Hermite": finat.Hermite,
-    "Kong-Mulder-Veldhuizen": finat.KongMulderVeldhuizen,
+    "Mass lumped triangles and tetrahedra": finat.MassLumpedTriangular,
     "Argyris": finat.Argyris,
     "Hsieh-Clough-Tocher": finat.HsiehCloughTocher,
     "Reduced-Hsieh-Clough-Tocher": finat.ReducedHsiehCloughTocher,
