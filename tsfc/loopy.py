@@ -240,6 +240,8 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     instructions.append(noop)
 
     # Profile the instructions
+    # disable for now
+    log = False
     instructions, event_name, preamble = profile_insns(kernel_name, instructions, log)
 
     # Create domains
