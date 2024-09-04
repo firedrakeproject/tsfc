@@ -240,15 +240,17 @@ def generate(impero_c, args, scalar_type, kernel_name="loopy_kernel", index_name
     instructions.append(noop)
 
     # Profile the instructions
+    # disable for now
+    log = False
     instructions, event_name, preamble = profile_insns(kernel_name, instructions, log)
 
     # Create domains
     domains = create_domains(ctx.index_extent.items())
 
     # Create loopy kernel
-    knl = lp.make_function(domains, instructions, data, name=kernel_name, target=target,
-                           seq_dependencies=True, silenced_warnings=["summing_if_branches_ops"],
-                           lang_version=(2018, 2), preambles=preamble)
+    knl = lp.make_kernel(domains, instructions, data, name=kernel_name, target=target,
+                         seq_dependencies=True, silenced_warnings=["summing_if_branches_ops"],
+                         lang_version=(2018, 2), preambles=preamble)
 
     # Prevent loopy interchange by loopy
     knl = lp.prioritize_loops(knl, ",".join(ctx.index_extent.keys()))
