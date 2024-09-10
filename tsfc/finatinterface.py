@@ -25,6 +25,7 @@ from functools import partial, singledispatch
 import FIAT
 import finat
 import finat.ufl
+import redefining_fe
 import ufl
 
 __all__ = ("as_fiat_cell", "create_base_element",
@@ -98,6 +99,8 @@ def as_fiat_cell(cell):
     :arg cell: the :class:`ufl.Cell` to convert."""
     if not isinstance(cell, ufl.AbstractCell):
         raise ValueError("Expecting a UFL Cell")
+    if isinstance(cell, redefining_fe.cells.CellComplexToUFL):
+        return cell.to_fiat()
     return FIAT.ufc_cell(cell)
 
 
@@ -203,6 +206,11 @@ def convert_finiteelement(element, **kwargs):
             element = element.reconstruct(cell=ufl.cell.hypercube(dim))
 
     return lmbda(cell, element.degree()), set()
+
+
+@convert.register(redefining_fe.triples.IndiaTripleUFL)
+def convert_india_def(element, **kwargs):
+    return finat.fiat_elements.IndiaDefElement(element.triple), set()
 
 
 # Element modifiers and compound element types
