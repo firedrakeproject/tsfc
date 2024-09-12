@@ -2,6 +2,7 @@
 expression DAG languages."""
 
 import collections
+import gem
 
 
 class Node(object):
@@ -99,6 +100,13 @@ class Node(object):
         return hash((type(self),) + self._cons_args(self.children))
 
 
+def _make_traversal_children(node):
+    if isinstance(node, (gem.Indexed, gem.FlexiblyIndexed)):
+        return node.children + node.indirect_children
+    else:
+        return node.children
+
+
 def pre_traversal(expression_dags):
     """Pre-order traversal of the nodes of expression DAGs."""
     seen = set()
@@ -114,7 +122,8 @@ def pre_traversal(expression_dags):
     while lifo:
         node = lifo.pop()
         yield node
-        for child in reversed(node.children):
+        children = _make_traversal_children(node)
+        for child in reversed(children):
             if child not in seen:
                 seen.add(child)
                 lifo.append(child)
@@ -130,13 +139,13 @@ def post_traversal(expression_dags):
     for root in expression_dags:
         if root not in seen:
             seen.add(root)
-            lifo.append((root, list(root.children)))
+            lifo.append((root, list(_make_traversal_children(root))))
 
     while lifo:
         node, deps = lifo[-1]
         for i, dep in enumerate(deps):
             if dep is not None and dep not in seen:
-                lifo.append((dep, list(dep.children)))
+                lifo.append((dep, list(_make_traversal_children(dep))))
                 deps[i] = None
                 break
         else:
@@ -153,7 +162,7 @@ def collect_refcount(expression_dags):
     """Collects reference counts for a multi-root expression DAG."""
     result = collections.Counter(expression_dags)
     for node in traversal(expression_dags):
-        result.update(node.children)
+        result.update(_make_traversal_children(node))
     return result
 
 

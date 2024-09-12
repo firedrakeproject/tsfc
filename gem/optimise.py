@@ -4,6 +4,7 @@ expressions."""
 from collections import OrderedDict, defaultdict
 from functools import singledispatch, partial, reduce
 from itertools import combinations, permutations, zip_longest
+from numbers import Integral
 
 import numpy
 
@@ -95,11 +96,19 @@ def replace_indices(node, self, subst):
 replace_indices.register(Node)(reuse_if_untouched_arg)
 
 
+def _replace_indices_atomic(i, self, subst):
+    if isinstance(i, VariableIndex):
+        new_expr = self(i.expression, subst)
+        return i if new_expr == i.expression else VariableIndex(new_expr)
+    else:
+        substitute = dict(subst)
+        return substitute.get(i, i)
+
+
 @replace_indices.register(Delta)
 def replace_indices_delta(node, self, subst):
-    substitute = dict(subst)
-    i = substitute.get(node.i, node.i)
-    j = substitute.get(node.j, node.j)
+    i = _replace_indices_atomic(node.i, self, subst)
+    j = _replace_indices_atomic(node.j, self, subst)
     if i == node.i and j == node.j:
         return node
     else:
@@ -110,7 +119,9 @@ def replace_indices_delta(node, self, subst):
 def replace_indices_indexed(node, self, subst):
     child, = node.children
     substitute = dict(subst)
-    multiindex = tuple(substitute.get(i, i) for i in node.multiindex)
+    multiindex = []
+    for i in node.multiindex:
+        multiindex.append(_replace_indices_atomic(i, self, subst))
     if isinstance(child, ComponentTensor):
         # Indexing into ComponentTensor
         # Inline ComponentTensor and augment the substitution rules
@@ -130,9 +141,11 @@ def replace_indices_flexiblyindexed(node, self, subst):
     child, = node.children
     assert not child.free_indices
 
-    substitute = dict(subst)
     dim2idxs = tuple(
-        (offset, tuple((substitute.get(i, i), s) for i, s in idxs))
+        (
+            offset if isinstance(offset, Integral) else _replace_indices_atomic(offset, self, subst),
+            tuple((_replace_indices_atomic(i, self, subst), s if isinstance(s, Integral) else self(s, subst)) for i, s in idxs)
+        )
         for offset, idxs in node.dim2idxs
     )
 
@@ -145,6 +158,8 @@ def replace_indices_flexiblyindexed(node, self, subst):
 def filtered_replace_indices(node, self, subst):
     """Wrapper for :func:`replace_indices`.  At each call removes
     substitution rules that do not apply."""
+    if any(isinstance(k, VariableIndex) for k, _ in subst):
+        raise NotImplementedError("Can not replace VariableIndex (will need inverse)")
     filtered_subst = tuple((k, v) for k, v in subst if k in node.free_indices)
     return replace_indices(node, self, filtered_subst)
 

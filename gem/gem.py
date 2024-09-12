@@ -24,16 +24,21 @@ from numpy import asarray
 
 from gem.node import Node as NodeBase, traversal
 
+from FIAT.orientation_utils import Orientation as FIATOrientation
+
 
 __all__ = ['Node', 'Identity', 'Literal', 'Zero', 'Failure',
-           'Variable', 'Sum', 'Product', 'Division', 'Power',
+           'Variable', 'Sum', 'Product', 'Division', 'FloorDiv', 'Remainder', 'Power',
            'MathFunction', 'MinValue', 'MaxValue', 'Comparison',
            'LogicalNot', 'LogicalAnd', 'LogicalOr', 'Conditional',
            'Index', 'VariableIndex', 'Indexed', 'ComponentTensor',
-           'IndexSum', 'ListTensor', 'Concatenate', 'Delta',
+           'IndexSum', 'ListTensor', 'Concatenate', 'Delta', 'OrientationVariableIndex',
            'index_sum', 'partial_indexed', 'reshape', 'view',
            'indices', 'as_gem', 'FlexiblyIndexed',
-           'Inverse', 'Solve', 'extract_type']
+           'Inverse', 'Solve', 'extract_type', 'uint_type']
+
+
+uint_type = numpy.uintc
 
 
 class NodeMeta(type):
@@ -130,6 +135,24 @@ class Node(NodeBase, metaclass=NodeMeta):
     def __rtruediv__(self, other):
         return as_gem(other).__truediv__(self)
 
+    def __floordiv__(self, other):
+        other = as_gem_uint(other)
+        if other.shape:
+            raise ValueError("Denominator must be scalar")
+        return componentwise(FloorDiv, self, other)
+
+    def __rfloordiv__(self, other):
+        return as_gem_uint(other).__floordiv__(self)
+
+    def __mod__(self, other):
+        other = as_gem_uint(other)
+        if other.shape:
+            raise ValueError("Denominator must be scalar")
+        return componentwise(Remainder, self, other)
+
+    def __rmod__(self, other):
+        return as_gem_uint(other).__mod__(self)
+
 
 class Terminal(Node):
     """Abstract class for terminal GEM nodes."""
@@ -167,7 +190,8 @@ class Constant(Terminal):
      - array: numpy array of values
      - value: float or complex value (scalars only)
     """
-    __slots__ = ()
+    __slots__ = ('dtype',)
+    __back__ = ('dtype',)
 
 
 class Zero(Constant):
@@ -176,13 +200,14 @@ class Zero(Constant):
     __slots__ = ('shape',)
     __front__ = ('shape',)
 
-    def __init__(self, shape=()):
+    def __init__(self, shape=(), dtype=float):
         self.shape = shape
+        self.dtype = dtype
 
     @property
     def value(self):
         assert not self.shape
-        return 0.0
+        return numpy.array(0, dtype=self.dtype).item()
 
 
 class Identity(Constant):
@@ -191,8 +216,9 @@ class Identity(Constant):
     __slots__ = ('dim',)
     __front__ = ('dim',)
 
-    def __init__(self, dim):
+    def __init__(self, dim, dtype=float):
         self.dim = dim
+        self.dtype = dtype
 
     @property
     def shape(self):
@@ -200,7 +226,7 @@ class Identity(Constant):
 
     @property
     def array(self):
-        return numpy.eye(self.dim)
+        return numpy.eye(self.dim, dtype=self.dtype)
 
 
 class Literal(Constant):
@@ -209,16 +235,24 @@ class Literal(Constant):
     __slots__ = ('array',)
     __front__ = ('array',)
 
-    def __new__(cls, array):
+    def __new__(cls, array, dtype=None):
         array = asarray(array)
         return super(Literal, cls).__new__(cls)
 
-    def __init__(self, array):
+    def __init__(self, array, dtype=None):
         array = asarray(array)
-        try:
-            self.array = array.astype(float, casting="safe")
-        except TypeError:
-            self.array = array.astype(complex)
+        if dtype is None:
+            # Assume float or complex.
+            try:
+                self.array = array.astype(float, casting="safe")
+                self.dtype = float
+            except TypeError:
+                self.array = array.astype(complex)
+                self.dtype = complex
+        else:
+            # Can be int, etc.
+            self.array = array.astype(dtype)
+            self.dtype = dtype
 
     def is_equal(self, other):
         if type(self) is not type(other):
@@ -243,12 +277,13 @@ class Literal(Constant):
 class Variable(Terminal):
     """Symbolic variable tensor"""
 
-    __slots__ = ('name', 'shape')
-    __front__ = ('name', 'shape')
+    __slots__ = ('name', 'shape', 'dtype')
+    __front__ = ('name', 'shape', 'dtype')
 
-    def __init__(self, name, shape):
+    def __init__(self, name, shape, dtype=None):
         self.name = name
         self.shape = shape
+        self.dtype = dtype
 
 
 class Sum(Scalar):
@@ -265,7 +300,8 @@ class Sum(Scalar):
             return a
 
         if isinstance(a, Constant) and isinstance(b, Constant):
-            return Literal(a.value + b.value)
+            dtype = numpy.result_type(a.dtype, b.dtype)
+            return Literal(a.value + b.value, dtype=dtype)
 
         self = super(Sum, cls).__new__(cls)
         self.children = a, b
@@ -289,7 +325,8 @@ class Product(Scalar):
             return a
 
         if isinstance(a, Constant) and isinstance(b, Constant):
-            return Literal(a.value * b.value)
+            dtype = numpy.result_type(a.dtype, b.dtype)
+            return Literal(a.value * b.value, dtype=dtype)
 
         self = super(Product, cls).__new__(cls)
         self.children = a, b
@@ -313,9 +350,58 @@ class Division(Scalar):
             return a
 
         if isinstance(a, Constant) and isinstance(b, Constant):
-            return Literal(a.value / b.value)
+            dtype = numpy.result_type(a.dtype, b.dtype)
+            return Literal(a.value / b.value, dtype=dtype)
 
         self = super(Division, cls).__new__(cls)
+        self.children = a, b
+        return self
+
+
+class FloorDiv(Scalar):
+    __slots__ = ('children',)
+
+    def __new__(cls, a, b):
+        assert not a.shape
+        assert not b.shape
+        # TODO: Attach dtype property to Node and check that
+        #       numpy.result_dtype(a.dtype, b.dtype) is uint type.
+        #       dtype is currently attached only to {Constant, Variable}.
+        # Constant folding
+        if isinstance(b, Zero):
+            raise ValueError("division by zero")
+        if isinstance(a, Zero):
+            return Zero(dtype=a.dtype)
+        if isinstance(b, Constant) and b.value == 1:
+            return a
+        if isinstance(a, Constant) and isinstance(b, Constant):
+            dtype = numpy.result_type(a.dtype, b.dtype)
+            return Literal(a.value // b.value, dtype=dtype)
+        self = super(FloorDiv, cls).__new__(cls)
+        self.children = a, b
+        return self
+
+
+class Remainder(Scalar):
+    __slots__ = ('children',)
+
+    def __new__(cls, a, b):
+        assert not a.shape
+        assert not b.shape
+        # TODO: Attach dtype property to Node and check that
+        #       numpy.result_dtype(a.dtype, b.dtype) is uint type.
+        #       dtype is currently attached only to {Constant, Variable}.
+        # Constant folding
+        if isinstance(b, Zero):
+            raise ValueError("division by zero")
+        if isinstance(a, Zero):
+            return Zero(dtype=a.dtype)
+        if isinstance(b, Constant) and b.value == 1:
+            return Zero(dtype=b.dtype)
+        if isinstance(a, Constant) and isinstance(b, Constant):
+            dtype = numpy.result_type(a.dtype, b.dtype)
+            return Literal(a.value % b.value, dtype=dtype)
+        self = super(Remainder, cls).__new__(cls)
         self.children = a, b
         return self
 
@@ -329,14 +415,16 @@ class Power(Scalar):
 
         # Constant folding
         if isinstance(base, Zero):
+            dtype = numpy.result_type(base.dtype, exponent.dtype)
             if isinstance(exponent, Zero):
                 raise ValueError("cannot solve 0^0")
-            return Zero()
+            return Zero(dtype=dtype)
         elif isinstance(exponent, Zero):
-            return one
-
-        if isinstance(base, Constant) and isinstance(exponent, Constant):
-            return Literal(base.value ** exponent.value)
+            dtype = numpy.result_type(base.dtype, exponent.dtype)
+            return Literal(1, dtype=dtype)
+        elif isinstance(base, Constant) and isinstance(exponent, Constant):
+            dtype = numpy.result_type(base.dtype, exponent.dtype)
+            return Literal(base.value ** exponent.value, dtype=dtype)
 
         self = super(Power, cls).__new__(cls)
         self.children = base, exponent
@@ -502,7 +590,6 @@ class VariableIndex(IndexBase):
 
     def __init__(self, expression):
         assert isinstance(expression, Node)
-        assert not expression.free_indices
         assert not expression.shape
         self.expression = expression
 
@@ -517,20 +604,20 @@ class VariableIndex(IndexBase):
         return not self.__eq__(other)
 
     def __hash__(self):
-        return hash((VariableIndex, self.expression))
+        return hash((type(self), self.expression))
 
     def __str__(self):
         return str(self.expression)
 
     def __repr__(self):
-        return "VariableIndex(%r)" % (self.expression,)
+        return "%r(%r)" % (type(self), self.expression,)
 
     def __reduce__(self):
-        return VariableIndex, (self.expression,)
+        return type(self), (self.expression,)
 
 
 class Indexed(Scalar):
-    __slots__ = ('children', 'multiindex')
+    __slots__ = ('children', 'multiindex', 'indirect_children')
     __back__ = ('multiindex',)
 
     def __new__(cls, aggregate, multiindex):
@@ -553,41 +640,59 @@ class Indexed(Scalar):
 
         # Zero folding
         if isinstance(aggregate, Zero):
-            return Zero()
+            return Zero(dtype=aggregate.dtype)
 
         # All indices fixed
         if all(isinstance(i, int) for i in multiindex):
             if isinstance(aggregate, Constant):
-                return Literal(aggregate.array[multiindex])
+                return Literal(aggregate.array[multiindex], dtype=aggregate.dtype)
             elif isinstance(aggregate, ListTensor):
                 return aggregate.array[multiindex]
 
         self = super(Indexed, cls).__new__(cls)
         self.children = (aggregate,)
         self.multiindex = multiindex
+        self.indirect_children = tuple(i.expression for i in self.multiindex if isinstance(i, VariableIndex))
 
-        new_indices = tuple(i for i in multiindex if isinstance(i, Index))
-        self.free_indices = unique(aggregate.free_indices + new_indices)
+        new_indices = []
+        for i in multiindex:
+            if isinstance(i, Index):
+                new_indices.append(i)
+            elif isinstance(i, VariableIndex):
+                new_indices.extend(i.expression.free_indices)
+        self.free_indices = unique(aggregate.free_indices + tuple(new_indices))
 
         return self
 
     def index_ordering(self):
         """Running indices in the order of indexing in this node."""
-        return tuple(i for i in self.multiindex if isinstance(i, Index))
+        free_indices = []
+        for i in self.multiindex:
+            if isinstance(i, Index):
+                free_indices.append(i)
+            elif isinstance(i, VariableIndex):
+                free_indices.extend(i.expression.free_indices)
+        return tuple(free_indices)
 
 
 class FlexiblyIndexed(Scalar):
     """Flexible indexing of :py:class:`Variable`s to implement views and
     reshapes (splitting dimensions only)."""
 
-    __slots__ = ('children', 'dim2idxs')
+    __slots__ = ('children', 'dim2idxs', 'indirect_children')
     __back__ = ('dim2idxs',)
 
     def __init__(self, variable, dim2idxs):
         """Construct a flexibly indexed node.
 
-        :arg variable: a node that has a shape
-        :arg dim2idxs: describes the mapping of indices
+        Parameters
+        ----------
+        variable : Node
+            `Node` that has a shape.
+        dim2idxs : tuple
+            Tuple of (offset, ((index, stride), (...), ...)) mapping indices,
+            where offset is {Node, int}, index is {Index, VariableIndex, int}, and
+            stride is {Node, int}.
 
         For example, if ``variable`` is rank two, and ``dim2idxs`` is
 
@@ -600,40 +705,73 @@ class FlexiblyIndexed(Scalar):
         """
         assert variable.shape
         assert len(variable.shape) == len(dim2idxs)
-
         dim2idxs_ = []
         free_indices = []
         for dim, (offset, idxs) in zip(variable.shape, dim2idxs):
             offset_ = offset
             idxs_ = []
             last = 0
-            for idx in idxs:
-                index, stride = idx
+            if isinstance(offset, Node):
+                free_indices.extend(offset.free_indices)
+            for index, stride in idxs:
                 if isinstance(index, Index):
                     assert index.extent is not None
                     free_indices.append(index)
                     idxs_.append((index, stride))
                     last += (index.extent - 1) * stride
+                elif isinstance(index, VariableIndex):
+                    base_indices = index.expression.free_indices
+                    assert all(base_index.extent is not None for base_index in base_indices)
+                    free_indices.extend(base_indices)
+                    idxs_.append((index, stride))
+                    # last += (unknown_extent - 1) * stride
                 elif isinstance(index, int):
-                    offset_ += index * stride
+                    # TODO: Attach dtype to each Node.
+                    # Here, we should simply be able to do:
+                    # >>> offset_ += index * stride
+                    # but "+" and "*" are not currently correctly overloaded
+                    # for indices (integers); they assume floats.
+                    if not isinstance(offset, Integral):
+                        raise NotImplementedError(f"Found non-Integral offset : {offset}")
+                    if isinstance(stride, Constant):
+                        offset_ += index * stride.value
+                    else:
+                        offset_ += index * stride
                 else:
                     raise ValueError("Unexpected index type for flexible indexing")
-
-            if dim is not None and offset_ + last >= dim:
+                if isinstance(stride, Node):
+                    free_indices.extend(stride.free_indices)
+            if dim is not None and isinstance(offset_ + last, Integral) and offset_ + last >= dim:
                 raise ValueError("Offset {0} and indices {1} exceed dimension {2}".format(offset, idxs, dim))
-
             dim2idxs_.append((offset_, tuple(idxs_)))
-
         self.children = (variable,)
         self.dim2idxs = tuple(dim2idxs_)
         self.free_indices = unique(free_indices)
+        indirect_children = []
+        for offset, idxs in self.dim2idxs:
+            if isinstance(offset, Node):
+                indirect_children.append(offset)
+            for idx, stride in idxs:
+                if isinstance(idx, VariableIndex):
+                    indirect_children.append(idx.expression)
+                if isinstance(stride, Node):
+                    indirect_children.append(stride)
+        self.indirect_children = tuple(indirect_children)
 
     def index_ordering(self):
         """Running indices in the order of indexing in this node."""
-        return tuple(index
-                     for _, idxs in self.dim2idxs
-                     for index, _ in idxs
-                     if isinstance(index, Index))
+        free_indices = []
+        for offset, idxs in self.dim2idxs:
+            if isinstance(offset, Node):
+                free_indices.extend(offset.free_indices)
+            for index, stride in idxs:
+                if isinstance(index, Index):
+                    free_indices.append(index)
+                elif isinstance(index, VariableIndex):
+                    free_indices.extend(index.expression.free_indices)
+                if isinstance(stride, Node):
+                    free_indices.extend(stride.free_indices)
+        return tuple(free_indices)
 
 
 class ComponentTensor(Node):
@@ -653,7 +791,7 @@ class ComponentTensor(Node):
 
         # Zero folding
         if isinstance(expression, Zero):
-            return Zero(shape)
+            return Zero(shape, dtype=expression.dtype)
 
         self = super(ComponentTensor, cls).__new__(cls)
         self.children = (expression,)
@@ -771,7 +909,8 @@ class Concatenate(Node):
     def __new__(cls, *children):
         if all(isinstance(child, Zero) for child in children):
             size = int(sum(numpy.prod(child.shape, dtype=int) for child in children))
-            return Zero((size,))
+            dtype = numpy.result_type(*(child.dtype for child in children))
+            return Zero((size,), dtype=dtype)
 
         self = super(Concatenate, cls).__new__(cls)
         self.children = children
@@ -802,7 +941,12 @@ class Delta(Scalar, Terminal):
         self.i = i
         self.j = j
         # Set up free indices
-        free_indices = tuple(index for index in (i, j) if isinstance(index, Index))
+        free_indices = []
+        for index in (i, j):
+            if isinstance(index, Index):
+                free_indices.append(index)
+            elif isinstance(index, VariableIndex):
+                raise NotImplementedError("Can not make Delta with VariableIndex")
         self.free_indices = tuple(unique(free_indices))
         return self
 
@@ -843,6 +987,34 @@ class Solve(Node):
 
         self.children = (A, B)
         self.shape = A.shape[1:] + B.shape[1:]
+
+
+class OrientationVariableIndex(VariableIndex, FIATOrientation):
+    """VariableIndex representing a fiat orientation.
+
+    Notes
+    -----
+    In the current implementation, we need to extract
+    `VariableIndex.expression` as index arithmetic
+    is not supported (indices are not `Node`).
+
+    """
+
+    def __floordiv__(self, other):
+        other = other.expression if isinstance(other, VariableIndex) else as_gem_uint(other)
+        return type(self)(FloorDiv(self.expression, other))
+
+    def __rfloordiv__(self, other):
+        other = other.expression if isinstance(other, VariableIndex) else as_gem_uint(other)
+        return type(self)(FloorDiv(other, self.expression))
+
+    def __mod__(self, other):
+        other = other.expression if isinstance(other, VariableIndex) else as_gem_uint(other)
+        return type(self)(Remainder(self.expression, other))
+
+    def __rmod__(self, other):
+        other = other.expression if isinstance(other, VariableIndex) else as_gem_uint(other)
+        return type(self)(Remainder(other, self.expression))
 
 
 def unique(indices):
@@ -1027,16 +1199,55 @@ def componentwise(op, *exprs):
 
 
 def as_gem(expr):
-    """Attempt to convert an expression into GEM.
+    """Attempt to convert an expression into GEM of scalar type.
 
-    :arg expr: The expression.
-    :returns: A GEM representation of the expression.
-    :raises ValueError: if conversion was not possible.
+    Parameters
+    ----------
+    expr : Node or Number
+        The expression.
+
+    Returns
+    -------
+    Node
+        A GEM representation of the expression.
+
+    Raises
+    ------
+    ValueError
+        If conversion was not possible.
+
     """
     if isinstance(expr, Node):
         return expr
     elif isinstance(expr, Number):
         return Literal(expr)
+    else:
+        raise ValueError("Do not know how to convert %r to GEM" % expr)
+
+
+def as_gem_uint(expr):
+    """Attempt to convert an expression into GEM of uint type.
+
+    Parameters
+    ----------
+    expr : Node or Integral
+        The expression.
+
+    Returns
+    -------
+    Node
+        A GEM representation of the expression.
+
+    Raises
+    ------
+    ValueError
+        If conversion was not possible.
+
+    """
+    if isinstance(expr, Node):
+        return expr
+    elif isinstance(expr, Integral):
+        return Literal(expr, dtype=uint_type)
     else:
         raise ValueError("Do not know how to convert %r to GEM" % expr)
 
