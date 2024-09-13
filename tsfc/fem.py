@@ -152,7 +152,7 @@ class CoordinateMapping(PhysicalGeometry):
     @property
     def config(self):
         config = {name: getattr(self.interface, name)
-                  for name in ["ufl_cell", "index_cache", "scalar_type"]}
+                  for name in ["ufl_cell", "index_cache", "scalar_type", "domain_integral_type_map"]}
         config["interface"] = self.interface
         return config
 
