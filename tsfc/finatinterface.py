@@ -65,6 +65,7 @@ supported_elements = {
     "Christiansen-Hu": finat.ChristiansenHu,
     "Guzman-Neilan": finat.GuzmanNeilan,
     "Guzman-Neilan Bubble": finat.GuzmanNeilanBubble,
+    "Guzman-Neilan H1(div)": finat.GuzmanNeilanH1div,
     "Morley": finat.Morley,
     "Bell": finat.Bell,
     "Lagrange": finat.Lagrange,
