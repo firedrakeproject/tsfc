@@ -4,4 +4,4 @@ version = "0.0.1"
 
 setup(name="tsfc",
       version=version,
-      packages=["gem", "tsfc", "tsfc.kernel_interface"])
+      packages=["gem"])
