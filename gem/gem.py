@@ -415,12 +415,18 @@ class Power(Scalar):
 
         # Constant folding
         if isinstance(base, Zero):
-            dtype = numpy.result_type(base.dtype, exponent.dtype)
+            if isinstance(exponent, Constant):
+                dtype = numpy.result_type(base.dtype, exponent.dtype)
+            else:
+                dtype = base.dtype
             if isinstance(exponent, Zero):
                 raise ValueError("cannot solve 0^0")
             return Zero(dtype=dtype)
         elif isinstance(exponent, Zero):
-            dtype = numpy.result_type(base.dtype, exponent.dtype)
+            if isinstance(base, Constant):
+                dtype = numpy.result_type(base.dtype, exponent.dtype)
+            else:
+                dtype = exponent.dtype
             return Literal(1, dtype=dtype)
         elif isinstance(base, Constant) and isinstance(exponent, Constant):
             dtype = numpy.result_type(base.dtype, exponent.dtype)
