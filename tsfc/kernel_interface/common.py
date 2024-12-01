@@ -216,7 +216,7 @@ class KernelBuilderMixin(object):
         # Let the kernel interface inspect the optimised IR to register
         # what kind of external data is required (e.g., cell orientations,
         # cell sizes, etc.).
-        oriented, needs_cell_sizes, tabulations = self.register_requirements(expressions)
+        oriented, needs_cell_sizes, tabulations, need_facet_orientation = self.register_requirements(expressions)
 
         # Extract Variables that are actually used
         active_variables = gem.extract_type(expressions, gem.Variable)
@@ -227,7 +227,7 @@ class KernelBuilderMixin(object):
             impero_c = impero_utils.compile_gem(assignments, index_ordering, remove_zeros=True)
         except impero_utils.NoopError:
             impero_c = None
-        return impero_c, oriented, needs_cell_sizes, tabulations, active_variables
+        return impero_c, oriented, needs_cell_sizes, tabulations, active_variables, need_facet_orientation
 
     def fem_config(self):
         """Return a dictionary used with fem.compile_ufl.
@@ -431,6 +431,7 @@ def check_requirements(ir):
     in one pass."""
     cell_orientations = False
     cell_sizes = False
+    facet_orientation = False
     rt_tabs = {}
     for node in traversal(ir):
         if isinstance(node, gem.Variable):
@@ -440,7 +441,9 @@ def check_requirements(ir):
                 cell_sizes = True
             elif node.name.startswith("rt_"):
                 rt_tabs[node.name] = node.shape
-    return cell_orientations, cell_sizes, tuple(sorted(rt_tabs.items()))
+            elif node.name == "facet_orientation":
+                facet_orientation = True
+    return cell_orientations, cell_sizes, tuple(sorted(rt_tabs.items())), facet_orientation
 
 
 def prepare_constant(constant, number):
